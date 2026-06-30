@@ -1,0 +1,26 @@
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local envs
+.env
+.env.local
+
+# Node (for any future tooling)
+node_modules/
+
+# Python (for any future tooling)
+__pycache__/
+*.pyc
+.venv/
+venv/
+.exloom/

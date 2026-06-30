@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "exloom",
+  "description": "exloom — a team-oriented development workflow for Claude Code: discipline, handoff, and an enforced review gate.",
+  "owner": {
+    "name": "Expeed Software",
+    "email": "support@expeed.com"
+  },
+  "plugins": [
+    {
+      "name": "exloom",
+      "description": "Team-oriented development workflow for Claude Code — discipline, handoff, and an enforced evidence-based review gate. Brings brainstorming, planning, execution, review, debugging, verification, and brownfield-aware knowledge to Claude Code, from one developer to a whole org.",
+      "source": "./plugins/exloom",
+      "category": "development-workflow"
+    }
+  ]
+}

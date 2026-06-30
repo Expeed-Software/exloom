@@ -1,0 +1,85 @@
+# exloom
+
+**Spec-driven development for teams — with a review gate that's actually enforced.**
+
+exloom is a spec-driven development workflow for Claude Code, built for teams. You brainstorm → plan → execute → prove → review — with the **plan as a handoff contract** between developers (deviations logged, what-shipped checked against what-was-planned), a **multi-pass review** (correctness, cross-layer, adversarial) plus a **boot-and-prove smoke test**, and an **opt-in gate that blocks "done" and `git push`** until the review evidence exists. Excellent solo; built to scale to a team.
+
+It sits in the same family as other spec-driven / structured-agentic development frameworks — the spec → plan → execute → review loop is the standard they share. exloom's focus within that category is the two things teams feel most: making the **handoff auditable** and the **review non-bypassable**.
+
+MIT-licensed. Works with any Claude Code marketplace.
+
+## Why exloom
+
+Claude Code is fast. On a team, fast-without-discipline produces plans nobody else can follow, "done" that wasn't, and reviews that rubber-stamp. exloom adds the discipline that makes AI-assisted work **provable and handoff-safe**:
+
+- **The plan is a contract.** `planning-for-handoff` produces a plan a different person can execute without guessing; `reviewing-plans` approves it; `executing-handoff-plans` logs every deviation instead of improvising; `auditing-plan-fidelity` checks that what shipped matches what was planned.
+- **Review is a panel, not a rubber stamp.** Correctness (`l1-reviewer`), cross-layer integration (`cross-layer-auditor`), and hostile adversarial (`adversarial-reviewer`) review agents, plus a **boot-and-prove smoke test** — you have to actually run the change and show the output, not assert it works.
+- **"Done" needs evidence.** `proving-done` is an eight-item checklist that wants real command output, not a feeling.
+- **Brownfield-first.** Your existing conventions win — exloom defers to the repo's `CLAUDE.md`; its defaults only fill gaps.
+
+## How it works: skills nudge, one gate enforces
+
+Be clear about the mechanism, because it matters:
+
+- **Most of exloom is discipline** — skills Claude reads and follows. They guide the work; they don't force it.
+- **One part is enforcement** — the optional review-gate hooks. When a repo turns them on, the Claude Code harness (not the model) **blocks "done" and `git push`** until the review evidence is committed to `.claude/reviews/<branch>.md`.
+
+That's the difference between *hoping* review happened and *guaranteeing* it did — the one thing you can't get from instructions alone.
+
+## The loop
+
+```
+brainstorming → planning-for-handoff → [reviewing-plans] → executing-handoff-plans (TDD)
+   → proving-done → [auditing-plan-fidelity] → reviewing-code / review-gate → requesting-review
+```
+
+The bracketed steps apply when work crosses from one person to another. Solo? The same loop, lighter — but every plan is still written handoff-ready, because future-you is a different person.
+
+## Install
+
+```
+/plugin marketplace add https://github.com/Expeed-Software/exloom
+/plugin install exloom@exloom
+```
+
+Or from the terminal: `claude plugin marketplace add https://github.com/Expeed-Software/exloom` then `claude plugin install exloom@exloom`.
+
+## Use it
+
+Skills surface based on what you're doing — just start working:
+
+```
+> Design a CSV-export feature for the orders page.
+> Write a plan for PROJ-1234 that another developer can pick up.
+> I'm joining an unfamiliar service — help me get oriented.
+> Before I open this PR, review it.
+```
+
+## Turn on the enforcement gate (optional, per repo)
+
+Off by default — exloom never blocks a repo that didn't ask for it. To make review non-bypassable for a repository:
+
+```
+mkdir -p .claude && touch .claude/exloom-gate.enabled
+```
+
+Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate — and the hooks refuse to let anyone declare done or push until it's filled. (Emergency bypass: set `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.)
+
+## What's inside
+
+- **18 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
+- **3 review agents** — `l1-reviewer`, `cross-layer-auditor`, `adversarial-reviewer`.
+- **3 commands** — `/review-init`, `/smoke-test`, `/review-complete`.
+- **Opt-in hooks** — the enforcement gate.
+- **CLAUDE.md templates** — starting points for common stacks.
+
+See [`plugins/exloom/`](plugins/exloom/).
+
+## Honest scope
+
+- exloom guides Claude with skills; only the gate **enforces**. Plan discipline, TDD, and review quality are strong defaults, not guarantees — turn the gate on for the part that genuinely can't be skipped.
+- Claude Code only, for now.
+
+## License
+
+[MIT](LICENSE). Built by [Expeed Software](https://github.com/Expeed-Software).
