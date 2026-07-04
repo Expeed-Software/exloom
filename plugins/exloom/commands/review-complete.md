@@ -88,7 +88,7 @@ chore(review): mark Tier <N> review complete for <branch-name>
 
 Print:
 
-> Review complete for Tier <N>. You may now claim done and run `git push` / open a PR. The Stop hook and PreToolUse hook will no longer block.
+> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now claim done and run `git push` / open a PR. The Stop hook and PreToolUse hook will no longer block.
 
 ## Rules
 

@@ -35,6 +35,8 @@ Run the structural validator:
 bash scripts/validate-plugin.sh
 ```
 
+On Windows, run this under **Git Bash** (not WSL or PowerShell) — it's a POSIX shell script. Claude Code runs the plugin's hooks through Git Bash automatically; only this manual validator needs you to pick the right shell.
+
 It must print `PASSED`. Then:
 
 - Bump the `version` in `plugins/exloom/.claude-plugin/plugin.json` (any plugin change bumps the version).

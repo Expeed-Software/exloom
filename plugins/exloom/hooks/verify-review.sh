@@ -183,4 +183,22 @@ EOF
   exit 2
 fi
 
+# The "Checklist committed" box is self-attested — verify it against git so a
+# ticked box cannot stand in for an actually-committed file. Block if the
+# checklist is untracked or differs from HEAD. Fail open on genuine git errors.
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  if ! git ls-files --error-unmatch "$CHECKLIST" >/dev/null 2>&1 \
+     || ! git diff --quiet HEAD -- "$CHECKLIST" 2>/dev/null; then
+    cat >&2 <<EOF
+exloom review gate: BLOCKED
+
+The checklist is marked "Checklist committed", but git shows otherwise:
+  $CHECKLIST is untracked or has uncommitted changes.
+
+The review evidence must ship with the code it reviews. Commit it, then retry.
+EOF
+    exit 2
+  fi
+fi
+
 exit 0

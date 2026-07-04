@@ -65,7 +65,7 @@ Do NOT commit anything else. The checklist is the only file in this commit.
 
 Print:
 
-> Review checklist initialized at `.claude/reviews/<branch>.md` (Tier <N>).
+> Review checklist initialized at `.claude/reviews/<branch>.md` (Tier <N>) — committed as `chore(review): initialize Tier <N> review checklist`.
 > Required remaining steps for Tier <N>:
 > - <list based on tier>
 > Next commands: `/smoke-test` to fill the smoke-test section, then `/review-complete` when ready to ship.
