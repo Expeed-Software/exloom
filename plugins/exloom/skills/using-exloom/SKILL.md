@@ -63,6 +63,7 @@ These skills cover the primary development loop — the work itself.
 | `exloom:review-gate` | When closing work — claiming done, shipping, or opening a PR — runs the tier-scaled review gate (L1 + smoke test + cross-layer + adversarial) and refuses to mark complete without evidence. |
 | `exloom:requesting-review` | When implementation is complete and needs a human reviewer. |
 | `exloom:reviewing-code` | When reviewing someone else's code — PR review, pairing, or audit. |
+| `exloom:security-review` | When a change touches user input, auth, secrets, deserialization, external calls, or dependencies — runs scanners plus a category review for AI-code security flaws. Evidence-based first pass, not a guarantee. |
 | `exloom:test-driven-development` | When implementing any feature or bugfix — write failing test first, minimal code, refactor. |
 
 ### Handoff
@@ -102,7 +103,7 @@ When multiple skills could apply, use this priority:
 2. **Workflow skills** — if the work is defined, plan it or execute the plan.
    - `planning-for-handoff` (need a plan) → `isolating-execution` (isolate onto a gated branch) → `executing-handoff-plans` *or* `orchestrating-execution` (multi-agent, review-per-task) → `test-driven-development` (during implementation)
 3. **Review skills** — whenever work crosses a boundary (person-to-person, stage-to-stage).
-   - `reviewing-plans` → `reviewing-code` → `review-gate` (enforced gate at completion) → `auditing-plan-fidelity`
+   - `reviewing-plans` → `reviewing-code` / `security-review` → `review-gate` (enforced gate at completion) → `auditing-plan-fidelity`
 4. **Supporting skills** — context, setup, and organizational hygiene.
    - Any of the supporting skills as needed.
 

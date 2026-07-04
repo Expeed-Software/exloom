@@ -37,6 +37,13 @@
 - Non-blocking findings: <category + file:line + disposition, or "none">
 - Reviewer's meta-notes: <which hostile question surfaced the most issues>
 
+## Security review (Tier 3, or any change touching input / auth / secrets / deserialization / dependencies)
+- [ ] Dispatched security-auditor
+- Tools run (and unavailable): <secrets / dep-audit / static — ran or missing, one-line result each>
+- Findings: <severity + category + file:line + disposition, or "none found by the checks run">
+- New dependencies verified real (not hallucinated / typo-squatted): <list, or N/A>
+- Note: first pass only — not a security guarantee.
+
 ## Runbook + rollback (Tier 3)
 - Runbook path: <path to committed runbook.md>
 - Dry-run evidence (staging): <log excerpt or link>

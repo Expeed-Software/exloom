@@ -2,7 +2,7 @@
 
 **Spec-driven development for teams — with a review gate that's actually enforced.**
 
-exloom is a spec-driven development workflow for Claude Code, built for teams. You brainstorm → plan → execute → prove → review — with the **plan as a handoff contract** between developers (deviations logged, what-shipped checked against what-was-planned), a **multi-pass review** (correctness, cross-layer, adversarial) plus a **boot-and-prove smoke test**, and an **opt-in gate that blocks "done" and `git push`** until the review evidence exists. Excellent solo; built to scale to a team.
+exloom is a spec-driven development workflow for Claude Code, built for teams. You brainstorm → plan → execute → prove → review — with the **plan as a handoff contract** between developers (deviations logged, what-shipped checked against what-was-planned), a **multi-pass review** (correctness, cross-layer, adversarial, and a scanner-backed **security** pass for how AI code tends to fail) plus a **boot-and-prove smoke test**, and an **opt-in gate that blocks "done" and `git push`** until the review evidence exists. Excellent solo; built to scale to a team.
 
 It sits in the same family as other spec-driven / structured-agentic development frameworks — the spec → plan → execute → review loop is the standard they share. exloom's focus within that category is the two things teams feel most: making the **handoff auditable** and the **review enforced** — a committed evidence gate, not a suggestion.
 
@@ -20,7 +20,7 @@ MIT-licensed. Works with any Claude Code marketplace.
 Claude Code is fast. On a team, fast-without-discipline produces plans nobody else can follow, "done" that wasn't, and reviews that rubber-stamp. exloom adds the discipline that makes AI-assisted work **provable and handoff-safe**:
 
 - **The plan is a contract.** `planning-for-handoff` produces a plan a different person can execute without guessing; `reviewing-plans` approves it; `executing-handoff-plans` logs every deviation instead of improvising; `auditing-plan-fidelity` checks that what shipped matches what was planned.
-- **Review is a panel, not a rubber stamp.** Correctness (`l1-reviewer`), cross-layer integration (`cross-layer-auditor`), and hostile adversarial (`adversarial-reviewer`) review agents, plus a **boot-and-prove smoke test** — you have to actually run the change and show the output, not assert it works.
+- **Review is a panel, not a rubber stamp.** Correctness (`l1-reviewer`), cross-layer integration (`cross-layer-auditor`), hostile adversarial (`adversarial-reviewer`), and **security** (`security-auditor` — scanners + a review for the security flaws AI code tends to introduce) review agents, plus a **boot-and-prove smoke test** — you have to actually run the change and show the output, not assert it works.
 - **"Done" needs evidence.** `proving-done` is an eight-item checklist that wants real command output, not a feeling.
 - **Brownfield-first.** Your existing conventions win — exloom defers to the repo's `CLAUDE.md`; its defaults only fill gaps.
 
@@ -95,9 +95,9 @@ Step 7 is the point: the review is bound to the exact commit it reviewed, not ju
 
 ## What's inside
 
-- **19 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
+- **20 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`, `security-review`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
 - **Isolated execution** — `isolating-execution` puts work on a gated feature branch (or a dedicated worktree); in the multi-agent mode, each parallel implementer gets its own worktree, gated then integrated back.
-- **3 review agents** — `l1-reviewer`, `cross-layer-auditor`, `adversarial-reviewer`.
+- **4 review agents** — `l1-reviewer`, `cross-layer-auditor`, `adversarial-reviewer`, `security-auditor`.
 - **3 commands** — `/review-init`, `/smoke-test`, `/review-complete`.
 - **Opt-in hooks** — the enforcement gate.
 - **CLAUDE.md templates** — starting points for common stacks.
@@ -107,6 +107,8 @@ See [`plugins/exloom/`](plugins/exloom/).
 ## Honest scope
 
 - exloom guides Claude with skills; only the gate **enforces**. Plan discipline, TDD, and review quality are strong defaults, not guarantees — turn the gate on for the part that genuinely can't be skipped.
+- The **security review** runs the scanners a repo has (secrets, dependency-vuln audit, static analysis) and reviews the diff for how AI code commonly fails — injection, missing authorization, secrets, weak crypto, hallucinated dependencies. It's a **first-pass aid, not a guarantee**: it never certifies code "secure," its coverage is only as good as the tools installed, and it doesn't replace SAST/DAST or a pentest for high-risk changes.
+- It reviews the change in front of it, not your whole codebase, and only the CLI-git path (`git push` / `gh pr create`) is gated.
 - Claude Code only, for now.
 
 ## License

@@ -22,9 +22,11 @@ This protocol encodes those lessons. Every change, regardless of size, needs an 
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
 | <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + checklist |
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + cross-layer contract check + adversarial review |
-| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + runbook + rollback test + staging dry-run |
+| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + runbook + rollback test + staging dry-run |
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
+
+**Security review is triggered by surface, not only by tier.** Any change — at any tier — that touches user input, authentication/authorization, tenancy, secrets, deserialization, server-side outbound requests, cryptography, or dependencies also runs the security review (Step 5). This matters most for AI-generated code, which introduces exactly those flaws.
 
 ## Per-step procedure
 
@@ -73,7 +75,13 @@ Dispatch the `adversarial-reviewer` agent. This tends to carry the highest signa
 
 Implementer addresses every Blocking finding. Non-blocking findings go to the checklist with disposition (fixed / deferred with reason / won't fix with reason).
 
-### Step 5 — Runbook + rollback (Tier 3 only)
+### Step 5 — Security review (Tier 3, and any change touching input / auth / secrets / deserialization / dependencies)
+
+Dispatch the `security-auditor` agent. It runs the repo's security scanners — secrets detection, a dependency-vulnerability audit, and static analysis — and reviews the diff for the AI-generated-code failure modes: injection, missing authorization, secrets/PII exposure, insecure deserialization, SSRF, weak crypto, unsafe defaults, and hallucinated or vulnerable dependencies. Every finding carries a severity, a source→sink, and a confidence (CONFIRMED vs SUSPECTED), and the tool output is pasted as evidence.
+
+This is a **first pass, not a guarantee** — it never certifies code "secure," only "no issues found by the checks that ran." A Critical or High finding blocks the change until it is fixed or risk-accepted in writing. Full method: `exloom:security-review`.
+
+### Step 6 — Runbook + rollback (Tier 3 only)
 
 Required content in the checklist:
 - Runbook path (a markdown doc committed alongside the change, listing: deploy order, health checks, signals to watch, common failure modes).
@@ -99,11 +107,11 @@ The canonical template lives at `templates/review-checklist.md` in this plugin. 
 ### Doesn't catch (known blind spots)
 
 - **Performance regressions not visible in a single smoke run.** Load testing is out of scope.
-- **Security vulnerabilities in unchanged code** — the gate is about THIS change, not the whole system. Use a security audit for that.
+- **Security vulnerabilities in *unchanged* code** — the security review (Step 5) covers THIS change's security surface, not the pre-existing system. Audit the whole codebase separately.
 - **Third-party API contract drift** — if Stripe changes its webhook body and nothing in the diff triggers the change, the gate won't notice.
 - **Race conditions that don't reproduce in single-operator smoke tests.**
 
-For those, use dedicated tooling (load tests, security review, chaos testing). The review protocol is necessary, not sufficient.
+For those, use dedicated tooling (load tests, chaos testing) and, for the wider system, a full-codebase security audit. The review protocol is necessary, not sufficient.
 
 ## Turn it on (per repo)
 
