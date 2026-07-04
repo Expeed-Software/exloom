@@ -23,7 +23,9 @@ Each implementer is constructed with exactly what it needs — its task, the int
 
 ## Workspace setup (once)
 
-Before the first dispatch, make sure scratch never gets committed: add `.exloom/` **and** your stack's build artifacts (`__pycache__/`, `*.pyc`, `node_modules/`, `target/`, `dist/`, …) to `.gitignore`. The `.exloom/` directory is **per-run scratch** — briefs, reports, diff packages, and the resume ledger, all regenerable — and must never enter git. If it isn't ignored, an implementer's `git add -A` will sweep it (and build artifacts) straight into a task commit. Either gitignore it up front, or instruct implementers to stage only the files they changed.
+Before the first dispatch, isolate the run: invoke `exloom:isolating-execution` so the whole run lands on a feature branch where the review gate can enforce if the repo enabled it (the hooks skip `main`/`dev`, and only act when `.claude/exloom-gate.enabled` is present) — not on whatever branch you were on. That skill reports whether the branch is actually gated or merely isolated, and also governs the per-implementer worktrees for the isolated-parallel mode below.
+
+Then make sure scratch never gets committed: add `.exloom/` **and** your stack's build artifacts (`__pycache__/`, `*.pyc`, `node_modules/`, `target/`, `dist/`, …) to `.gitignore`. The `.exloom/` directory is **per-run scratch** — briefs, reports, diff packages, and the resume ledger, all regenerable — and must never enter git. If it isn't ignored, an implementer's `git add -A` will sweep it (and build artifacts) straight into a task commit. Either gitignore it up front, or instruct implementers to stage only the files they changed.
 
 ## The loop
 
@@ -95,7 +97,18 @@ Use the least powerful model that fits, and **always set the model explicitly** 
 
 ## Parallel dispatch (independent tasks)
 
-When several tasks are genuinely independent (no shared files, no ordering), you may dispatch their implementers concurrently to cut wall-clock — but **never** run two implementers that touch the same files at once (conflicts). Review each result through the same gate as it returns. If tasks share state or order, run them sequentially.
+When several tasks are genuinely independent (no shared files, no ordering), you can run their implementers concurrently to cut wall-clock. There are two ways, and the second is exloom's real parallel mode.
+
+**Shared tree (simple, limited).** Dispatch the implementers concurrently in the current worktree — but only when they touch strictly disjoint files. Two implementers editing the same file in one tree corrupt each other. Review each result through the same gate as it returns. Use this only for obviously non-overlapping tasks.
+
+**A worktree per implementer (isolated — the real parallel mode).** For higher parallelism — including tasks that might touch overlapping files — give each implementer its own worktree on its own `task/<feature-slug>/<N>` branch, cut from the feature branch (dispatch it with `isolation: worktree`). Each implementer builds and commits in isolation, so nothing it does can collide with a sibling. Create and tear these down with the helpers in this skill's `scripts/` dir — `create-task-worktree.sh <N> <feature-branch>` (guards a clean, non-protected base and prints the worktree path to hand the implementer; branches are named `task/<feature-slug>/<N>` so features don't collide), `list-task-worktrees.sh` (what is still live), and `cleanup-task-worktree.sh <N> <feature-branch>` (refuses to remove a task worktree whose branch isn't yet merged into the feature branch, unless you pass `--force`). If a worktree folder is deleted by hand, run `git worktree prune` to clear the stale registration. Then:
+
+1. **Gate each task branch as it returns** — the same tier-scaled reviewers (l1 / cross-layer / adversarial + smoke) against that branch's diff; the reviewed-commit binding works per branch. Write each task's tier, evidence, and findings into the one authoritative feature-branch checklist (`.claude/reviews/<feature>.md`). The `task/<feature-slug>/<N>` branches are ephemeral, so the audit trail stays in one place instead of fragmenting across per-task checklists.
+2. **Integrate passing branches** — merge each cleared `task/<feature-slug>/<N>` into the feature branch in a deliberate order. A conflict here is a *recoverable merge*, not the silent corruption two implementers in one tree would cause — resolve it (or dispatch a fix subagent to) and log it.
+3. **Re-gate the integrated result** — after the merges, run the whole-branch review over the feature branch. A merge can break what each branch passed alone (one task changed an interface another task built against). This re-gate is not optional; it is the whole point of integrating under review.
+4. **Hold failing branches out** — a `task/<feature-slug>/<N>` that cannot pass review is not merged. Report it, re-dispatch or split it, and integrate only once it is clean. Never merge a branch with open Blocking/Critical/Important findings to "fix later."
+
+Cap the number of live worktrees to the same concurrency you would give any fan-out (a handful, not dozens), and record each task's branch, worktree path, and merge state in the ledger so a compaction cannot lose which branches are already integrated. If tasks share state or must run in order, do not parallelize them — run them sequentially through the normal loop.
 
 ## Red flags
 
@@ -105,9 +118,11 @@ When several tasks are genuinely independent (no shared files, no ordering), you
 - Pre-judging findings for a reviewer ("treat as minor") → that's grading your own work.
 - Re-dispatching a task the ledger already marks complete → wasted work after a compaction.
 - Marking a task done with open Blocking/Critical/Important findings.
+- Merging a `task/<feature-slug>/<N>` branch before it clears the gate ("integrate now, fix later") → integrate only clean branches, and re-gate the merged result.
 
 ## Integration
 
+- **Isolate first:** `exloom:isolating-execution` — puts the run on a gated feature branch, and (for the isolated-parallel mode) a worktree per implementer.
 - **Plan from:** `exloom:planning-for-handoff`.
 - **Gate via:** `exloom:review-gate` (tiers + the l1 / cross-layer-auditor / adversarial reviewers + smoke test).
 - **Alternative:** `exloom:executing-handoff-plans` for disciplined single-agent execution in this session (no subagents); use that for small or tightly-coupled plans where orchestration overhead isn't worth it.

@@ -4,7 +4,7 @@
 
 exloom is a spec-driven development workflow for Claude Code, built for teams. You brainstorm → plan → execute → prove → review — with the **plan as a handoff contract** between developers (deviations logged, what-shipped checked against what-was-planned), a **multi-pass review** (correctness, cross-layer, adversarial) plus a **boot-and-prove smoke test**, and an **opt-in gate that blocks "done" and `git push`** until the review evidence exists. Excellent solo; built to scale to a team.
 
-It sits in the same family as other spec-driven / structured-agentic development frameworks — the spec → plan → execute → review loop is the standard they share. exloom's focus within that category is the two things teams feel most: making the **handoff auditable** and the **review non-bypassable**.
+It sits in the same family as other spec-driven / structured-agentic development frameworks — the spec → plan → execute → review loop is the standard they share. exloom's focus within that category is the two things teams feel most: making the **handoff auditable** and the **review enforced** — a committed evidence gate, not a suggestion.
 
 MIT-licensed. Works with any Claude Code marketplace.
 
@@ -12,7 +12,8 @@ MIT-licensed. Works with any Claude Code marketplace.
 
 - Claude Code with plugin support.
 - Git, because the review gate binds evidence to commits and blocks stale reviews.
-- Bash for the hook scripts. On Windows, Claude Code runs plugin hooks through Git Bash; if you run the validator manually, use Git Bash rather than WSL or PowerShell.
+- Bash for the hook scripts. On Windows, Claude Code runs plugin hooks through Git Bash; if you run the validator or the worktree helper scripts manually, use Git Bash rather than WSL or PowerShell.
+- `jq` **or** `python3` for the full review gate. The **push gate** (`git push` / `gh pr create`) works without either — it falls back to a `grep`/`sed` parser. The **Stop hook** (which nudges you not to *claim* "done" prematurely) parses the session transcript and needs `jq` or `python3`; without one it won't fire, though the push gate still blocks the actual push. Git Bash on Windows bundles neither, so install `jq` (or Python) if you want the complete gate.
 
 ## Why exloom
 
@@ -35,7 +36,7 @@ That's the difference between *hoping* review happened and *guaranteeing* it did
 ## The loop
 
 ```
-brainstorming → planning-for-handoff → [reviewing-plans] → executing-handoff-plans (TDD)
+brainstorming → planning-for-handoff → [reviewing-plans] → isolating-execution → executing-handoff-plans (TDD)
    → proving-done → [auditing-plan-fidelity] → reviewing-code / review-gate → requesting-review
 ```
 
@@ -63,7 +64,7 @@ Skills surface based on what you're doing — just start working:
 
 ## Turn on the enforcement gate (optional, per repo)
 
-Off by default — exloom never blocks a repo that didn't ask for it. To make review non-bypassable for a repository:
+Off by default — exloom never blocks a repo that didn't ask for it. To make the review gate enforce on a repository:
 
 ```
 mkdir -p .claude && touch .claude/exloom-gate.enabled
@@ -76,7 +77,7 @@ New-Item -ItemType Directory -Force .claude | Out-Null
 New-Item -ItemType File -Force .claude/exloom-gate.enabled | Out-Null
 ```
 
-Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. (Emergency bypass: set `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.)
+Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. The gate applies on feature branches only — work committed directly to `main`/`master`/`dev`/`develop` is deliberately not gated, so isolate onto a feature branch first (`exloom:isolating-execution`). It gates the CLI-git workflow (`git push`, `gh pr create`); an emergency bypass is available (`EXLOOM_REVIEW_SKIP=1` in your Claude Code session env).
 
 ## Try the gate in 2 minutes
 
@@ -94,7 +95,8 @@ Step 7 is the point: the review is bound to the exact commit it reviewed, not ju
 
 ## What's inside
 
-- **18 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
+- **19 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
+- **Isolated execution** — `isolating-execution` puts work on a gated feature branch (or a dedicated worktree); in the multi-agent mode, each parallel implementer gets its own worktree, gated then integrated back.
 - **3 review agents** — `l1-reviewer`, `cross-layer-auditor`, `adversarial-reviewer`.
 - **3 commands** — `/review-init`, `/smoke-test`, `/review-complete`.
 - **Opt-in hooks** — the enforcement gate.

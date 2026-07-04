@@ -30,13 +30,22 @@ fi
 CMD=""
 if command -v jq >/dev/null 2>&1; then
   CMD="$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
-elif command -v python3 >/dev/null 2>&1; then
+fi
+if [[ -z "$CMD" ]] && command -v python3 >/dev/null 2>&1; then
   CMD="$(printf '%s' "$HOOK_INPUT" | python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin)
     print((d.get("tool_input") or {}).get("command",""))
 except Exception:
     pass' 2>/dev/null || true)"
+fi
+if [[ -z "$CMD" ]]; then
+  # Fallback when neither jq nor python3 is on PATH (e.g. stock Windows Git Bash,
+  # which bundles neither). Without this the gate would silently fail open here.
+  # Best-effort sed extraction of tool_input.command — covers ordinary commands
+  # like `git push origin main`; a command containing an escaped quote may not
+  # extract, but such a command is not a push/PR-create anyway.
+  CMD="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 fi
 
 if [[ -z "$CMD" ]]; then exit 0; fi

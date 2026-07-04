@@ -19,9 +19,9 @@ New to exloom? Find your situation and start with the named skill — it will pu
 
 | Your situation | Start with |
 |---|---|
-| Building a new feature or changing behavior | `brainstorming` → it leads to `planning-for-handoff` → `executing-handoff-plans` |
+| Building a new feature or changing behavior | `brainstorming` → it leads to `planning-for-handoff` → `isolating-execution` → `executing-handoff-plans` |
 | Fixing a bug | `systematic-debugging` → diagnose root cause before any fix |
-| Handed a written plan to implement | `executing-handoff-plans` (or `orchestrating-execution` for multi-agent, review-per-task execution) |
+| Handed a written plan to implement | `isolating-execution` first, then `executing-handoff-plans` (or `orchestrating-execution` for multi-agent, review-per-task execution) |
 | About to say "it's done" | `proving-done` |
 | Closing work — about to mark done / ship / merge | `review-gate` (enforces the evidence gate) |
 | Opening a PR | `requesting-review` |
@@ -30,7 +30,7 @@ New to exloom? Find your situation and start with the named skill — it will pu
 | Moving from one project to another | `switching-projects` |
 | Learned something worth keeping | `capturing-learnings` |
 
-The single most common flow: **`brainstorming` → `planning-for-handoff` → `executing-handoff-plans` → `proving-done` → `requesting-review`.** When in doubt, start at `brainstorming` — it's the front door for any new work.
+The single most common flow: **`brainstorming` → `planning-for-handoff` → `isolating-execution` → `executing-handoff-plans` → `proving-done` → `requesting-review`.** When in doubt, start at `brainstorming` — it's the front door for any new work.
 
 ## When Skills Apply
 
@@ -57,6 +57,7 @@ These skills cover the primary development loop — the work itself.
 | `exloom:planning-for-handoff` | When you have a spec or requirements and need a handoff-ready execution plan. |
 | `exloom:executing-handoff-plans` | When you have a written plan to run — step-by-step, no improvising. |
 | `exloom:orchestrating-execution` | When executing a plan task-by-task by dispatching a fresh subagent per task, with the review gate run between tasks (multi-agent execution). |
+| `exloom:isolating-execution` | Before executing a plan — isolates the workspace onto a gated feature branch (or a worktree) so the review gate applies and the base branch stays clean. |
 | `exloom:systematic-debugging` | Any bug, test failure, or unexpected behavior. Diagnose before fixing. |
 | `exloom:proving-done` | Before claiming any work is done, fixed, or passing. |
 | `exloom:review-gate` | When closing work — claiming done, shipping, or opening a PR — runs the tier-scaled review gate (L1 + smoke test + cross-layer + adversarial) and refuses to mark complete without evidence. |
@@ -99,7 +100,7 @@ When multiple skills could apply, use this priority:
 1. **Process skills** — if there is a bug or open-ended creative problem, start here.
    - `systematic-debugging` (bug present) → `brainstorming` (creative problem)
 2. **Workflow skills** — if the work is defined, plan it or execute the plan.
-   - `planning-for-handoff` (need a plan) → `executing-handoff-plans` *or* `orchestrating-execution` (multi-agent, review-per-task) → `test-driven-development` (during implementation)
+   - `planning-for-handoff` (need a plan) → `isolating-execution` (isolate onto a gated branch) → `executing-handoff-plans` *or* `orchestrating-execution` (multi-agent, review-per-task) → `test-driven-development` (during implementation)
 3. **Review skills** — whenever work crosses a boundary (person-to-person, stage-to-stage).
    - `reviewing-plans` → `reviewing-code` → `review-gate` (enforced gate at completion) → `auditing-plan-fidelity`
 4. **Supporting skills** — context, setup, and organizational hygiene.
@@ -112,7 +113,7 @@ If two skills at the same priority level both apply, invoke the one that gates t
 ### Solo path (one person owns the full cycle)
 
 ```
-brainstorming → planning-for-handoff → executing-handoff-plans (with TDD) → proving-done → review-gate → requesting-review
+brainstorming → planning-for-handoff → isolating-execution → executing-handoff-plans (with TDD) → proving-done → review-gate → requesting-review
 ```
 
 For higher throughput, `orchestrating-execution` replaces `executing-handoff-plans` — it dispatches a fresh subagent per task and runs the review gate between tasks. Even solo work produces handoff-ready plans. Future-you is a different person. Use `test-driven-development` during execution for any task with business logic. Code review still happens at the end — the reviewer is the team.
@@ -120,7 +121,7 @@ For higher throughput, `orchestrating-execution` replaces `executing-handoff-pla
 ### Team path (work crosses person boundaries)
 
 ```
-brainstorming → planning-for-handoff → reviewing-plans → [assign to executor] → executing-handoff-plans or orchestrating-execution (with TDD) → auditing-plan-fidelity → reviewing-code → review-gate
+brainstorming → planning-for-handoff → reviewing-plans → [assign to executor] → isolating-execution → executing-handoff-plans or orchestrating-execution (with TDD) → auditing-plan-fidelity → reviewing-code → review-gate
 ```
 
 The handoff point is between `reviewing-plans` and `executing-handoff-plans`. The plan is the contract. The executor does not modify the plan without logging a deviation and getting approval from the author.

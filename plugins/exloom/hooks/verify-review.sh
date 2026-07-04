@@ -35,13 +35,21 @@ fi
 TRANSCRIPT_PATH=""
 if command -v jq >/dev/null 2>&1; then
   TRANSCRIPT_PATH="$(printf '%s' "$HOOK_INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
-elif command -v python3 >/dev/null 2>&1; then
+fi
+if [[ -z "$TRANSCRIPT_PATH" ]] && command -v python3 >/dev/null 2>&1; then
   TRANSCRIPT_PATH="$(printf '%s' "$HOOK_INPUT" | python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin)
     print(d.get("transcript_path",""))
 except Exception:
     pass' 2>/dev/null || true)"
+fi
+if [[ -z "$TRANSCRIPT_PATH" ]]; then
+  # Fallback when neither jq nor python3 is on PATH: best-effort sed extraction.
+  # Resolves POSIX-style transcript paths (Linux/macOS). Windows paths arrive with
+  # escaped backslashes and won't resolve here, so on Windows install jq or python3
+  # for the Stop hook — the push hook is the hard gate regardless.
+  TRANSCRIPT_PATH="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 fi
 
 if [[ -z "$TRANSCRIPT_PATH" ]] || [[ ! -f "$TRANSCRIPT_PATH" ]]; then

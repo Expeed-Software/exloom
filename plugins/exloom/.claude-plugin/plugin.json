@@ -1,7 +1,7 @@
 {
   "name": "exloom",
   "description": "Team-oriented development workflow for Claude Code — discipline, handoff, and an enforced evidence-based review gate. Scales from one developer to a whole org.",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "author": {
     "name": "Expeed Software",
     "email": "support@expeed.com"
