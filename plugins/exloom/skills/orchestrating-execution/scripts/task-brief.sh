@@ -13,6 +13,7 @@ set -euo pipefail
 
 plan=${1:?usage: task-brief.sh <plan-file> <task-number>}
 num=${2:?usage: task-brief.sh <plan-file> <task-number>}
+[[ $num =~ ^[0-9]+$ ]] || { printf 'task number must be a positive integer: %s\n' "$num" >&2; exit 1; }
 [[ -f $plan ]] || { printf 'plan not found: %s\n' "$plan" >&2; exit 1; }
 
 root=$(git rev-parse --show-toplevel 2>/dev/null || printf '.')

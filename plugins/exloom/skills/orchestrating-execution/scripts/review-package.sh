@@ -9,6 +9,9 @@ set -euo pipefail
 
 BASE="${1:?usage: review-package.sh <base> <head>}"
 HEAD_REF="${2:?usage: review-package.sh <base> <head>}"
+# reject option-like refs so they cannot be parsed as git options
+case "$BASE" in -*) echo "invalid base ref: $BASE" >&2; exit 1;; esac
+case "$HEAD_REF" in -*) echo "invalid head ref: $HEAD_REF" >&2; exit 1;; esac
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 OUTDIR="$ROOT/.exloom/execution"

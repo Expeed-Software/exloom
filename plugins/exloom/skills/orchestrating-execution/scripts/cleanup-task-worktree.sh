@@ -13,6 +13,7 @@ N="${1:?usage: cleanup-task-worktree.sh <task-number> <feature-branch> [--force]
 BASE="${2:?usage: cleanup-task-worktree.sh <task-number> <feature-branch> [--force]}"
 FORCE=0
 [ "${3:-}" = "--force" ] && FORCE=1
+[[ "$N" =~ ^[0-9]+$ ]] || { echo "task number must be a positive integer: $N" >&2; exit 1; }
 
 slug="${BASE#feature/}"; slug="${slug//\//-}"
 BRANCH="task/${slug}/${N}"

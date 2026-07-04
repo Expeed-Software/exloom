@@ -19,6 +19,7 @@ set -euo pipefail
 
 N="${1:?usage: create-task-worktree.sh <task-number> <feature-branch>}"
 BASE="${2:?usage: create-task-worktree.sh <task-number> <feature-branch>}"
+[[ "$N" =~ ^[0-9]+$ ]] || { echo "task number must be a positive integer: $N" >&2; exit 1; }
 
 is_protected() { case "$1" in main|master|dev|develop|HEAD) return 0 ;; *) return 1 ;; esac; }
 
