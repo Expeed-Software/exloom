@@ -8,6 +8,12 @@ It sits in the same family as other spec-driven / structured-agentic development
 
 MIT-licensed. Works with any Claude Code marketplace.
 
+## Requirements
+
+- Claude Code with plugin support.
+- Git, because the review gate binds evidence to commits and blocks stale reviews.
+- Bash for the hook scripts. On Windows, Claude Code runs plugin hooks through Git Bash; if you run the validator manually, use Git Bash rather than WSL or PowerShell.
+
 ## Why exloom
 
 Claude Code is fast. On a team, fast-without-discipline produces plans nobody else can follow, "done" that wasn't, and reviews that rubber-stamp. exloom adds the discipline that makes AI-assisted work **provable and handoff-safe**:
@@ -63,7 +69,14 @@ Off by default — exloom never blocks a repo that didn't ask for it. To make re
 mkdir -p .claude && touch .claude/exloom-gate.enabled
 ```
 
-Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate — and the hooks refuse to let anyone declare done or push until it's filled. (Emergency bypass: set `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.)
+In Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force .claude | Out-Null
+New-Item -ItemType File -Force .claude/exloom-gate.enabled | Out-Null
+```
+
+Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. (Emergency bypass: set `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.)
 
 ## Try the gate in 2 minutes
 
@@ -72,9 +85,9 @@ Prove the enforcement is real on a throwaway branch:
 1. Install exloom and enable the gate (above).
 2. `git checkout -b try/exloom-gate`, then make a small code change.
 3. `/review-init` — bootstraps and commits the checklist (pick a tier).
-4. `/smoke-test` — boot the change and paste real evidence.
-5. `/review-complete` — records the reviewed commit and marks the checklist ready.
-6. `git push` now succeeds.
+4. `/smoke-test` — boot the change, paste real evidence, and commit it to the checklist.
+5. `/review-complete` — records the reviewed commit and commits the final verdict.
+6. `git push` is now allowed by the gate. Your usual Git remote/upstream setup still applies.
 7. Make **another** code commit without re-reviewing, then `git push` again — the gate **blocks** it: the review no longer covers the tip. Re-run `/review-complete` and it passes.
 
 Step 7 is the point: the review is bound to the exact commit it reviewed, not just "some checklist exists."
