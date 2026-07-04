@@ -164,7 +164,7 @@ EOF
 fi
 
 # Placeholder detection.
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*)>'
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha)>'
 if grep -Eq "$PLACEHOLDER_RE" "$CHECKLIST" || grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$' "$CHECKLIST"; then
   cat >&2 <<EOF
 exloom review gate: BLOCKED
@@ -196,6 +196,38 @@ The checklist is marked "Checklist committed", but git shows otherwise:
   $CHECKLIST is untracked or has uncommitted changes.
 
 The review evidence must ship with the code it reviews. Commit it, then retry.
+EOF
+    exit 2
+  fi
+fi
+
+# Staleness + migration: a complete checklist must record a valid reviewed code
+# commit, and no non-checklist file may have changed since it. Only enforced when
+# HEAD is resolvable — fail open on genuine git/infra failure, never on content.
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  REVIEWED_SHA="$(grep -E '^Reviewed code commit:' "$CHECKLIST" | head -1 | sed -E 's/^Reviewed code commit:[[:space:]]*//' | tr -d '[:space:]')"
+  if [[ -z "$REVIEWED_SHA" ]] || ! git rev-parse --verify "${REVIEWED_SHA}^{commit}" >/dev/null 2>&1; then
+    cat >&2 <<EOF
+exloom review gate: BLOCKED
+
+The checklist is marked complete but records no valid 'Reviewed code commit:',
+so the review cannot be bound to the current code. A checklist created before
+this field existed needs migrating.
+
+Re-run /review-complete to record the reviewed tip before claiming done.
+EOF
+    exit 2
+  fi
+  STALE="$(git diff --name-only "$REVIEWED_SHA" HEAD -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  if [[ -n "$STALE" ]]; then
+    cat >&2 <<EOF
+exloom review gate: BLOCKED
+
+The review is stale. These files changed after the reviewed commit
+(${REVIEWED_SHA}) and are not covered by the committed review:
+${STALE}
+
+Re-run /review-complete to review the current tip before claiming done.
 EOF
     exit 2
   fi

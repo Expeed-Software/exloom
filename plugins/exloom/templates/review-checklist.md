@@ -53,5 +53,6 @@
 - [ ] Checklist committed
 - [ ] Ready to ship
 
+Reviewed code commit: <reviewed-sha>
 Signed: <Claude-session-or-human-reviewer>
 Date: YYYY-MM-DD

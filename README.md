@@ -24,7 +24,7 @@ Be clear about the mechanism, because it matters:
 - **Most of exloom is discipline** — skills Claude reads and follows. They guide the work; they don't force it.
 - **One part is enforcement** — the optional review-gate hooks. When a repo turns them on, the Claude Code harness (not the model) **blocks "done" and `git push`** until the review evidence is committed to `.claude/reviews/<branch>.md`.
 
-That's the difference between *hoping* review happened and *guaranteeing* it did — the one thing you can't get from instructions alone.
+That's the difference between *hoping* review happened and *guaranteeing* it did — the one thing you can't get from instructions alone. It's also what separates exloom from most workflow plugins: they *guide* the loop; exloom guides it and, with the gate on, **enforces** it — committed evidence, a smoke proof, and a review bound to the exact commit you're shipping.
 
 ## The loop
 
@@ -64,6 +64,20 @@ mkdir -p .claude && touch .claude/exloom-gate.enabled
 ```
 
 Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate — and the hooks refuse to let anyone declare done or push until it's filled. (Emergency bypass: set `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.)
+
+## Try the gate in 2 minutes
+
+Prove the enforcement is real on a throwaway branch:
+
+1. Install exloom and enable the gate (above).
+2. `git checkout -b try/exloom-gate`, then make a small code change.
+3. `/review-init` — bootstraps and commits the checklist (pick a tier).
+4. `/smoke-test` — boot the change and paste real evidence.
+5. `/review-complete` — records the reviewed commit and marks the checklist ready.
+6. `git push` now succeeds.
+7. Make **another** code commit without re-reviewing, then `git push` again — the gate **blocks** it: the review no longer covers the tip. Re-run `/review-complete` and it passes.
+
+Step 7 is the point: the review is bound to the exact commit it reviewed, not just "some checklist exists."
 
 ## What's inside
 

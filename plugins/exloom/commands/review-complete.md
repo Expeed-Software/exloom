@@ -66,7 +66,11 @@ Wait for the user. Do NOT mark complete while anything is missing.
 
 ## Step 5 — If everything is present
 
-Fill the Final Verdict section:
+First capture the **reviewed code tip** — the commit this review covers:
+
+`git rev-parse HEAD`
+
+Fill the Final Verdict section, writing that SHA into `Reviewed code commit:`:
 
 ```
 ## Final verdict
@@ -74,15 +78,22 @@ Fill the Final Verdict section:
 - [x] Checklist committed
 - [x] Ready to ship
 
+Reviewed code commit: <the `git rev-parse HEAD` output>
 Signed: Claude (exloom)
 Date: <YYYY-MM-DD>
 ```
 
-Stage the checklist and commit:
+Capture the SHA **before** committing the checklist, so it names the last *code*
+commit — the tip that was actually reviewed, not the checklist commit. Then stage
+the checklist and commit:
 
 ```
 chore(review): mark Tier <N> review complete for <branch-name>
 ```
+
+This SHA binds the review to the branch tip: the hooks block a push if any
+non-checklist file changed after it, so completing the review and then committing
+more code forces a re-run of `/review-complete`.
 
 ## Step 6 — Tell the user what is now unblocked
 
