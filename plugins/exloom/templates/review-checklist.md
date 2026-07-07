@@ -55,6 +55,13 @@
 - Skipped steps with written justification:
   - <step name> — <one sentence why>
 
+## Provenance
+- AI-assisted: <ai-assisted>
+- Model(s): <model-id>
+- Directed by: <directed-by>
+- Base commit: <base-sha>
+- Attested: <attested-date>
+
 ## Final verdict
 - [ ] All required gates passed for declared tier
 - [ ] Checklist committed

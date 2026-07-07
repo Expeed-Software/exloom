@@ -84,16 +84,48 @@ Date: <YYYY-MM-DD>
 ```
 
 Capture the SHA **before** committing the checklist, so it names the last *code*
-commit — the tip that was actually reviewed, not the checklist commit. Then stage
-the checklist and commit:
+commit — the tip that was actually reviewed, not the checklist commit.
+
+Then fill the **Provenance** section — who and what produced this change:
+
+- **AI-assisted:** `yes` if a model wrote or co-wrote the change (the default for a
+  Claude Code session), else `no`.
+- **Model(s):** the model id you are running as (e.g. `claude-opus-4-8`), or
+  `N/A — human-authored`. State it honestly; it is self-reported.
+- **Directed by:** the human on whose behalf you are working — from
+  `git config user.name` / `user.email`.
+- **Base commit:** the fork point — `git merge-base HEAD <default-branch>` (try
+  `origin/main`, then `origin/master`, then `origin/dev`); if there is no base, use
+  the repository's first commit.
+- **Attested:** today's date.
 
 ```
-chore(review): mark Tier <N> review complete for <branch-name>
+## Provenance
+- AI-assisted: yes
+- Model(s): claude-opus-4-8
+- Directed by: Jane Dev <jane@example.com>
+- Base commit: <merge-base output>
+- Attested: <YYYY-MM-DD>
 ```
 
-This SHA binds the review to the branch tip: the hooks block a push if any
-non-checklist file changed after it, so completing the review and then committing
-more code forces a re-run of `/review-complete`.
+Then stage the checklist and commit. **If** the repo has
+`.claude/exloom-provenance-signed.enabled`, the commit MUST be signed
+(`git commit -S`) — the hooks `git verify-commit` it and block an unsigned commit.
+Otherwise a normal commit is fine:
+
+```
+# signed-provenance repos:
+git commit -S -m "chore(review): mark Tier <N> review complete for <branch-name>"
+# otherwise:
+git commit -m "chore(review): mark Tier <N> review complete for <branch-name>"
+```
+
+The reviewed SHA binds the review to the branch tip (the hooks block a push if any
+non-checklist file changed after it), and the provenance record makes who/what
+produced the change auditable. If `git commit -S` fails because no signing key is
+configured, tell the user to set up git commit signing (GPG or SSH) or remove the
+signed-provenance marker — do **not** fall back to an unsigned commit in a
+signed-provenance repo.
 
 ## Step 6 — Tell the user what is now unblocked
 

@@ -109,6 +109,7 @@ See [`plugins/exloom/`](plugins/exloom/).
 - exloom guides Claude with skills; only the gate **enforces**. Plan discipline, TDD, and review quality are strong defaults, not guarantees — turn the gate on for the part that genuinely can't be skipped.
 - The **security review** runs the scanners a repo has (secrets, dependency-vuln audit, static analysis) and reviews the diff for how AI code commonly fails — injection, missing authorization, secrets, weak crypto, hallucinated dependencies. It's a **first-pass aid, not a guarantee**: it never certifies code "secure," its coverage is only as good as the tools installed, and it doesn't replace SAST/DAST or a pentest for high-risk changes.
 - It reviews the change in front of it, not your whole codebase. It gates `git push` / `gh pr create` plus the common GitHub MCP push/PR tools — but a push through some other MCP server or a raw API call it doesn't recognize could still slip by.
+- When the gate is on, every change also carries a committed **provenance** record — AI-assisted, model, who directed it, base commit — bound to the reviewed commit. It's an audit trail (ISO 42001 / SOC 2 / insurance kind), **not a compliance certificate**; the model id is self-reported. An opt-in signed-commit mode (`git commit -S` + `git verify-commit`) adds verified-identity non-repudiation with your existing key — no sigstore/cosign.
 - Claude Code only, for now.
 
 ## License

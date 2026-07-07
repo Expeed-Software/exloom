@@ -146,7 +146,7 @@ EOF
 fi
 
 # Placeholder text detection.
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha)>'
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
 if grep -Eq "$PLACEHOLDER_RE" "$CHECKLIST" || grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$' "$CHECKLIST"; then
   cat >&2 <<EOF
 exloom review gate: push BLOCKED
@@ -207,6 +207,35 @@ ${STALE}
 Re-run /review-complete to review the current tip, then retry the push.
 EOF
     exit 2
+  fi
+
+  # ---------- provenance attestation ----------
+  # Who/what produced the change must be recorded; it is bound to the reviewed
+  # code by the Reviewed-commit + staleness checks above.
+  if ! grep -q '^- AI-assisted:' "$CHECKLIST" || ! grep -q '^- Model(s):' "$CHECKLIST" \
+     || ! grep -q '^- Directed by:' "$CHECKLIST" || ! grep -q '^- Base commit:' "$CHECKLIST"; then
+    cat >&2 <<EOF
+exloom review gate: push BLOCKED
+
+Provenance is missing from $CHECKLIST (AI-assisted / Model / Directed by / Base
+commit). Run /review-complete to record who and what produced this change.
+EOF
+    exit 2
+  fi
+  # v2 (opt-in): the attestation commit must be a verified signed commit.
+  if [[ -f ".claude/exloom-provenance-signed.enabled" ]]; then
+    P_COMMIT="$(git log -1 --format=%H -- "$CHECKLIST" 2>/dev/null)"
+    if [[ -z "$P_COMMIT" ]] || ! git verify-commit "$P_COMMIT" >/dev/null 2>&1; then
+      cat >&2 <<EOF
+exloom review gate: push BLOCKED
+
+Signed provenance is required here (.claude/exloom-provenance-signed.enabled) but
+the commit that recorded the checklist is not a verified signed commit. Configure
+git commit signing and re-run /review-complete (it commits with -S), or remove the
+marker to use v1 (unsigned) provenance.
+EOF
+      exit 2
+    fi
   fi
 fi
 

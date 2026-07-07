@@ -123,6 +123,15 @@ mkdir -p .claude && touch .claude/exloom-gate.enabled
 
 With the marker present, the hooks enforce the gate on every branch. Without it, the hooks no-op and this skill is only a (strong) recommendation.
 
+## Provenance attestation (who/what made the change)
+
+When the gate is on, `/review-complete` also records a **Provenance** block in the checklist — whether AI assisted, the model id, the human who directed it, and the base commit — and the hooks refuse to ship without it. Bound to the reviewed commit, this is a committed audit trail of *how* the change was produced (the kind of evidence ISO 42001 / SOC 2 auditors and cyber-insurers ask for — position it there, not on the EU AI Act, which governs synthetic media, not source code).
+
+- **v1 (default):** the record is committed and commit-bound. Tamper-evident through git history; the model id is **self-reported** (cooperating-team trust), not independently verified.
+- **v2 (opt-in):** create `.claude/exloom-provenance-signed.enabled`, and the attestation commit must be a **signed git commit** — `/review-complete` commits with `git commit -S` and the hooks `git verify-commit` it, giving verified-identity non-repudiation with your existing GPG/SSH key (no sigstore/cosign/in-toto). Verification requires the signer's key to be trusted wherever the hook runs (a documented setup step; fail-closed by design).
+
+It is **evidence, not compliance certification**, and a branch-level declaration, not per-line attribution.
+
 ## Entry points
 
 - `/review-init` — create the checklist for the current branch.
