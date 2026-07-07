@@ -27,33 +27,57 @@ if [[ -p /dev/stdin || ! -t 0 ]]; then
   HOOK_INPUT="$(cat 2>/dev/null || true)"
 fi
 
-CMD=""
+# Which tool fired? A shell `git push`/`gh pr create` and a GitHub MCP write/PR
+# tool are both "publish" actions the gate must cover.
+TOOL=""
 if command -v jq >/dev/null 2>&1; then
-  CMD="$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  TOOL="$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 fi
-if [[ -z "$CMD" ]] && command -v python3 >/dev/null 2>&1; then
-  CMD="$(printf '%s' "$HOOK_INPUT" | python3 -c 'import json,sys
+if [[ -z "$TOOL" ]] && command -v python3 >/dev/null 2>&1; then
+  TOOL="$(printf '%s' "$HOOK_INPUT" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("tool_name",""))
+except Exception:
+    pass' 2>/dev/null || true)"
+fi
+if [[ -z "$TOOL" ]]; then
+  TOOL="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+fi
+
+IS_PUBLISH=0
+case "$TOOL" in
+  # GitHub MCP write/PR tools (any server-name prefix). The tool call itself is
+  # the publish, so there is no shell command to parse — go straight to the gate.
+  *push_files|*create_or_update_file|*create_pull_request|*merge_pull_request|*delete_file)
+    IS_PUBLISH=1 ;;
+esac
+
+if [[ "$IS_PUBLISH" -eq 0 ]]; then
+  # Not an MCP publish tool — treat as a Bash command and match git push / gh pr create.
+  CMD=""
+  if command -v jq >/dev/null 2>&1; then
+    CMD="$(printf '%s' "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  fi
+  if [[ -z "$CMD" ]] && command -v python3 >/dev/null 2>&1; then
+    CMD="$(printf '%s' "$HOOK_INPUT" | python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin)
     print((d.get("tool_input") or {}).get("command",""))
 except Exception:
     pass' 2>/dev/null || true)"
-fi
-if [[ -z "$CMD" ]]; then
-  # Fallback when neither jq nor python3 is on PATH (e.g. stock Windows Git Bash,
-  # which bundles neither). Without this the gate would silently fail open here.
-  # Best-effort sed extraction of tool_input.command — covers ordinary commands
-  # like `git push origin main`; a command containing an escaped quote may not
-  # extract, but such a command is not a push/PR-create anyway.
-  CMD="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  fi
+  if [[ -z "$CMD" ]]; then
+    # Fallback when neither jq nor python3 is on PATH (e.g. stock Windows Git Bash).
+    # Best-effort sed extraction of tool_input.command — covers ordinary commands
+    # like `git push origin main`.
+    CMD="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  fi
+  if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git[[:space:]]+push([[:space:]]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
+    IS_PUBLISH=1
+  fi
 fi
 
-if [[ -z "$CMD" ]]; then exit 0; fi
-
-# ---------- match only push / PR create ----------
-if ! printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git[[:space:]]+push([[:space:]]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
-  exit 0
-fi
+if [[ "$IS_PUBLISH" -eq 0 ]]; then exit 0; fi
 
 # ---------- branch check ----------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"

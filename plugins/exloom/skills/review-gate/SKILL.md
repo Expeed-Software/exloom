@@ -129,4 +129,4 @@ With the marker present, the hooks enforce the gate on every branch. Without it,
 - `/smoke-test` — fill the smoke-test section with real commands and observed output.
 - `/review-complete` — verify all required sections populated for the tier, run any missing reviewer agents, mark ready to ship.
 
-The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse(Bash)` hook refuses `git push` and `gh pr create` without it. Both honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.
+The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`) without it — so switching from the shell to the MCP integration doesn't bypass the gate. All honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.

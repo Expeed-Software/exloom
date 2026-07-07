@@ -77,7 +77,7 @@ New-Item -ItemType Directory -Force .claude | Out-Null
 New-Item -ItemType File -Force .claude/exloom-gate.enabled | Out-Null
 ```
 
-Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. The gate applies on feature branches only — work committed directly to `main`/`master`/`dev`/`develop` is deliberately not gated, so isolate onto a feature branch first (`exloom:isolating-execution`). It gates the CLI-git workflow (`git push`, `gh pr create`); an emergency bypass is available (`EXLOOM_REVIEW_SKIP=1` in your Claude Code session env).
+Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. The gate applies on feature branches only — work committed directly to `main`/`master`/`dev`/`develop` is deliberately not gated, so isolate onto a feature branch first (`exloom:isolating-execution`). It gates `git push` / `gh pr create` **and** the common GitHub MCP push/PR tools (`push_files`, `create_pull_request`, …), so switching to the MCP integration doesn't dodge it; a push through some other MCP server or raw API it doesn't recognize could still slip by. Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.
 
 ## Try the gate in 2 minutes
 
@@ -108,7 +108,7 @@ See [`plugins/exloom/`](plugins/exloom/).
 
 - exloom guides Claude with skills; only the gate **enforces**. Plan discipline, TDD, and review quality are strong defaults, not guarantees — turn the gate on for the part that genuinely can't be skipped.
 - The **security review** runs the scanners a repo has (secrets, dependency-vuln audit, static analysis) and reviews the diff for how AI code commonly fails — injection, missing authorization, secrets, weak crypto, hallucinated dependencies. It's a **first-pass aid, not a guarantee**: it never certifies code "secure," its coverage is only as good as the tools installed, and it doesn't replace SAST/DAST or a pentest for high-risk changes.
-- It reviews the change in front of it, not your whole codebase, and only the CLI-git path (`git push` / `gh pr create`) is gated.
+- It reviews the change in front of it, not your whole codebase. It gates `git push` / `gh pr create` plus the common GitHub MCP push/PR tools — but a push through some other MCP server or a raw API call it doesn't recognize could still slip by.
 - Claude Code only, for now.
 
 ## License
