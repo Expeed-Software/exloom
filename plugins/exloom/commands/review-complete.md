@@ -40,7 +40,7 @@ For each required section, check the literal text is not one of the placeholder 
 - `<exact command>`
 - `<exact steps>`
 - `<Critical / Important / Minor with file:line>`
-- `<description>`
+- `<expected-result>`
 - Empty after the header.
 
 If any placeholder remains, the section is NOT filled — list it as missing.

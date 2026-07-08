@@ -72,7 +72,9 @@ except Exception:
     # like `git push origin main`.
     CMD="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   fi
-  if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git[[:space:]]+push([[:space:]]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
+  # Match `git push` even with git global options between (git -C <p> push,
+  # git -c k=v push, git --no-pager push), and `gh pr create`.
+  if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git([[:space:]]+(-C|-c)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
     IS_PUBLISH=1
   fi
 fi
@@ -145,16 +147,25 @@ EOF
   exit 2
 fi
 
-# Placeholder text detection.
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
-if grep -Eq "$PLACEHOLDER_RE" "$CHECKLIST" || grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$' "$CHECKLIST"; then
+# Placeholder detection — scoped to the sections that apply to the declared tier,
+# so unfilled higher-tier sections on a lower-tier change are not falsely flagged,
+# and matched only against distinctive template tokens (not substrings of pasted
+# evidence like an XML <description> element).
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+P_TIER="$(grep -E '^\*\*Tier:\*\*' "$CHECKLIST" | head -1 | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
+[[ "$P_TIER" =~ ^[0-3]$ ]] || P_TIER=3
+P_DROP=''
+if   [[ "$P_TIER" -lt 1 ]]; then P_DROP='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
+elif [[ "$P_TIER" -lt 2 ]]; then P_DROP='^## (Cross-layer|Adversarial|Security review|Runbook)'
+elif [[ "$P_TIER" -lt 3 ]]; then P_DROP='^## (Security review|Runbook)'
+fi
+P_SCAN="$(awk -v drop="$P_DROP" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}' "$CHECKLIST")"
+if printf '%s' "$P_SCAN" | grep -Eq "$PLACEHOLDER_RE" || printf '%s' "$P_SCAN" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
   cat >&2 <<EOF
 exloom review gate: push BLOCKED
 
-Checklist at $CHECKLIST is marked complete but contains template placeholder
-text (e.g. <paste output / screenshot link>, unfilled date). The final verdict
-cannot stand on placeholders. Fill in the real evidence or revert the
-final-verdict ticks.
+A required section of $CHECKLIST still contains template placeholder text. Fill in
+the real evidence for the declared tier, or revert the final-verdict ticks.
 EOF
   exit 2
 fi

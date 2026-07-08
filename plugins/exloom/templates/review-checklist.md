@@ -17,7 +17,7 @@
 ## Smoke test (all tiers) — EVIDENCE REQUIRED
 - Boot command (including prerequisites): `<exact command>`
 - User action performed: `<exact steps>`
-- Expected observable result: `<description>`
+- Expected observable result: `<expected-result>`
 - Actual observed result: `<paste output / screenshot link>`
 - [ ] Test passed
 

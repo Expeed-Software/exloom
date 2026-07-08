@@ -5,7 +5,7 @@ description: Use when closing work — when claiming done / complete / ready / s
 
 # Review Gate
 
-**This is exloom's one enforced mechanism — the rest of exloom is discipline a model can skip.** Every other skill is guidance the model reads and *chooses* to follow, and sometimes it won't. This gate is different: when it is turned on, the `Stop` and `PreToolUse` hooks are run by the Claude Code harness — not by the model — and they *physically block* "done" and `git push` until the tier's evidence is in `.claude/reviews/<branch>.md`. That is the difference between *hoping* review happened and *guaranteeing* it did, and it is the part of exloom you cannot reproduce by prompting.
+**This is exloom's one enforced mechanism — the rest of exloom is discipline a model can skip.** Every other skill is guidance the model reads and *chooses* to follow, and sometimes it won't. This gate is different: when it is turned on, the `Stop` and `PreToolUse` hooks are run by the Claude Code harness — not by the model. The `PreToolUse` hook *physically blocks* a `git push` / PR (shell **and** GitHub MCP), and the `Stop` hook blocks a completion claim it recognizes, until the tier's evidence is in `.claude/reviews/<branch>.md`. That is the difference between *hoping* review happened and *guaranteeing* it did, and it is the part of exloom you cannot reproduce by prompting.
 
 ## Why this exists
 
@@ -138,4 +138,4 @@ It is **evidence, not compliance certification**, and a branch-level declaration
 - `/smoke-test` — fill the smoke-test section with real commands and observed output.
 - `/review-complete` — verify all required sections populated for the tier, run any missing reviewer agents, mark ready to ship.
 
-The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`) without it — so switching from the shell to the MCP integration doesn't bypass the gate. All honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.
+The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) without it — so switching from the shell to the MCP integration doesn't bypass the gate. All honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.

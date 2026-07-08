@@ -171,19 +171,25 @@ EOF
   exit 2
 fi
 
-# Placeholder detection.
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|description|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|file:line — problem[^>]*|category \+ file:line[^>]*|list[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
-if grep -Eq "$PLACEHOLDER_RE" "$CHECKLIST" || grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$' "$CHECKLIST"; then
+# Placeholder detection — scoped to the sections that apply to the declared tier,
+# so unfilled higher-tier sections on a lower-tier change are not falsely flagged,
+# and matched only against distinctive template tokens (not substrings of pasted
+# evidence like an XML <description> element).
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+P_TIER="$(grep -E '^\*\*Tier:\*\*' "$CHECKLIST" | head -1 | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
+[[ "$P_TIER" =~ ^[0-3]$ ]] || P_TIER=3
+P_DROP=''
+if   [[ "$P_TIER" -lt 1 ]]; then P_DROP='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
+elif [[ "$P_TIER" -lt 2 ]]; then P_DROP='^## (Cross-layer|Adversarial|Security review|Runbook)'
+elif [[ "$P_TIER" -lt 3 ]]; then P_DROP='^## (Security review|Runbook)'
+fi
+P_SCAN="$(awk -v drop="$P_DROP" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}' "$CHECKLIST")"
+if printf '%s' "$P_SCAN" | grep -Eq "$PLACEHOLDER_RE" || printf '%s' "$P_SCAN" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
   cat >&2 <<EOF
 exloom review gate: BLOCKED
 
-Checklist at $CHECKLIST still contains placeholder text from the template.
-Real evidence is required — fill in the actual commands, outputs, dates, and
-findings. The smoke test section in particular must have real boot command,
-user action, and observed output.
-
-Next step:
-  Run /smoke-test to capture real evidence, then /review-complete.
+A required section of $CHECKLIST still contains template placeholder text. Fill in
+the real evidence for the declared tier (e.g. run /smoke-test), then /review-complete.
 
 Bypass (emergency only, audited):
   EXLOOM_REVIEW_SKIP=1
