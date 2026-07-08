@@ -67,14 +67,19 @@ except Exception:
     pass' 2>/dev/null || true)"
   fi
   if [[ -z "$CMD" ]]; then
-    # Fallback when neither jq nor python3 is on PATH (e.g. stock Windows Git Bash).
-    # Best-effort sed extraction of tool_input.command — covers ordinary commands
-    # like `git push origin main`.
-    CMD="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    # No JSON parser on PATH (e.g. stock Windows Git Bash): detect the push in the
+    # RAW hook input rather than a sed-extracted substring — sed's [^"]* truncates
+    # at the first quote, which would let `commit -m "x" && git push` fail open.
+    CMD="$HOOK_INPUT"
   fi
-  # Match `git push` even with git global options between (git -C <p> push,
-  # git -c k=v push, git --no-pager push), and `gh pr create`.
-  if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git([[:space:]]+(-C|-c)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
+  # Collapse newlines and tabs so a multi-line or tabbed command still matches on
+  # one line. (A backslash line-continuation can still evade this — documented as a
+  # known limit; the gate is a cooperating-team tool, not an obfuscation-proof boundary.)
+  CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
+  # Match git push (allowing git global options) and gh pr create. The trailing
+  # boundary is any non-word char (`;`, `&`, `)`, `>`, …) or end-of-string, so
+  # `git push;`, `cd x && git push`, `(git push)` are all caught; `git pushx` is not.
+  if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])git([[:space:]]+(-C|-c)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+push([^[:alnum:]_]|$)|(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([^[:alnum:]_]|$)'; then
     IS_PUBLISH=1
   fi
 fi
@@ -151,9 +156,12 @@ fi
 # so unfilled higher-tier sections on a lower-tier change are not falsely flagged,
 # and matched only against distinctive template tokens (not substrings of pasted
 # evidence like an XML <description> element).
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
 P_TIER="$(grep -E '^\*\*Tier:\*\*' "$CHECKLIST" | head -1 | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
 [[ "$P_TIER" =~ ^[0-3]$ ]] || P_TIER=3
+# An unsubstituted template tier (`[0 | 1 | 2 | 3]`) parses as its first digit (0);
+# treat that placeholder as the strictest tier so nothing gets under-scanned.
+if grep -qE '^\*\*Tier:\*\*.*\|' "$CHECKLIST"; then P_TIER=3; fi
 P_DROP=''
 if   [[ "$P_TIER" -lt 1 ]]; then P_DROP='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
 elif [[ "$P_TIER" -lt 2 ]]; then P_DROP='^## (Cross-layer|Adversarial|Security review|Runbook)'
@@ -194,7 +202,7 @@ fi
 # HEAD is resolvable — fail open on genuine git/infra failure, never on content.
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
   REVIEWED_SHA="$(grep -E '^Reviewed code commit:' "$CHECKLIST" | head -1 | sed -E 's/^Reviewed code commit:[[:space:]]*//' | tr -d '[:space:]')"
-  if [[ -z "$REVIEWED_SHA" ]] || ! git rev-parse --verify "${REVIEWED_SHA}^{commit}" >/dev/null 2>&1; then
+  if [[ -z "$REVIEWED_SHA" ]] || ! [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || ! git rev-parse --verify "${REVIEWED_SHA}^{commit}" >/dev/null 2>&1; then
     cat >&2 <<EOF
 exloom review gate: push BLOCKED
 

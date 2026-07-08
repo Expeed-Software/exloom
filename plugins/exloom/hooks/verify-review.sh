@@ -48,7 +48,8 @@ if [[ -z "$TRANSCRIPT_PATH" ]]; then
   # Fallback when neither jq nor python3 is on PATH: best-effort sed extraction.
   # Resolves POSIX-style transcript paths (Linux/macOS). Windows paths arrive with
   # escaped backslashes and won't resolve here, so on Windows install jq or python3
-  # for the Stop hook — the push hook is the hard gate regardless.
+  # for the Stop hook — the push hook is the primary gate (it matches the common
+  # push/PR forms even without jq/python3, though obfuscated commands can evade text-matching).
   TRANSCRIPT_PATH="$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 fi
 
@@ -175,9 +176,12 @@ fi
 # so unfilled higher-tier sections on a lower-tier change are not falsely flagged,
 # and matched only against distinctive template tokens (not substrings of pasted
 # evidence like an XML <description> element).
-PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+PLACEHOLDER_RE='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|log excerpt or link|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
 P_TIER="$(grep -E '^\*\*Tier:\*\*' "$CHECKLIST" | head -1 | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
 [[ "$P_TIER" =~ ^[0-3]$ ]] || P_TIER=3
+# An unsubstituted template tier (`[0 | 1 | 2 | 3]`) parses as its first digit (0);
+# treat that placeholder as the strictest tier so nothing gets under-scanned.
+if grep -qE '^\*\*Tier:\*\*.*\|' "$CHECKLIST"; then P_TIER=3; fi
 P_DROP=''
 if   [[ "$P_TIER" -lt 1 ]]; then P_DROP='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
 elif [[ "$P_TIER" -lt 2 ]]; then P_DROP='^## (Cross-layer|Adversarial|Security review|Runbook)'
@@ -220,7 +224,7 @@ fi
 # HEAD is resolvable — fail open on genuine git/infra failure, never on content.
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
   REVIEWED_SHA="$(grep -E '^Reviewed code commit:' "$CHECKLIST" | head -1 | sed -E 's/^Reviewed code commit:[[:space:]]*//' | tr -d '[:space:]')"
-  if [[ -z "$REVIEWED_SHA" ]] || ! git rev-parse --verify "${REVIEWED_SHA}^{commit}" >/dev/null 2>&1; then
+  if [[ -z "$REVIEWED_SHA" ]] || ! [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || ! git rev-parse --verify "${REVIEWED_SHA}^{commit}" >/dev/null 2>&1; then
     cat >&2 <<EOF
 exloom review gate: BLOCKED
 
