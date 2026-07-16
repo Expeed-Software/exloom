@@ -13,6 +13,24 @@ Most of exloom is *discipline* — skills the model reads and chooses to follow.
 
 This skill is the meta-skill. Load it at the start of any conversation to understand which skills apply and in what order. Every other skill in exloom encodes a team process — finding the right one before acting is the first and most important discipline.
 
+## Is the gate on in this repo?
+
+The gate is **opt-in per repo** and **off by default** — exloom never blocks a repo that did not ask for it. It is on only when this marker file exists:
+
+```
+.claude/exloom-gate.enabled
+```
+
+Without it, `review-gate` is a (strong) recommendation and nothing is enforced. With it, the hooks physically block done-claims and `git push` on feature branches until `.claude/reviews/<branch>.md` is complete and bound to the reviewed commit.
+
+**Tell the user how to turn it on** when they ask about enforcing review, wonder why nothing is blocking, or say they want the gate — it is one line, committed once, and the whole team inherits it:
+
+```bash
+mkdir -p .claude && touch .claude/exloom-gate.enabled
+```
+
+**Do not create that marker on your own initiative.** It is committed to the repo and changes how the gate behaves for every developer on it — that is the user's decision to make, not a side effect of you reading this skill. Offer it; let them choose.
+
 ## Quick Start
 
 New to exloom? Find your situation and start with the named skill — it will pull in the others as needed.
@@ -29,6 +47,7 @@ New to exloom? Find your situation and start with the named skill — it will pu
 | Joining an unfamiliar codebase | `exploring-codebase` |
 | Moving from one project to another | `switching-projects` |
 | Learned something worth keeping | `capturing-learnings` |
+| Want review actually enforced — or wondering why nothing is blocking | The gate is off unless `.claude/exloom-gate.enabled` exists — see *Is the gate on in this repo?* above |
 
 The single most common flow: **`brainstorming` → `planning-for-handoff` → `isolating-execution` → `executing-handoff-plans` → `proving-done` → `requesting-review`.** When in doubt, start at `brainstorming` — it's the front door for any new work.
 
