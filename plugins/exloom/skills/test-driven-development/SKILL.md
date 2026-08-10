@@ -7,13 +7,9 @@ description: Use when implementing any feature or bugfix — write the failing t
 
 ## Overview
 
-TDD is a design technique, not a testing technique. When you write the test first, you are forced to think about the interface before the implementation. You design the API by consuming it before building it. The test becomes the first client of your code, and that client's needs shape the public surface. If the test is awkward to write, the API is awkward to use — and you discover this before you've committed to an implementation, not after. This is why TDD produces better APIs than implementation-first development: the feedback loop is immediate and the cost of change is zero.
+TDD is a design technique, not a testing technique. Writing the test first forces you to design the interface before the implementation: the test is your code's first client, and if the test is awkward to write, the API is awkward to use — you learn that before committing to an implementation, when the cost of change is still zero.
 
-Why teams resist: it feels slower. And it IS slower for the first 30 minutes. You're writing code that doesn't exist yet, watching it fail, writing the minimum to pass, watching it go green, then cleaning up. It feels like busywork compared to just writing the function. Then you hit the 30-hour mark — the part where non-TDD teams are debugging, reworking, guessing what the code should do, and manually testing in a browser. The TDD team is shipping. The upfront cost pays for itself many times over, and the payoff starts earlier than most people expect.
-
-The inconsistency problem is what kills organizations at scale. Some teams do TDD, some don't. TDD teams produce code that is testable by design — small functions, injected dependencies, clear interfaces. Non-TDD teams produce code that is hard to test after the fact because testability was never a design constraint. This creates a quality gap that widens with every sprint. The untested code becomes the code nobody wants to touch, which becomes the code that breaks in production, which becomes the code that gets a "rewrite" ticket that sits in the backlog for two years.
-
-This skill makes the case AND teaches the practice. It walks through the full Red-Green-Refactor cycle with real examples, addresses the situations where TDD genuinely doesn't apply, and covers the hardest scenario: applying TDD to brownfield code where nothing is tested yet. Not dogmatic — see Decision Points for when to skip it. But the default is: test first. You need a reason not to, not a reason to start. The goal is not 100% TDD adoption — it's making test-first the natural way of working, so that writing code without a test feels as uncomfortable as deploying without a review.
+Default to test-first: you need a reason NOT to write the test first, not a reason to. This skill teaches the full Red-Green-Refactor cycle, the cases where TDD genuinely doesn't apply (see Decision Points), and the hardest case — applying it to brownfield code where nothing is tested yet.
 
 ## The Cycle
 

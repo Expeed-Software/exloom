@@ -7,19 +7,15 @@ description: Use when you have a spec or requirements for a multi-step task — 
 
 ## Overview
 
-A plan is a contract between two people: the author who understands the problem and the executor who will solve it. If the only person who can execute your plan is you, you have not written a plan — you have written a note to yourself. Notes to yourself are fine for groceries. They are not fine for engineering work that blocks other people, costs real money, and ships to production.
+A plan is a contract between two people: the author who understands the problem and the executor who will solve it.
 
-The test is simple and absolute: hand your plan to a skilled developer who has never seen this codebase. Can they execute it start to finish without sending you a single Slack message? If the answer is no, the plan is not done. Every "they'll figure it out" is a question that will come back to you at the worst possible time — when you are asleep, on vacation, or deep in something else.
+The test is simple and absolute: hand your plan to a skilled developer who has never seen this codebase. Can they execute it start to finish without sending you a single Slack message? If the answer is no, the plan is not done.
 
-Teams learn this the hard way. Author writes a plan on Friday, leaves for a week. Executor picks it up Monday, spends two days reverse-engineering what the author meant by "update the relevant service" and "add appropriate error handling." By Wednesday, the executor has either guessed wrong or blocked the entire sprint waiting for answers. The plan did not save time. It moved the work from one person to two people and added a communication bottleneck.
-
-Even if you are executing your own plan — solo path, no handoff — the same rigor applies. Future-you is a different person. Future-you does not remember why you chose that approach, which file had the pattern you wanted to follow, or what edge cases you considered and dismissed. Plans written for yourself decay faster than you think. Write every plan as if the executor is a stranger, because in three weeks, they are.
-
-At team and org scale — many developers across many codebases — the plan is often the only communication channel between the person who designed the solution and the person who builds it. A vague plan at this scale does not just slow down one person; it creates a ripple of blocked dependencies, misaligned implementations, and review cycles that could have been avoided with 30 more minutes of planning precision.
+Even if you are executing your own plan — solo path, no handoff — the same rigor applies. Future-you does not remember why you chose that approach, which file had the pattern you wanted to follow, or what edge cases you considered and dismissed. Write every plan as if the executor is a stranger.
 
 ## Process
 
-Follow these 9 steps in order. Do not skip steps — each one exists because skipping it causes specific, predictable failures described in the Failure Modes section below. The time investment is front-loaded by design: 30-60 minutes of precise planning saves days of confused execution.
+Follow these 9 steps in order. Do not skip steps — each one exists because skipping it causes specific, predictable failures described in the Failure Modes section below.
 
 **Where the plan lives.** Save the plan where this repo keeps plans: if the repo's CLAUDE.md (or the user) specifies a location — e.g. `.claude/plans/current.md` — use that; otherwise default to `docs/exloom/plans/YYYY-MM-DD-<topic>-plan.md`. Commit it so it is reviewable and so `exloom:reviewing-plans`, `exloom:executing-handoff-plans`, and `exloom:auditing-plan-fidelity` can find it.
 

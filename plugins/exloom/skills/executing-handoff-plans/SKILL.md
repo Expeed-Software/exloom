@@ -7,19 +7,17 @@ description: Use when you have a written plan to execute — runs tasks in order
 
 ## Overview
 
-Execution is not implementation. Implementation is writing code. Execution is following a plan while writing code. The difference is discipline. Anyone can write code that solves a problem. The hard part is writing code that solves the problem in the way the team agreed upon, documented, and will later audit against. This skill exists because the gap between "I built it" and "I built what we planned" is where teams lose trust, context, and time.
+Execution is not implementation. Implementation is writing code. Execution is following a plan while writing code. The difference is discipline: writing code that solves the problem in the way the team agreed upon, documented, and will later audit against.
 
-The defining rule: **flag deviations, don't improvise.** When reality diverges from the plan — a file has moved, a dependency behaves differently, a pattern in the codebase contradicts the plan's assumption — the correct response is to log the deviation and pause. Not to figure it out. Not to pick the option that seems reasonable. Log it, describe it precisely, and wait for the author to decide. The executor's judgment is not the issue. The issue is that unlogged decisions are invisible decisions, and invisible decisions cannot be reviewed, audited, or learned from.
+The defining rule: **flag deviations, don't improvise.** When reality diverges from the plan — a file has moved, a dependency behaves differently, a pattern in the codebase contradicts the plan's assumption — the correct response is to log the deviation and pause. Not to figure it out. Not to pick the option that seems reasonable. Log it, describe it precisely, and wait for the author to decide. Unlogged decisions are invisible decisions, and invisible decisions cannot be reviewed, audited, or learned from.
 
-Why this matters for teams: unlogged improvisation creates drift. The code stops matching the plan. The reviewer reads the plan expecting one thing and finds another. Future developers reading the plan to understand why a decision was made get a false picture. Over time, plans become documents nobody trusts because "the code always ends up different anyway." That erosion of trust is expensive. It means every plan requires more oversight, every review takes longer, and institutional knowledge degrades. Disciplined execution is what makes plans worth writing in the first place.
-
-This skill works whether you wrote the plan yourself or picked it up from someone else. The rules are identical. In fact, executing someone else's plan is the better test of execution discipline — you cannot fall back on "I know what I meant." You only have what the plan says. When a whole team operates this way, plans become reliable contracts. Anyone can pick up anyone else's plan and execute it with confidence that the result will match the author's intent — because the process enforces it.
+This skill works whether you wrote the plan yourself or picked it up from someone else. The rules are identical. Executing someone else's plan is the better test of execution discipline — you cannot fall back on "I know what I meant." You only have what the plan says.
 
 ## Process
 
 ### Before Starting
 
-Do not begin execution until all four preconditions are satisfied. Skipping any of them is how execution goes sideways in the first hour. These are not optional hygiene steps — they are the foundation that makes disciplined execution possible. An executor who starts without reading the full plan is guessing. An executor who starts on an ambiguous plan is improvising. Neither produces auditable work.
+Do not begin execution until all four preconditions are satisfied. Skipping any of them is how execution goes sideways in the first hour.
 
 **1. Read the plan in full.**
 

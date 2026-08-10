@@ -7,11 +7,9 @@ description: Use when opening a pull request or marking work ready for review �
 
 ## Overview
 
-A pull request is a communication artifact, not a code dump. Its purpose is to tell the reviewer four things: what changed, why it changed, how it works, and how you know it is correct. If the reviewer has to reconstruct any of those from the diff alone, the PR body has failed its job. The diff shows what lines moved — it cannot show intent, tradeoffs, or the alternatives you considered and rejected.
+A pull request body tells the reviewer four things: what changed, why it changed, how it works, and how you know it is correct. The diff shows what lines moved — it cannot show intent, tradeoffs, or the alternatives you considered and rejected. Front-load that context so the reviewer evaluates the change instead of reconstructing it.
 
-Reviewer time is the scarcest resource in any engineering team. A PR body that says "fixed the bug" forces the reviewer to spend 30 minutes rebuilding context that the author already had. That is not a review — it is archaeology. A well-prepared PR body front-loads the context so the reviewer can spend their time evaluating the change, not deciphering it.
-
-The team-level failure mode is predictable: poor PR descriptions lead to surface-level reviews. The reviewer skims because there is no context to anchor deep review. They check formatting, maybe naming, and approve. Issues that should be caught — wrong assumptions, missed edge cases, architectural drift — pass through. Over time, the team learns that reviews do not catch real problems, so they invest less in reviewing. The feedback loop degrades until code review is pure ceremony. The PR body is not bureaucracy. It is the mechanism that makes code review actually work.
+This skill defines the six-section PR body, when to split large PRs, when to use drafts, and the author's responsibilities after opening.
 
 ---
 
@@ -19,7 +17,7 @@ The team-level failure mode is predictable: poor PR descriptions lead to surface
 
 ### Prerequisites
 
-Before opening a PR, every one of these must be true. If any is false, fix it first — do not open the PR and plan to fix it later. A PR opened before it is ready trains reviewers to delay looking at your PRs.
+Before opening a PR, every one of these must be true. If any is false, fix it first — do not open the PR and plan to fix it later.
 
 - **`exloom:proving-done` has run.** The verification output exists and contains test evidence. This is not optional. The test evidence in the PR body comes directly from verification output — you do not re-run or reconstruct it.
 - **All tests pass.** The test suite is green. If tests fail for reasons unrelated to this change, that context belongs in the PR body explicitly — but the default expectation is a clean run.
@@ -161,7 +159,7 @@ The specific time windows below (the 24-hour response expectation, the 3-day dra
 
 ## Splitting Large PRs
 
-Large PRs get worse reviews. After ~400 lines, reviewer fatigue sets in — attention drops, critical issues pass through, and approval becomes "I skimmed it and nothing jumped out." Splitting is not about making reviewers happy. It is about getting reviews that actually catch problems.
+Split PRs larger than ~400 lines changed. Past that threshold, reviewer attention drops and critical issues pass through.
 
 **How to split — in order of preference:**
 
@@ -335,6 +333,4 @@ This skill sits between verification and review in your org's development workfl
 **Related:**
 - `exloom:reviewing-code` — defines the review categories the reviewer applies to the PR you open here.
 
-**If no plan existed:** This skill still applies in full. The PR body structure is the same — the Plan and Deviations sections simply state that no plan existed and give a one-sentence scope description. The absence of a plan does not mean the absence of structure. Every PR gets the same six sections regardless of whether a plan existed.
-
-**Key principle:** The PR body is a gift to your reviewer. The five minutes you spend writing it saves them thirty minutes of context reconstruction — and produces a review that actually catches problems.
+**If no plan existed:** This skill still applies in full. The PR body structure is the same — the Plan and Deviations sections simply state that no plan existed and give a one-sentence scope description. Every PR gets the same six sections regardless of whether a plan existed.

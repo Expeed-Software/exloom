@@ -7,34 +7,9 @@ description: Use before any creative work — creating features, building compon
 
 ## Overview
 
-The cost of skipping brainstorming is rework. The first idea is rarely the best
-idea, and code is the most expensive medium to discover that in. A feature built
-on an unexamined assumption works fine until it doesn't — and by then the cost
-of correction includes not just the code change but the tests, the deployments,
-the downstream consumers who adapted to the wrong behavior, and the team members
-who built on top of it. Brainstorming is the cheapest place to be wrong. A wrong
-sentence in a spec costs seconds to fix. A wrong abstraction in production costs
-weeks.
-
-Developers skip brainstorming because it feels like delay. "I already know what
-to build" is the most dangerous sentence in software engineering. That certainty
-is not evidence of correctness — it is evidence that you haven't stress-tested
-the idea. The developer who is most certain they don't need brainstorming is the
-one who needs it most. If you're right, the process is quick and
-confirms your instincts. If you're wrong, it catches the mistake before a single
-line of code exists. Either way, you come out with a shared artifact the team
-can reference, review, and build on. (How long "quick" is scales with
-complexity — see the table below; it is minutes for a simple change, not a
-fixed quota.)
-
-The team failure mode is duplication. Developer A builds a notification system
-without brainstorming. It works. But if they had explored the codebase first,
-they would have found that Developer B built an event-alerting system six months
-ago that does 80% of what they need. Now two systems do similar things,
-maintained by different people, with different bugs and different interfaces.
-The team pays for this duplication forever — in maintenance, in onboarding
-confusion, in integration friction. Brainstorming that starts with "what already
-exists?" prevents this entirely.
+Brainstorming explores intent, requirements, and design before implementation.
+It runs before any code exists — the depth scales with complexity (see the table
+below; minutes for a simple change, not a fixed quota).
 
 This is brownfield-aware brainstorming. Generic brainstorming asks "what should
 we build?" This skill asks "what already exists, and what is the minimum we need

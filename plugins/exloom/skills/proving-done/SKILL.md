@@ -7,13 +7,9 @@ description: Use before saying work is done, fixed, passing, or ready to ship (a
 
 ## Overview
 
-"Done" is a claim that requires evidence. Not a feeling. Not "I think tests pass." Not "it worked on my machine." Evidence means you ran the commands, read the output, and can show the receipts. Without evidence, "done" is just optimism with a keyboard. Every time a developer says "done" without having run the verification commands, they are making a bet — betting that nothing they missed will be caught by someone else. That bet loses more often than anyone is comfortable admitting.
+"Done" is a claim that requires evidence: you ran the commands, read the output, and can show the receipts — not a feeling, not "I think tests pass," not "it worked on my machine."
 
-The cost of premature "done" is brutal and it compounds across a team. You announce completion. The reviewer finds issues in ten minutes that you could have found in two. The PR gets sent back. You context-switch away from whatever you moved on to, reload the mental model of the code you have already moved past, fix the issues, push again, and wait for another review cycle. That single round-trip costs ten times more than catching it yourself before you ever opened the PR. Multiply that across a whole team, each person making this mistake a few times a month, and entire weeks of engineering capacity evaporate into rework that should never have been necessary.
-
-Why do developers skip verification? Because they are tired after implementing. The feature works. The tests pass. Verification feels like bureaucracy bolted onto the end of real work. But the tired developer who just finished a complex implementation is exactly the person most likely to miss something. Fatigue degrades attention. Confidence after a successful implementation creates blind spots. That is exactly who needs the checklist. The checklist does not get tired. It does not assume. It does not skip steps because it is confident.
-
-This is the pre-flight checklist for code. Pilots do not skip preflight because they have flown a thousand times. Surgeons do not skip the surgical checklist because they have done this operation before. The checklist exists precisely because experienced professionals still make errors when they rely on memory and intuition under fatigue. The more experienced you are, the more you trust the checklist — because experience teaches you how often memory fails when you are certain it will not.
+This skill is an eight-item checklist to run before claiming work is complete, fixed, passing, or ready to ship. Each item specifies what to check, how to check it, and what bad looks like.
 
 ## The Checklist
 
@@ -21,7 +17,7 @@ Run all eight items before claiming completion. Each item specifies what to chec
 
 The examples below use Java/Spring commands (`./gradlew`, `checkstyle`, `application.yml`) because they are concrete, but the checklist is stack-agnostic — substitute your stack's equivalents (`npm test`/`eslint`, `pytest`/`ruff`, `go test`/`go vet`, `cargo test`/`clippy`). The eight items apply to backend, frontend, mobile, and infrastructure work alike.
 
-Some items overlap with upstream skills by design — item 4 (plan deviations) revisits territory from `exloom:executing-handoff-plans`, and item 5 (edge cases) revisits `exloom:planning-for-handoff`. This is intentional, and it is not busywork if those skills were used: when the deviation log is already complete and the edge cases were already decided, these items are 30-second confirmations, not redo-work. They exist as a final net to catch what slipped through — work done without a plan, a deviation logged hastily, an edge case the plan never considered. If an item is genuinely already covered, confirm it and move on; the cost of confirming is seconds, the cost of a gap reaching production is not.
+Some items overlap with upstream skills by design — item 4 (plan deviations) revisits territory from `exloom:executing-handoff-plans`, and item 5 (edge cases) revisits `exloom:planning-for-handoff`. When the deviation log is already complete and the edge cases were already decided, these items are 30-second confirmations, not redo-work. They exist as a final net to catch what slipped through — work done without a plan, a deviation logged hastily, an edge case the plan never considered. If an item is genuinely already covered, confirm it and move on.
 
 ### 1. Re-read every modified file
 
@@ -153,7 +149,7 @@ If the rating is below 8, report the score and the specific gaps to the user bef
 
 ## Evidence Format
 
-Evidence is the difference between "I verified the work" and "I can prove I verified the work." This skill requires proof. Claims without proof are not accepted, no matter how confident the claim sounds. The standard format for all verification evidence is:
+This skill requires proof, not claims. Claims without proof are not accepted, no matter how confident the claim sounds. The standard format for all verification evidence is:
 
 ```
 <command> exited <exit code>. <quantitative summary>.

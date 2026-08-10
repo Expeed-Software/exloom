@@ -7,7 +7,7 @@ description: Use when joining an unfamiliar repo or before making non-trivial ch
 
 ## Overview
 
-Jumping into an unfamiliar repo without a mental model is how developers introduce bugs in the wrong layer, duplicate logic that already exists, or violate conventions they didn't know about. This skill produces a structured mental model before any code changes begin.
+This skill produces a structured mental model before any code changes begin.
 
 The output is a Markdown document — saved to `.claude/project-notes.md` — that gives you and your Claude Code sessions a working map of the repo, so future sessions start from it instead of re-exploring from scratch. Team-level facts that belong to everyone (architecture, conventions, gotchas) get promoted into the repo's committed `CLAUDE.md`; the personal notes file is your own working memory. See the Save Location section for how to split the two.
 
@@ -115,7 +115,7 @@ Note what triggers a deployment, what environments exist, and whether there are 
 
 ### Step 8: Produce Mental Model Document
 
-Compile everything into `.claude/project-notes.md` using the structure below. Then split it by audience: the team-level sections — **Stack, Core Components, Data Flow, Tests, Configuration, Deploy, Gotchas** — are durable facts every developer on this repo needs, so promote them into the repo's committed `CLAUDE.md` (run `exloom:authoring-claude-md` if it's missing or thin). Keep only your personal working notes — open questions, "look at X next," tentative impressions — in the gitignored `project-notes.md`. The template produces the full picture; the promotion step is what delivers the team-thesis payoff rather than burying the map in a private file.
+Compile everything into `.claude/project-notes.md` using the structure below. Then split it by audience: the team-level sections — **Stack, Core Components, Data Flow, Tests, Configuration, Deploy, Gotchas** — are durable facts every developer on this repo needs, so promote them into the repo's committed `CLAUDE.md` (run `exloom:authoring-claude-md` if it's missing or thin). Keep only your personal working notes — open questions, "look at X next," tentative impressions — in the gitignored `project-notes.md`.
 
 Structure:
 
@@ -170,12 +170,12 @@ _Last updated: [date] | Explored by: [author]_
 
 Write the document to `.claude/project-notes.md` in the repo root. Create the `.claude/` directory if it doesn't exist.
 
-There is a real tension here, and the right default depends on what you found. The two destinations serve different purposes:
+The two destinations serve different purposes:
 
-- **Durable, team-level facts** — architecture, conventions, entry points, gotchas that every developer on this repo needs — belong in `CLAUDE.md`, committed and shared. This is the team-thesis payoff: one person explores, everyone benefits, and Claude Code surfaces it automatically in every future session. If `CLAUDE.md` is thin or missing, run `exloom:authoring-claude-md` and route these findings there.
+- **Durable, team-level facts** — architecture, conventions, entry points, gotchas that every developer on this repo needs — belong in `CLAUDE.md`, committed and shared. If `CLAUDE.md` is thin or missing, run `exloom:authoring-claude-md` and route these findings there.
 - **Personal working memory** — your own scratch notes, half-formed questions, "I should look at X next" reminders — belong in `.claude/project-notes.md`, gitignored, because they are yours and would be noise to others.
 
-So the resolution to the apparent contradiction: the *valuable shared map* goes in `CLAUDE.md` (committed); `project-notes.md` is only for the personal residue that does not belong in shared docs. Add `.claude/project-notes.md` to `.gitignore` if the repo has one.
+Add `.claude/project-notes.md` to `.gitignore` if the repo has one.
 
 Exception: if the team explicitly wants a committed exploration document distinct from `CLAUDE.md` (for example, a longer architecture walkthrough), save to `docs/project-notes.md` and commit it.
 

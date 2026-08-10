@@ -7,19 +7,15 @@ description: Use when encountering any bug, test failure, or unexpected behavior
 
 ## Overview
 
-The average guess-and-patch debugging session burns three hours of scattered changes, console.log archaeology, and "let me try one more thing" before someone finally reads the stack trace. Systematic isolation takes thirty minutes. The math is not close, and yet guess-and-patch remains the default because it occasionally works on the first try. That intermittent reinforcement is exactly what makes it so persistent and so expensive across a team.
+The single discipline: find the root cause before writing fix code. Not after. Not simultaneously. Before. The process is deliberately sequential because the most common debugging error is skipping ahead to a fix before understanding the problem.
 
-The team cost is worse than the individual cost. When one developer patches a symptom, the root cause stays alive. It resurfaces weeks later in a different form, and the next developer has even less context. They guess too. Now you have two patches, zero understanding, and a codebase that resists reasoning. Multiply this across a large engineering organization and you get entire subsystems that nobody will touch because "it works but nobody knows why." The organizational debt compounds silently until a production incident forces a painful reckoning.
-
-This skill enforces a single discipline: find the root cause before writing fix code. Not after. Not simultaneously. Before. Every step exists to prevent the specific failure modes that teams actually hit — not textbook advice, but the mistakes we have seen senior engineers make under deadline pressure. The process is deliberately sequential because the most common debugging error is skipping ahead to a fix before understanding the problem.
-
-The process applies to every class of defect: logic errors that produce wrong output, performance regressions that make things slow, integration failures where services disagree, flaky tests that pass "most of the time," and data corruption that only shows up downstream. The steps are identical. The evidence bar is identical. There are no shortcuts for "simple" bugs because the bugs that look simple are the ones that get patched incorrectly — and the cost of a wrong fix compounds: the patch, the reopened ticket, the second investigation, the real fix, and the eroded trust.
+The process applies to every class of defect: logic errors that produce wrong output, performance regressions that make things slow, integration failures where services disagree, flaky tests that pass "most of the time," and data corruption that only shows up downstream. The steps are identical. The evidence bar is identical. There are no shortcuts for "simple" bugs because the bugs that look simple are the ones that get patched incorrectly.
 
 ## Process
 
 Follow these seven steps in order. Do not skip to step 5 because the fix seems obvious — skipping steps is how wrong fixes get committed with confidence.
 
-As a rough feel, a well-scoped bug often resolves in well under an hour — but this varies enormously by bug, and the number is illustrative, not a standard you are failing if you exceed it. A gnarly concurrency or cross-service bug can legitimately take a day. The useful signal is not the clock but progress: if you have cycled through hypotheses several times with no narrowing, you are stuck at step 3 or 4 and should consult the Decision Points section below. Time spent in steps 1-4 is not overhead — it is the work. The fix itself (step 5) is usually the shortest step.
+The useful signal for progress is not the clock but narrowing: if you have cycled through hypotheses several times with no narrowing, you are stuck at step 3 or 4 and should consult the Decision Points section below.
 
 ### Step 1: Reproduce reliably
 
@@ -142,7 +138,7 @@ When a bug spans multiple services, the standard 7-step process still applies �
 
 ## Failure Modes
 
-These are the six most common ways debugging goes wrong in practice. Each one is a pattern you will recognize in yourself or your teammates — these are not junior mistakes, they are human defaults that affect engineers at every level. The descriptions are specific because vague warnings ("be careful") do not change behavior — recognizing the exact thought pattern in the moment, as it happens, is what gives you the chance to correct course before the cost compounds.
+These are the six most common ways debugging goes wrong in practice. Each is a thought pattern to recognize in the moment, as it happens, so you can correct course before the cost compounds.
 
 ### 1. "Let me just try this"
 

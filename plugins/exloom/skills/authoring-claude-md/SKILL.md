@@ -7,7 +7,7 @@ description: Use when scaffolding or updating a repo's CLAUDE.md — auto-detect
 
 ## Overview
 
-CLAUDE.md is the single most impactful file for AI-assisted development. It tells Claude what the project is, how it builds and runs, what conventions the team follows, and what patterns to use. Without it, Claude guesses — and guesses inconsistently across sessions, across developers, across tasks. With a well-authored CLAUDE.md, every developer on the team gets Claude that matches their project's actual patterns from the first prompt.
+CLAUDE.md tells Claude what the project is, how it builds and runs, what conventions the team follows, and what patterns to use.
 
 This skill operates in two primary modes: **greenfield** (new repo, template-based, fast) and **brownfield** (existing repo, inference-based, respects what's already there). A third mode, **update**, handles repos that already have a CLAUDE.md. In all three modes, the baselines are layered in — but only where they are compatible with what the codebase already does.
 

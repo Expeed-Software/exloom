@@ -7,9 +7,7 @@ description: Use when a developer is moving from one project to another — load
 
 ## Overview
 
-Developers move between projects regularly. Context switching is expensive — not because skills don't transfer, but because every project has its own conventions, stack quirks, and gotchas. Applying the wrong project's conventions is a common source of avoidable review comments.
-
-This skill is lighter than onboarding. It assumes you already know how to write code and focuses on one thing: the delta. What is different about this new project compared to the last one you were on?
+Every project has its own conventions, stack quirks, and gotchas; applying the previous project's conventions is a common source of avoidable review comments. This skill is lighter than onboarding — it assumes you can already write code and focuses on one thing: the delta between the project you were on and the new one.
 
 The output is a delta report — a table that puts old and new side by side, with explicit "watch out for" notes for the gaps most likely to trip you up.
 

@@ -7,9 +7,7 @@ description: Use whenever a team learns something new — a gotcha, a convention
 
 ## Overview
 
-Knowledge that lives only in people's heads leaves when people leave. Knowledge captured in the right place becomes part of how the whole team works — surfaced automatically by Claude Code in future sessions, applied consistently across the whole team.
-
-This skill is the feedback loop that keeps exloom alive and relevant. Every real-world learning — a gotcha in a specific framework, an incident that revealed a missing convention, a pattern that turned out to work well — gets routed to the right durable location automatically.
+Every real-world learning — a gotcha in a specific framework, an incident that revealed a missing convention, a pattern that turned out to work well — gets routed to the right durable location.
 
 The skill's job is not to write documentation. It is to ask: "Where does this belong so that it helps the right people at the right time?"
 

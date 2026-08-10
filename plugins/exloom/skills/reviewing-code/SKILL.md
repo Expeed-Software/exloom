@@ -7,13 +7,9 @@ description: Use when reviewing a pull request or someone else's code — applie
 
 ## Overview
 
-A code review is a collaboration between reviewer and author, not a gate where one person proves the other wrong. The reviewer's job is to catch what the author could not — the blindness that comes from having written the code yourself. The author knows the intent; the reviewer brings fresh eyes, knowledge of adjacent systems, and perspective on long-term maintenance. When both sides understand this, reviews become one of the most effective quality tools a team has.
+A code review answers two questions: is the implementation correct, and is it consistent with the rest of the codebase. The reviewer's job is to catch what the author could not — the blind spots that come from having written the code yourself.
 
-The consistency problem is real and measurable. Without a checklist, reviews are personality-dependent. One reviewer fixates on style. Another cares only about architecture. A third reviews nothing but tests. The result is that the same PR gets meaningfully different scrutiny depending on who draws the review. A checklist does not make reviews mechanical — it makes coverage reliable. Every category gets checked every time, regardless of who reviews.
-
-The severity problem is equally damaging. Without calibration, every comment from a reviewer feels like "you must fix this." Authors cannot distinguish a blocking defect from a style preference, so they either over-react to every comment or learn to ignore them all. Severity ratings solve this by making the reviewer's intent explicit. A Blocker means "this cannot merge." A Nit means "your call entirely." The author's judgment is respected on minor items, and the reviewer's authority is preserved for items that matter.
-
-Reviews are worth the investment only when done consistently and with calibrated severity. A rubber-stamp "LGTM" catches nothing. A review where every comment is a blocker exhausts the author and erodes trust. The goal is the middle ground: thorough, fair, calibrated.
+This skill applies two mechanisms for consistency across a team: a checklist, so every category gets checked every time regardless of who reviews, and severity ratings, so the author can distinguish a blocking defect (Blocker: "this cannot merge") from a style preference (Nit: "your call entirely"). It covers the review process, severity calibration, output format, reviewing AI-assisted code, and handling disagreements.
 
 ## Process
 
@@ -77,7 +73,7 @@ Do not use the approval to signal agreement with every line of code. Use it to s
 
 ## Severity Calibration
 
-This section is the single most important section for team consistency. Every review comment must include a severity. This is not optional and not a suggestion — it is a requirement of your org's review process. Untagged comments force authors to guess whether they need to act, which leads to either over-reacting to suggestions or under-reacting to defects. Severity turns implicit expectations into explicit signals.
+Every review comment must include a severity. This is a requirement of your org's review process, not a suggestion — untagged comments force authors to guess whether they need to act.
 
 ### Blocker
 
@@ -206,7 +202,7 @@ The review checklist is the same for AI and human code. The difference is where 
 
 ## Handling Disagreements
 
-Disagreements during code review are normal, expected, and healthy. The way they are handled determines whether the review process builds trust or erodes it over time. A team that handles disagreements well produces better code than a team where the reviewer always wins or the author always capitulates.
+Disagreements during code review are normal. Handle them as follows:
 
 **Author pushes back on a Blocker** — A Blocker requires evidence, not authority. If the author disagrees that it is a production risk, discuss the specific scenario. Provide evidence: a reproduction path, a realistic input that triggers the issue, a code path that leads to the failure. If you cannot demonstrate the risk concretely, reconsider the severity — perhaps it is Major, not Blocker. If you still disagree after discussion, bring in a third person familiar with the system. Do not escalate to a stronger position out of frustration.
 
@@ -242,7 +238,7 @@ Use this table as a quick reference for common review situations. The full reaso
 
 ## Failure Modes
 
-These are the five most common ways reviews fail. Each one feels reasonable in the moment, which is exactly why they persist. Recognizing the thought pattern is the first step to correcting it.
+These are the five most common ways reviews fail. Each one feels reasonable in the moment, which is exactly why they persist.
 
 ### 1. "Looks good to me" (LGTM without reading)
 

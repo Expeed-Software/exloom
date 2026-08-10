@@ -7,13 +7,12 @@ description: Use when reviewing a change for security before shipping — especi
 
 ## Overview
 
-Of everything a review can check, security is the one that matters most for
-AI-assisted code — and the one exloom's other gates barely touch. AI-generated
-code fails in specific, repeatable security ways: it hardcodes secrets,
-concatenates user input into queries and shells, forgets the authorization check
-its neighbors have, deserializes untrusted data, and imports dependencies that
-are vulnerable or do not exist. And developers over-trust generated code, so these
-flaws ship. This review exists to catch them before they do.
+AI-generated code fails in specific, repeatable security ways: it hardcodes
+secrets, concatenates user input into queries and shells, forgets the
+authorization check its neighbors have, deserializes untrusted data, and imports
+dependencies that are vulnerable or do not exist — and generated code tends to be
+over-trusted, so these flaws ship. This review catches them before they do; it is
+the security surface exloom's other gates barely touch.
 
 It is deliberately **evidence-based, not vibes-based**: it runs the security tools
 that exist in the repo and pastes their real output, then reviews the diff against

@@ -9,13 +9,13 @@ description: Use for UI design and development tasks — guides design-first, ac
 
 This skill guides design-first UI development — the discipline of thinking about what you're building and why before writing component code. It covers design thinking, accessibility, visual fundamentals, and the process of building consistent UI across teams — with or without a formal design system.
 
-**Why this is a team skill, not a generic UI guide.** Most teams have no dedicated designer, and many products have no formal design system — yet many developers ship UI into the same product. Left alone, that produces drift: fifteen shades of blue, buttons that don't match, inconsistent spacing, accessibility gaps. The differentiating value here is not the universal fundamentals (typography, color, motion) — those are a shared *baseline* so the whole team converges instead of each inventing their own. The team-specific payoff is the **"Building Consistency Without a Design System"** process: extract the conventions the codebase already has, keep new work inside them, and let developers review UI without a designer in the loop. If you only read one section for the team angle, read that one. The fundamentals are the floor; the consistency process is the point.
+The universal fundamentals (typography, color, motion) are a shared *baseline* so the whole team converges instead of each inventing their own. The **"Building Consistency Without a Design System"** process is the core: extract the conventions the codebase already has, keep new work inside them, and let developers review UI without a designer in the loop.
 
 **Brownfield rule:** If the project has an established design system, component library, or style guide, follow it. Do not introduce new patterns, colors, spacing, or component variants without explicit approval. The guidance below applies to new projects or where the project has no established visual direction.
 
 ## Design Thinking — Before You Code
 
-Before writing any component code, answer these questions. Write the answers down (in a spec, a comment, or a message to the user). Skipping this step is how you end up with generic, forgettable interfaces.
+Before writing any component code, answer these questions. Write the answers down (in a spec, a comment, or a message to the user).
 
 ### 1. Purpose
 
@@ -72,14 +72,14 @@ Target WCAG 2.1 AA compliance as a minimum. This is not optional regardless of p
 
 ## Visual Fundamentals (shared baseline)
 
-These are the conventions every developer should default to so work converges instead of drifting — a baseline, not a manifesto. If the project already establishes different values, follow the project. The team value is consistency, so the concrete specifics below matter more than the theory; kept deliberately short.
+These are the conventions to default to so work converges instead of drifting. If the project already establishes different values, follow the project.
 
 - **Typography.** At most two fonts (one display, one body); avoid forgettable defaults when custom fonts are allowed. Define a 4-6 step type scale as tokens (hero/h1/h2/body/caption). Line height ~1.4-1.6 body, ~1.1-1.2 headings.
 - **Color.** A small, purposeful palette as semantic tokens (`primary`, `error`, `success`, `surface`, `text`); roughly 60% dominant / 30% secondary / 10% accent. For dark mode, redesign the palette rather than inverting — avoid pure white on pure black, distinguish elevation with subtle surface shifts.
 - **Layout & spacing.** Grid/Flexbox, never floats. A consistent spacing scale as tokens (4/8/12/16/24/32/48/64). Mobile-first with `min-width` queries; let content, not device widths, drive breakpoints. Use whitespace deliberately.
 - **Motion.** Animate state changes, entrances, and micro-interactions — not critical content the user is waiting on, and never when `prefers-reduced-motion: reduce` is set. Use `transform`/`opacity` (no layout reflow); short durations (150-300ms micro, 300-500ms transitions); `ease-out` in, `ease-in` out.
 
-All of the above live as tokens in whatever your stack uses — SCSS variables or a theme file in Angular, `tailwind.config` in Tailwind, CSS custom properties otherwise. The high-value, team-specific work is not memorizing these fundamentals but *extracting and enforcing* a project's actual values — see "Building Consistency Without a Design System" below.
+All of the above live as tokens in whatever your stack uses — SCSS variables or a theme file in Angular, `tailwind.config` in Tailwind, CSS custom properties otherwise. For *extracting and enforcing* a project's actual values, see "Building Consistency Without a Design System" below.
 
 ## Design-First Workflow
 

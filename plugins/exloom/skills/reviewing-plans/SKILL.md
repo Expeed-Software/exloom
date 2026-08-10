@@ -7,11 +7,9 @@ description: Use before handing off a plan to someone else — verifies the plan
 
 ## Overview
 
-This skill is the approval gate between plan authorship and plan execution. The central question it answers: "Can someone who doesn't know what the author was thinking execute this plan without ambiguity?" If the answer is anything other than an unqualified yes, the plan goes back to the author. There is no middle ground. A plan that is "mostly clear" will produce execution that is "mostly right," and mostly right is how rework starts.
+This skill is the approval gate between plan authorship and plan execution. The central question it answers: "Can someone who doesn't know what the author was thinking execute this plan without ambiguity?" If the answer is anything other than an unqualified yes, the plan goes back to the author. There is no middle ground.
 
-Why this matters at team scale: an unreviewed plan that gets handed off wastes the executor's time in ways that compound. They hit an ambiguity, make their best guess, build on that guess for three more tasks, and then discover in code review that the guess was wrong. The rework isn't one task — it's the entire chain built on top of it. Twenty minutes of plan review prevents two days of confused execution. The return on investment is not close.
-
-This skill also applies to self-review. Before you execute your own complex plan, run it through the full checklist. You will find gaps you missed while writing, because writing mode and review mode activate different thinking. When you wrote the plan, you had full context. When you execute it tomorrow — or next week — you won't. Review your plan as if a stranger will execute it, because future-you is that stranger.
+This skill also applies to self-review. Before you execute your own complex plan, run it through the full checklist — review it as if a stranger will execute it, because future-you (executing it next week without today's full context) is that stranger.
 
 The review is deliberately not about whether the plan is a good idea. That question was settled during brainstorming and design. This review is strictly about executability: Is every section present? Is every criterion testable? Is every file path real? Can the executor finish the work without coming back to ask questions? That is the only bar. If you find yourself evaluating the technical approach rather than the plan's clarity, you have shifted into the wrong mode — refocus on executability.
 

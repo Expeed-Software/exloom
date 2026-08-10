@@ -9,11 +9,7 @@ description: Use after plan execution and before code review — compares the ac
 
 Given a plan and the git diff of the work that claims to implement it, this skill answers: was the plan followed? What deviated? Was every deviation justified and recorded? The output is a structured audit report that becomes the first artifact a code reviewer sees before reading a single line of code.
 
-Why this matters for teams: plans are contracts. When a team agrees on an approach, acceptance criteria, and a file-change scope, that agreement is only as valuable as its enforcement. If execution silently deviates from the plan, the plan becomes fiction. Future developers reading it get a false picture of what was decided and why. Over time, teams stop trusting plans entirely, and the planning process collapses into ceremony.
-
-This skill is the bridge between execution and code review. The code reviewer needs to know: did the executor follow the plan, or did they improvise? Without an audit step, code review catches quality issues but misses structural drift. A reviewer might approve clean, well-tested code that solves a different problem than the one the team agreed on. The audit separates "is this code good?" from "is this the code we planned?"
-
-This is not a punishment mechanism. It is a learning mechanism. Deviations teach the team where plans are weak, where estimation was off, where requirements were ambiguous, and where the codebase surprised the executor. A high-deviation audit is a signal to route to `exloom:capturing-learnings`, not a reason to blame the executor.
+This skill runs between execution and code review. It separates "is this code good?" (code review) from "is this the code we planned?" (this audit). A high-deviation audit is a signal to route to `exloom:capturing-learnings` — it is a learning mechanism, not a punishment mechanism.
 
 ## Process
 
@@ -124,7 +120,7 @@ Then look for unlisted deviations: files changed that are not in the plan AND no
 
 Cross-reference Step 1's "Unplanned + Changed" files against the Deviation Log entries. Every unplanned file should have a corresponding log entry. Every "Planned + Unchanged" file should also have an entry explaining why it was skipped. Any gap between the file audit and the deviation log is a finding.
 
-Silent drift is the highest-severity finding. It means the executor changed the scope of the work — added files, dropped requirements, altered behavior — without any record. The team's understanding of what was built is now inaccurate. This is different from a logged deviation, which is a deliberate, transparent decision. Silent drift is what causes "the code doesn't match what we discussed" conversations weeks later.
+Silent drift is the highest-severity finding. This is different from a logged deviation, which is a deliberate, transparent decision.
 
 ### Step 4: Produce Audit Report
 
@@ -203,7 +199,7 @@ Use exactly one verdict line, not all three. The three options above are the pos
 
 ## Failure Modes
 
-These are the most common ways auditors get the audit wrong. Each follows the same pattern: a plausible-sounding shortcut that undermines the audit's purpose. Recognizing these patterns in yourself is the difference between a useful audit and a rubber stamp.
+These are the most common ways auditors get the audit wrong. Each follows the same pattern: a plausible-sounding shortcut that undermines the audit's purpose.
 
 **1. "The diff is small, the plan was followed."**
 The thought pattern is: small diff means small scope means nothing could have drifted. This feels right because volume is a proxy for complexity. But small diffs can hide significant deviations. A one-line change in an unplanned file is drift. A missing file that was supposed to be created is an unmet criterion. Audit systematically by comparing lists, not by estimating risk from diff size. Correction: run every step regardless of diff size. The steps are fast on small diffs anyway.
@@ -280,8 +276,6 @@ Blockers before code review can proceed:
 4. Re-run this audit after the deviation log is updated or the implementation is corrected.
 
 Note what a Pass would have looked like here: if the executor had logged "Dropped Redis in favor of in-memory Map because the staging environment has no Redis instance and the rate limiter needs to work in local dev. Will revisit for production multi-instance deployment," that would be a complete deviation log entry. The verdict would shift to Pass with notes, and the reviewer would know to evaluate the tradeoff rather than discovering it by accident in the diff.
-
-This example demonstrates the core value of the audit: the Redis-to-memory change is not inherently wrong. It might be the right call for the current deployment. But without a record, nobody knows it was a conscious decision. Six months from now, when the team deploys to multiple instances and rate limiting stops working, nobody will remember that this was an intentional tradeoff rather than an oversight. The deviation log prevents that scenario.
 
 ## Integration
 
