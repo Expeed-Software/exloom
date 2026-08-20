@@ -123,6 +123,35 @@ run allow "create a non-Test-Case work item" \
   'az boards work-item create --type "User Story" --title "Some story" --org https://dev.azure.com/acme'
 
 echo ""
+echo "-- reads must never be blocked (regression: live false positive 2026-08-20) --"
+run allow "WIQL POST is a read despite the POST method" \
+  'curl -s -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "{\"query\":\"SELECT [System.Id] FROM WorkItems\"}" https://dev.azure.com/acme/proj/_apis/wit/wiql?api-version=7.1'
+run allow "GET on the workitems endpoint" \
+  'curl -s -H "Authorization: Bearer $T" "https://dev.azure.com/acme/proj/_apis/wit/workitems?ids=1,2&api-version=7.1"'
+run allow "compound: WIQL POST then GET workitems in one command" \
+  'curl -s -X POST -d "{}" https://dev.azure.com/acme/proj/_apis/wit/wiql?api-version=7.1 -o /tmp/a.json; curl -s "https://dev.azure.com/acme/proj/_apis/wit/workitems?ids=1&api-version=7.1"'
+run deny "compound: a read followed by an unapproved Test Case create" \
+  'az boards work-item show --id 1 --org https://dev.azure.com/acme && az boards work-item create --type "Test Case" --title "x" --fields "System.Tags=exloom-qa:24501:TC-099"'
+
+echo ""
+echo "-- linking must not be blocked (it is how publishing links cases) --"
+run allow "relation add (tests link)" \
+  'az boards work-item relation add --id 24132 --relation-type "tests" --target-id 24501 --org https://dev.azure.com/acme'
+run deny "relation remove" \
+  'az boards work-item relation remove --id 24132 --relation-type "tests" --target-id 24501 --org https://dev.azure.com/acme --yes'
+
+echo ""
+echo "-- prose is not a command (regression: a commit message was blocked) --"
+run allow "commit message describing the gate" \
+  'git commit -m "fix: az boards work-item relation add carries no exloom-qa:24501:TC-007 tag, so the gate denied it"'
+run allow "documentation mentioning a create command" \
+  'echo "- run: az boards work-item create --type \"Test Case\" --fields System.Tags=exloom-qa:1:TC-1" >> NOTES.md'
+run allow "grep for the command in source" \
+  'grep -rn "az boards work-item create" plugins/'
+run deny "a real create still denied when prefixed by an env assignment" \
+  'ORG=https://dev.azure.com/acme az boards work-item create --type "Test Case" --title "x" --fields "System.Tags=exloom-qa:24501:TC-099"'
+
+echo ""
 echo "-- bypass --"
 set +e
 printf '%s' "$(CMD_ENV="$TC_CREATE" python3 -c '

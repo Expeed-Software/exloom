@@ -48,8 +48,47 @@ except Exception:
     pass' 2>/dev/null || true)"
   fi
   [[ -z "$cmd" ]] && cmd="$json"
-  cmd="${cmd//$'\n'/ }"; cmd="${cmd//$'\t'/ }"
   printf '%s' "$cmd"
+}
+
+# Split a shell command into segments on newline, ; && || and |, IGNORING those
+# characters when they appear inside quotes. Quote-awareness is not optional:
+# a Test Case tag value is "exloom-qa:24501; exloom-qa:24501:TC-007; Negative",
+# so a naive split on ';' severs the tag from its own command and the gate then
+# denies a properly tagged, approved case.
+# Without python3, emit the command unsplit — coarser, and fail-closed.
+exloomqa_segments() {
+  local cmd="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    CMD_ENV="$cmd" python3 -c '
+import os
+s = os.environ.get("CMD_ENV", "")
+DQ, SQ = chr(34), chr(39)
+out, cur, q, i = [], [], None, 0
+while i < len(s):
+    c = s[i]
+    if q:
+        cur.append(c)
+        if c == q:
+            q = None
+        i += 1
+        continue
+    if c in (DQ, SQ):
+        q = c; cur.append(c); i += 1; continue
+    if s[i:i+2] in ("&&", "||"):
+        out.append("".join(cur)); cur = []; i += 2; continue
+    if c in (chr(10), ";", "|"):
+        out.append("".join(cur)); cur = []; i += 1; continue
+    cur.append(c); i += 1
+out.append("".join(cur))
+for seg in out:
+    seg = seg.strip()
+    if seg:
+        print(seg)
+' 2>/dev/null
+  else
+    printf '%s\n' "$cmd"
+  fi
 }
 
 # ---------- artifact location ----------
