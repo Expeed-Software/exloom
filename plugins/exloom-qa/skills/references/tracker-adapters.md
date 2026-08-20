@@ -33,7 +33,9 @@ Read-only only. `fetch_story` is the sole permitted operation. No creates, no up
 
 ## Steps XML
 
-`Microsoft.VSTS.TCM.Steps` holds an XML blob. One `<step>` per test step; the first `parameterizedString` is the action, the second is the expected result. Inner HTML is entity-escaped.
+`Microsoft.VSTS.TCM.Steps` holds an XML blob. One `<step>` per row; the first `parameterizedString` is the action, the second is the expected result. Inner HTML is entity-escaped.
+
+Row order: `Precondition:` first, then `Test data:`, then the test steps. Those two leading rows carry an **empty** expected result — `<parameterizedString isformatted="true"/>` — because nothing is being asserted yet. Omit either row when the case has none.
 
 ```xml
 <steps id="0" last="3">
@@ -49,7 +51,27 @@ Rules:
 - Step `id` starts at **2** and increments by 1.
 - `last` is the final step id.
 - Escape `<`, `>`, `&`, and `"` inside the text as `&lt;` `&gt;` `&amp;` `&quot;`.
-- The whole blob is a single `--fields` value; quote it so the shell passes it intact.
+
+**Never inline the XML into a double-quoted `--fields` argument.** The attribute values contain `"`, which closes the shell's own quote, and the attributes arrive stripped:
+
+```
+<steps id=0 last=2><step id=2 type=ActionStep>     <-- invalid XML
+```
+
+Azure DevOps accepts that string without complaint and then cannot parse it, so the Steps grid renders **empty**. The test case looks published and carries no steps.
+
+Build the payload in a **single-quoted** variable, then pass the variable:
+
+```bash
+STEPS='<steps id="0" last="3"><step id="2" type="ActionStep">…</step></steps>'
+az boards work-item create --type "Test Case" --title "$TITLE" \
+  --org "$ORG" --project "$PROJECT" \
+  --fields "Microsoft.VSTS.TCM.Steps=$STEPS" "Microsoft.VSTS.Common.Priority=$PRI" "System.Tags=$TAGS"
+```
+
+Single quotes protect the `"` characters; `"$STEPS"` then expands without re-parsing them. A literal `'` cannot appear inside the payload — escape apostrophes in step text as `&apos;`.
+
+**Verify after creating**, before moving to the next case: read the work item back and confirm `Microsoft.VSTS.TCM.Steps` still contains `id="0"` **with quotes**. If the quotes are gone, the steps are lost — fix the command and update the case rather than publishing the rest the same way.
 
 Verified working: angle brackets, entities, quotes, and `=` inside XML attributes all survive shell and CLI parsing.
 
