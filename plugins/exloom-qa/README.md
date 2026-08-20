@@ -15,18 +15,80 @@ The QA-side sibling of [exloom](../exloom/README.md).
 
 ## Setup
 
-Three one-time steps. There is **no MCP server to configure** and no personal access token to create.
+There is **no MCP server to configure** and **no personal access token to create**. The plugin uses the board access you already have — if you can write test cases by hand, you can run this.
+
+You need three things: the **Azure CLI** with its `azure-devops` extension, **Python**, and **bash** (already present on Windows via Git Bash, which is what Claude Code runs hooks in).
+
+### 1. Azure CLI
+
+If `az version` already works, skip ahead.
+
+The official MSI installer, and `winget install Microsoft.AzureCLI`, both **require administrator rights**. If you have them, use the installer.
+
+**Without admin rights**, install Python first and get the CLI through pip — this covers the Python requirement at the same time:
 
 ```
-az login --tenant <your-org-tenant>
+winget install Python.Python.3.12
+```
+
+Open a **new terminal** (the installer updates PATH; existing windows won't see it), then:
+
+```
+python -m pip install --user azure-cli
+```
+
+This takes a few minutes and prints warnings like *"The script … is installed in `C:\Users\<you>\AppData\Roaming\Python\Python312\Scripts` which is not on PATH"*. That is expected — note that directory and add it to your **user** PATH, in PowerShell:
+
+```powershell
+$u = [Environment]::GetEnvironmentVariable("Path","User")
+[Environment]::SetEnvironmentVariable("Path", "$u;C:\Users\<you>\AppData\Roaming\Python\Python312\Scripts", "User")
+```
+
+Read the User value first rather than using `$env:Path`. `$env:Path` also contains the machine PATH, and writing that into the user PATH copies every system entry into it.
+
+Open another new terminal and confirm:
+
+```
+az version
+```
+
+### 2. The Azure DevOps extension
+
+```
 az extension add --name azure-devops
 ```
 
-> **Watch the tenant.** If your `az` session is on the wrong tenant, Azure DevOps does not return a clear
-> "not authorized" error — it returns a **302 redirect to a sign-in page**, which surfaces as an odd HTML
-> response or a silent failure. If board calls behave strangely, check `az account show` before anything else.
+### 3. Sign in
 
-The plugin uses whatever board access you already have. If you can write test cases by hand, you can run this.
+```
+az login --allow-no-subscriptions
+```
+
+**`--allow-no-subscriptions` matters.** Azure DevOps access and Azure *subscription* access are different things, and most QA engineers have the first without the second. Plain `az login` insists on finding a subscription and fails with *"No subscriptions found for …"* even though your board access is fine.
+
+If your account belongs to more than one tenant, name the one that owns the Azure DevOps organisation:
+
+```
+az login --allow-no-subscriptions --tenant <tenant-id>
+```
+
+### 4. Prove it
+
+The login output is not the test — a board call is:
+
+```
+az boards work-item show --id <any work item id> --org https://dev.azure.com/<your-org>
+```
+
+If the work item comes back, you are set up.
+
+### If something goes wrong
+
+**Board calls behave strangely, or return HTML.** Your `az` session is probably on the wrong tenant. Azure DevOps does not return a clear "not authorized" — it returns a **302 redirect to a sign-in page**, which surfaces as odd output or a silent failure. Check `az account show` and re-run `az login` with the right `--tenant`.
+
+**`python3` says "Python was not found; run without arguments to install from the Microsoft Store".** That is a Windows App Execution Alias stub, not your Python. Installs from winget and python.org provide `python` but not `python3`. The plugin handles this — it resolves the interpreter by running it rather than by name — so `python` alone is fine. To silence the stub: Settings → Apps → Advanced app settings → App execution aliases.
+
+**`az: command not found` right after installing.** Either the Scripts directory is not on PATH (step 1), or the terminal predates the PATH change. Open a new one.
 
 ## What it does
 

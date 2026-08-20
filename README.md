@@ -34,7 +34,7 @@ Turns an Azure DevOps user story into reviewed, traceable, human-executable manu
 /plugin install exloom-qa@exloom
 ```
 
-**Requires** the `az` CLI with the `azure-devops` extension. No MCP server, no personal access token. → [details](plugins/exloom-qa/)
+**Requires** the `az` CLI with the `azure-devops` extension, plus Python. No MCP server, no personal access token — and no admin rights, if you install both through pip. → [setup](plugins/exloom-qa/#setup)
 
 ## How the plugins relate
 
