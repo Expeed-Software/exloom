@@ -9,20 +9,24 @@ Produce a confirmed context block in `.claude/qa/<story-id>.md`. Generation does
 
 ## 1. Get the identifiers
 
-Accept either form:
+**The work item ID is all you need.** IDs are unique across the organisation, so the project is not required to fetch a story — it is read from the story itself and used later for publishing.
 
-**A work item URL** — the usual case, because QA is already looking at the story and copies the address bar. Parse organisation, project, and ID from it:
+QA usually pastes a URL — from the board, a backlog, a sprint taskboard, a query result, or the item itself. Do not try to recognise each shape. Take the number:
+
+- the `workitem=` query parameter when present,
+- otherwise the numeric segment following `_workitems/edit/` (a trailing slash is not part of the ID).
 
 ```
-https://dev.azure.com/<org>/<project>/_workitems/edit/<id>
-https://<org>.visualstudio.com/<project>/_workitems/edit/<id>
+…/_workitems/edit/24073/                                          -> 24073
+…/_boards/board/t/apptor-webhook%20Team/Stories?workitem=24073    -> 24073
+…/_backlogs/backlog/apptor-webhook%20Team/Stories?workitem=23471  -> 23471
 ```
 
-Both may carry query strings; ignore them. A URL is the preferred input — project and ID come from one string, so they cannot disagree.
+A bare ID is equally fine. The organisation comes from `az` defaults, or from the URL host when working across organisations.
 
-**Project name and work item ID stated separately** — also fine.
+Never search for the story, never list projects, never fetch unrelated items. The scope of a run is exactly one story.
 
-Ask only for what is genuinely missing. Never search for the story, never list projects, never fetch unrelated items. The scope of a run is exactly one story.
+**Echo what you resolved** — `24073 — Provider self-signup UX (apptor-webhook)` — before doing anything else. This is what makes an unrecognised URL shape harmless: either QA sees the right story named back, or they correct you immediately. It costs one line and removes the need to anticipate every URL form.
 
 ## 2. Fetch the story
 
@@ -30,7 +34,7 @@ Ask only for what is genuinely missing. Never search for the story, never list p
 
 Extract: ID, title, description, acceptance criteria, state, and any existing links.
 
-**Verify the project before using anything.** Work-item IDs are unique per organisation, not per project, and `az boards work-item show` takes no project argument — it will return a story from a different project without complaint. Compare `System.TeamProject` against the project QA named. If they differ, stop and report both; do not continue. A story from the wrong project yields a fully plausible test set for the wrong feature, and no later step catches it.
+**Record `System.TeamProject`** — this is the project, taken from the story rather than asked for. Publishing creates the test cases there, and every create passes it explicitly. Never rely on the `az` configured default project; it is set per machine and is frequently some unrelated project.
 
 ## 3. Number the acceptance criteria — and show the numbering
 

@@ -15,13 +15,13 @@ Azure DevOps only in v1, via the `az` CLI. No MCP server. Organization and proje
 
 `--relation-type` is lowercase `tests`; it maps to `Microsoft.VSTS.Common.TestedBy-Reverse`. One call writes both sides — the story gains a `Tested By` link automatically.
 
-## Work-item IDs are organisation-wide, not project-scoped
+## The project comes from the story, never from the user
 
-`az boards work-item show --id N` resolves N across the **whole organisation**. It does not take a project, and it will silently return an item belonging to a different project. WIQL behaves the same way: a query sent to a project endpoint still searches org-wide unless it filters on `[System.TeamProject]`.
+`az boards work-item show --id N` resolves N across the **whole organisation**, so the ID alone is enough to fetch. Read `System.TeamProject` off the result — that is the project, and it is the one publishing uses.
 
-So after `fetch_story`, **compare `System.TeamProject` against the project QA named**. If they differ, stop and report both values — do not generate against it. A story fetched from the wrong project produces a plausible, entirely wrong test set, and nothing downstream would reveal the mistake.
+**Always pass `--project` explicitly on create.** Without it `az` falls back to its configured default project, which is set per machine and is routinely some unrelated project. Test cases would land on the wrong board, and Test Cases cannot be deleted through the work-item API.
 
-Any WIQL query must filter explicitly:
+Any WIQL query must filter explicitly, since a query sent to a project endpoint still searches org-wide:
 
 ```
 SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND ...
