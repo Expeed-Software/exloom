@@ -9,7 +9,20 @@ Produce a confirmed context block in `.claude/qa/<story-id>.md`. Generation does
 
 ## 1. Get the identifiers
 
-Need project name and work item ID. Ask if either is missing. Never search for the story, never list projects, never fetch unrelated items.
+Accept either form:
+
+**A work item URL** — the usual case, because QA is already looking at the story and copies the address bar. Parse organisation, project, and ID from it:
+
+```
+https://dev.azure.com/<org>/<project>/_workitems/edit/<id>
+https://<org>.visualstudio.com/<project>/_workitems/edit/<id>
+```
+
+Both may carry query strings; ignore them. A URL is the preferred input — project and ID come from one string, so they cannot disagree.
+
+**Project name and work item ID stated separately** — also fine.
+
+Ask only for what is genuinely missing. Never search for the story, never list projects, never fetch unrelated items. The scope of a run is exactly one story.
 
 ## 2. Fetch the story
 
