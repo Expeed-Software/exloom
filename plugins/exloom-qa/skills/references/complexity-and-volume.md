@@ -7,9 +7,11 @@ Assess complexity **before** generating. State the tier and the reason in the ar
 | Tier | Signals | Band |
 |---|---|---|
 | **Trivial** | Label, text, or config change; single field; no business rule; no dependency; 1–2 AC | **3–8** |
-| **Simple** | One screen; ≤3 AC; no integration; at most one dependency | **12–20** |
-| **Typical** | Multi-field form or a workflow; some dependencies; one or two roles | **25–40** |
-| **Complex** | Multiple roles, integrations, or a state machine; cross-module effects | **40–60** |
+| **Simple** | One screen; ≤3 AC; no integration; at most one dependency | **9–20** |
+| **Typical** | Multi-field form or a workflow; some dependencies; one or two roles | **21–40** |
+| **Complex** | Multiple roles, integrations, or a state machine; cross-module effects | **41–60** |
+
+The bands are contiguous by design: every count from 3 to 60 falls in exactly one tier, so a set is never left between bands with no tier that fits it.
 
 When signals straddle two tiers, take the lower one and say so. QA can override the assessment; the override stands for the rest of the run.
 
