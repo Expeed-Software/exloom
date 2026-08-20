@@ -12,14 +12,41 @@
 # No git. The working folder may be an ordinary directory. Artifacts are keyed
 # by story ID, never by branch, and nothing here shells out to git.
 
-# ---------- JSON field extraction (jq -> python3 -> sed) ----------
+# ---------- resolve a usable Python ----------
+# Do not assume the name `python3`. Windows installs from winget and python.org
+# provide `python` but NOT `python3`, and Windows ships a `python3` App
+# Execution Alias stub that prints "Python was not found…" instead of running
+# anything. A `command -v python3` check therefore succeeds on a machine with no
+# usable Python, and fails on a machine that has one.
+#
+# So the name is never trusted: each candidate is asked to execute something and
+# is accepted only if the right answer comes back. Echoes the working command,
+# or returns non-zero when there is none.
+EXLOOMQA_PY=""
+exloomqa_python() {
+  if [[ -n "$EXLOOMQA_PY" ]]; then printf '%s' "$EXLOOMQA_PY"; return 0; fi
+  local candidate
+  for candidate in python3 python; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if [[ "$("$candidate" -c 'print(1)' 2>/dev/null)" == "1" ]]; then
+      EXLOOMQA_PY="$candidate"
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ---------- JSON field extraction (jq -> python -> sed) ----------
 exloomqa_json_field() {
   local json="$1" field="$2" out=""
   if command -v jq >/dev/null 2>&1; then
     out="$(printf '%s' "$json" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null || true)"
   fi
-  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
-    out="$(printf '%s' "$json" | FIELD="$field" python3 -c 'import json,os,sys
+  local py
+  py="$(exloomqa_python || true)"
+  if [[ -z "$out" && -n "$py" ]]; then
+    out="$(printf '%s' "$json" | FIELD="$field" "$py" -c 'import json,os,sys
 try:
     print(json.load(sys.stdin).get(os.environ["FIELD"],""))
 except Exception:
@@ -39,8 +66,10 @@ exloomqa_command() {
   if command -v jq >/dev/null 2>&1; then
     cmd="$(printf '%s' "$json" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
   fi
-  if [[ -z "$cmd" ]] && command -v python3 >/dev/null 2>&1; then
-    cmd="$(printf '%s' "$json" | python3 -c 'import json,sys
+  local py
+  py="$(exloomqa_python || true)"
+  if [[ -z "$cmd" && -n "$py" ]]; then
+    cmd="$(printf '%s' "$json" | "$py" -c 'import json,sys
 try:
     d=json.load(sys.stdin)
     print((d.get("tool_input") or {}).get("command",""))
@@ -56,11 +85,12 @@ except Exception:
 # a Test Case tag value is "exloom-qa:24501; exloom-qa:24501:TC-007; Negative",
 # so a naive split on ';' severs the tag from its own command and the gate then
 # denies a properly tagged, approved case.
-# Without python3, emit the command unsplit — coarser, and fail-closed.
+# Without a usable Python, emit the command unsplit — coarser, and fail-closed.
 exloomqa_segments() {
-  local cmd="$1"
-  if command -v python3 >/dev/null 2>&1; then
-    CMD_ENV="$cmd" python3 -c '
+  local cmd="$1" py
+  py="$(exloomqa_python || true)"
+  if [[ -n "$py" ]]; then
+    CMD_ENV="$cmd" "$py" -c '
 import os
 s = os.environ.get("CMD_ENV", "")
 DQ, SQ = chr(34), chr(39)
@@ -120,7 +150,12 @@ exloomqa_is_approved() {
   line="$(awk '/^## Approval Record/{f=1;next} /^## /{f=0} f' "$artifact" \
           | grep -iE '^[[:space:]]*Approved:' | head -1)"
   [[ -n "$line" ]] || return 1
-  ARTIFACT_APPROVED_LINE="$line" TC="$tc" python3 -c '
+  local py
+  if ! py="$(exloomqa_python)"; then
+    echo "exloom-qa: no usable Python found (tried python3, python) — cannot read the approval record, so the write is denied. Install Python, or run the publish by hand." >&2
+    return 1
+  fi
+  ARTIFACT_APPROVED_LINE="$line" TC="$tc" "$py" -c '
 import os, re, sys
 line = os.environ["ARTIFACT_APPROVED_LINE"]
 want = int(re.sub(r"\D", "", os.environ["TC"]) or -1)

@@ -22,11 +22,20 @@ WRAPPED="You have exloom-qa — a QA workflow that turns a user story into revie
 
 ${CONTENT}"
 
+# Resolve Python by execution, not by name — see lib.sh for why `python3` cannot
+# be trusted on Windows.
+PY=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && [[ "$("$candidate" -c 'print(1)' 2>/dev/null)" == "1" ]]; then
+    PY="$candidate"; break
+  fi
+done
+
 if command -v jq >/dev/null 2>&1; then
   jq -n --arg c "$WRAPPED" \
     '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
-elif command -v python3 >/dev/null 2>&1; then
-  CONTENT_ENV="$WRAPPED" python3 -c '
+elif [[ -n "$PY" ]]; then
+  CONTENT_ENV="$WRAPPED" "$PY" -c '
 import json, os
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
       "additionalContext": os.environ.get("CONTENT_ENV","")}}))'

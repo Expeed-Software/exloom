@@ -10,6 +10,21 @@
 set -u
 
 HOOK="plugins/exloom-qa/hooks/block-unapproved-publish.sh"
+
+# Resolve Python the same way the hook does — by execution, not by name. On
+# Windows `python3` is often an App Execution Alias stub that passes a
+# `command -v` check and then refuses to run anything.
+PY=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && [[ "$("$candidate" -c 'print(1)' 2>/dev/null)" == "1" ]]; then
+    PY="$candidate"; break
+  fi
+done
+if [[ -z "$PY" ]]; then
+  echo "FAIL: no usable Python found (tried python3, python) — cannot run these tests"
+  exit 1
+fi
+
 FIX="$(mktemp -d)"
 trap 'rm -rf "$FIX"' EXIT
 mkdir -p "$FIX/.claude/qa"
@@ -21,7 +36,7 @@ FAIL=0
 run() {
   local expect="$1" name="$2" cmd="$3" rc
   local json
-  json="$(CMD_ENV="$cmd" python3 -c '
+  json="$(CMD_ENV="$cmd" "$PY" -c '
 import json, os
 print(json.dumps({"tool_name": "Bash", "tool_input": {"command": os.environ["CMD_ENV"]}}))')"
   set +e
@@ -154,7 +169,7 @@ run deny "a real create still denied when prefixed by an env assignment" \
 echo ""
 echo "-- bypass --"
 set +e
-printf '%s' "$(CMD_ENV="$TC_CREATE" python3 -c '
+printf '%s' "$(CMD_ENV="$TC_CREATE" "$PY" -c '
 import json, os
 print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["CMD_ENV"]}}))')" \
   | CLAUDE_PROJECT_DIR="$(mktemp -d)" EXLOOM_QA_SKIP=1 bash "$HOOK" >/dev/null 2>&1
