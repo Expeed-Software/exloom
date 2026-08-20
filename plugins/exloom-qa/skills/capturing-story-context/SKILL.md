@@ -17,6 +17,8 @@ Need project name and work item ID. Ask if either is missing. Never search for t
 
 Extract: ID, title, description, acceptance criteria, state, and any existing links.
 
+**Verify the project before using anything.** Work-item IDs are unique per organisation, not per project, and `az boards work-item show` takes no project argument — it will return a story from a different project without complaint. Compare `System.TeamProject` against the project QA named. If they differ, stop and report both; do not continue. A story from the wrong project yields a fully plausible test set for the wrong feature, and no later step catches it.
+
 ## 3. Number the acceptance criteria — and show the numbering
 
 Acceptance criteria arrive as free text. Enumerate them `AC-1`, `AC-2`, … and **display the numbered list to QA**.

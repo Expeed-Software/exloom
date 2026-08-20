@@ -8,12 +8,24 @@ Azure DevOps only in v1, via the `az` CLI. No MCP server. Organization and proje
 
 | Operation | Command |
 |---|---|
-| `fetch_story` | `az boards work-item show --id <story-id> --org <org> --output json` |
+| `fetch_story` | `az boards work-item show --id <story-id> --org <org> --output json` — **then verify `System.TeamProject`** (see below) |
 | `create_test_case` | `az boards work-item create --type "Test Case" --title "<objective>" --org <org> --project <project> --fields "Microsoft.VSTS.TCM.Steps=<steps-xml>" "Microsoft.VSTS.Common.Priority=<0-3>" "System.Tags=<tags>"` |
 | `update_test_case` | `az boards work-item update --id <mapped-id> --org <org> --fields ...` |
 | `link_test_case` | `az boards work-item relation add --id <tc-id> --relation-type "tests" --target-id <story-id> --org <org>` |
 
 `--relation-type` is lowercase `tests`; it maps to `Microsoft.VSTS.Common.TestedBy-Reverse`. One call writes both sides — the story gains a `Tested By` link automatically.
+
+## Work-item IDs are organisation-wide, not project-scoped
+
+`az boards work-item show --id N` resolves N across the **whole organisation**. It does not take a project, and it will silently return an item belonging to a different project. WIQL behaves the same way: a query sent to a project endpoint still searches org-wide unless it filters on `[System.TeamProject]`.
+
+So after `fetch_story`, **compare `System.TeamProject` against the project QA named**. If they differ, stop and report both values — do not generate against it. A story fetched from the wrong project produces a plausible, entirely wrong test set, and nothing downstream would reveal the mistake.
+
+Any WIQL query must filter explicitly:
+
+```
+SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND ...
+```
 
 ## Before approval
 
