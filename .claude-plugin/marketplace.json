@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "exloom",
-  "description": "exloom — a team-oriented development workflow for Claude Code: discipline, handoff, and an enforced review gate.",
+  "description": "exloom \u2014 a team-oriented development workflow for Claude Code: discipline, handoff, and an enforced review gate.",
   "owner": {
     "name": "Expeed Software",
     "email": "support@expeed.com"
@@ -9,9 +9,15 @@
   "plugins": [
     {
       "name": "exloom",
-      "description": "Team-oriented development workflow for Claude Code — discipline, handoff, and an enforced evidence-based review gate. Brings brainstorming, planning, execution, review, debugging, verification, and brownfield-aware knowledge to Claude Code, from one developer to a whole org.",
+      "description": "Team-oriented development workflow for Claude Code \u2014 discipline, handoff, and an enforced evidence-based review gate. Brings brainstorming, planning, execution, review, debugging, verification, and brownfield-aware knowledge to Claude Code, from one developer to a whole org.",
       "source": "./plugins/exloom",
       "category": "development-workflow"
+    },
+    {
+      "name": "exloom-qa",
+      "description": "Team-oriented QA workflow for Claude Code \u2014 turns an Azure DevOps user story into reviewed, traceable, human-executable manual test cases. Scales test volume to story complexity, measures coverage against acceptance criteria, learns your application from QA's corrections, and publishes to the board only after explicit QA approval.",
+      "source": "./plugins/exloom-qa",
+      "category": "testing"
     }
   ]
 }
