@@ -46,9 +46,10 @@
 
 ## Runbook + rollback (Tier 3)
 - Runbook path: <path to committed runbook.md>
-- Dry-run evidence (staging): <log excerpt or link>
 - Rollback command: `<exact command>`
-- [ ] Rollback tested in staging — verification output: <paste>
+- Reversal proof: <test id or path, or "untestable in code" — what verifies it at deploy time>
+- [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
+- [ ] Reversal proof runs in CI on this commit
 
 ## Escape hatches used
 - [ ] None (default)

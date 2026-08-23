@@ -29,9 +29,9 @@ Parse the Tier field. If missing or not `0`, `1`, `2`, or `3`, refuse — the ti
 
 ### Tier 3 required (Tier 2 +)
 - Runbook path filled and the file exists at that path.
-- Dry-run evidence pasted (staging log excerpt or link).
-- Rollback command filled.
-- Rollback tested box ticked with verification output pasted.
+- Rollback command filled with an exact command, not a description.
+- Reversal proof names a test id or path — and that test exists in the repo. If it reads `untestable in code`, a one-sentence deploy-time verification follows it.
+- Both Tier 3 boxes ticked.
 
 ## Step 3 — Verify section content is real, not placeholder
 
@@ -61,6 +61,7 @@ For each missing section, offer to fix:
 - Cross-layer missing → offer to dispatch the `cross-layer-auditor` agent now.
 - Adversarial missing → offer to dispatch the `adversarial-reviewer` agent now.
 - Runbook missing → ask the user for the path or tell them to write it.
+- Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
 Wait for the user. Do NOT mark complete while anything is missing.
 

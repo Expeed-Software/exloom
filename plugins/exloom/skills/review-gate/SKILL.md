@@ -22,7 +22,7 @@ This protocol encodes those lessons. Every change, regardless of size, needs an 
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
 | <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + checklist |
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + cross-layer contract check + adversarial review |
-| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + runbook + rollback test + staging dry-run |
+| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + exact rollback command + a reversal test in CI |
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
 
@@ -83,13 +83,16 @@ This is a **first pass, not a guarantee** — it never certifies code "secure," 
 
 ### Step 6 — Runbook + rollback (Tier 3 only)
 
-Required content in the checklist:
-- Runbook path (a markdown doc committed alongside the change, listing: deploy order, health checks, signals to watch, common failure modes).
-- Dry-run evidence — the runbook was executed in staging, paste the relevant log lines or screenshots proving success.
-- Rollback command — the exact command to undo this change.
-- Rollback verification — the rollback was executed in staging, system returned to the pre-change state, paste the evidence.
+The review proves the code is safe to *merge*. So every item in this section is a property of the diff — something a reviewer can check at this commit. Verification against a deployed environment is deliberately **not** recorded here: this document is written once and read at merge, the gate binds it to a SHA and cannot bind it to the state of a running system, and a slot demanding evidence the gate cannot check is where fabrication goes. Deployment verification belongs to the deploy process, which owns the environment and can observe it.
 
-An untested rollback is not a rollback; it is a wish.
+Required content in the checklist:
+- **Runbook path** — a markdown doc committed alongside the change, listing deploy order, health checks, signals to watch, and common failure modes. The file must exist at the path given; `/review-complete` checks.
+- **Rollback command** — the exact command that undoes this change. Not a description of one.
+- **Reversal proof** — the automated test, run by CI on this commit, that exercises the rollback: applies the change, reverses it, asserts the pre-change state. Name it by test id or path.
+
+If the reversal genuinely cannot be exercised in code — an infrastructure action such as a DNS cutover or a load-balancer swap — write `untestable in code` and one sentence naming what will verify it at deploy time. This is not for a reversal that is merely inconvenient to test: a migration with a down-script is always testable, and so is a feature flag.
+
+An untested rollback is not a rollback; it is a wish. And a rollback proven by a test keeps proving itself on every commit, where one proven by a log pasted into a document stops being true the moment the code moves.
 
 ## Checklist template
 
@@ -101,12 +104,12 @@ The canonical template lives at `templates/review-checklist.md` in this plugin. 
 
 - **A persisted-but-unread field.** The UI wrote a new field to a saved record; no backend code read it. Tier 2 cross-layer contract check step 1 grep flags zero backend readers on a newly-persisted field; the adversarial review prompt explicitly requires this check.
 - **A silent parser/import regression.** A refactor quietly broke file import. The smoke test step (import a real file through the UI) fails immediately. Tier 2.
-- **Mid-flight feature-flag corruption.** A flag cutover left some tenants with the old code path reading new-schema DB rows. Tier 3 rollback dry-run would have shown the corruption on the staging replica.
 - **Write-only DB column.** Migration added a column, entity persisted it, no query ever read it. Cross-layer contract step 4.
 
 ### Doesn't catch (known blind spots)
 
 - **Performance regressions not visible in a single smoke run.** Load testing is out of scope.
+- **Mid-flight state corruption during a cutover.** A flag cutover leaves some tenants on the old code path reading new-schema rows. A Tier 3 reversal test proves the schema reverses; it does not prove the system stays coherent *while* traffic is split across both paths. That is a property of a running deployment, and only a staged rollout with real traffic observation will surface it.
 - **Security vulnerabilities in *unchanged* code** — the security review (Step 5) covers THIS change's security surface, not the pre-existing system. Audit the whole codebase separately.
 - **Third-party API contract drift** — if Stripe changes its webhook body and nothing in the diff triggers the change, the gate won't notice.
 - **Race conditions that don't reproduce in single-operator smoke tests.**
