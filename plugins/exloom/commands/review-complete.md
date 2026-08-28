@@ -7,27 +7,40 @@ description: Run the final gate for the current branch. Verifies every required 
 
 You are the terminal gate. Nothing ships unless every tier-required section of `.claude/reviews/<branch>.md` is filled with real evidence. You do not take the operator's word; you read the file and verify.
 
+**Reviewer dispatch is not something you attest to.** exloom writes a verdict receipt to `.claude/reviews/<branch>.verdicts/<agent>.json` when a reviewer subagent actually completes, and refuses to write one by hand. The gate requires one receipt per reviewer the tier needs, covering the reviewed commit. So there is no way to satisfy this command by filling in text: if a reviewer has not run, dispatch it. **The tier is also derived from the diff by the gate** — declaring a lower one than the diff earns does not reduce what is required, it blocks the push.
+
 ## Step 1 — Open and parse
 
 Open `.claude/reviews/<current-branch>.md`. If absent, refuse — tell the user to run `/review-init`.
 
 Parse the Tier field. If missing or not `0`, `1`, `2`, or `3`, refuse — the tier must be explicit.
 
+Then check the tier against the diff, using the same rules `/review-init` applies (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). If the declared tier is lower than what the diff earns, say so and raise it before going further — the gate derives the same minimum and will block otherwise. There is no escape hatch for an under-declared tier.
+
 ## Step 2 — Check required sections for the tier
 
+For every reviewer a tier requires, "was it dispatched?" is answered by the receipt file, never by the checklist. Check with:
+
+```bash
+ls .claude/reviews/<branch>.verdicts/
+```
+
+A receipt only counts if it names a commit with no code changes between it and the reviewed tip — if you fixed findings after a review, that reviewer must run again. Receipts must be committed alongside the checklist.
+
 ### Tier 0 required
-- L1 code review: "Dispatched" ticked, findings listed (or "no findings" stated), resolution for each Critical/Important.
+- L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test / cross-layer / adversarial / runbook sections marked `N/A - Tier 0` (or left with their defaults) are acceptable — Tier 0 only requires L1.
 
 ### Tier 1 required
-- L1 code review: "Dispatched" ticked, findings listed (or "no findings" stated), resolution for each Critical/Important.
+- L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test: boot command filled, user action filled, expected result filled, actual observed result filled with real evidence (not `<paste output>` placeholder, not empty). "Test passed" ticked.
 
 ### Tier 2 required (Tier 1 +)
-- Cross-layer contract check: "Dispatched cross-layer-auditor" ticked, grep output pasted for fields / endpoints / events / columns / config keys, orphan list resolved (fixed or annotated intentional).
-- Adversarial review: "Dispatched adversarial-reviewer" ticked, findings listed with category, resolution per finding.
+- Cross-layer contract check: `cross-layer-auditor.json` receipt present, grep output pasted for fields / endpoints / events / columns / config keys, orphan list resolved (fixed or annotated intentional).
+- Adversarial review: `adversarial-reviewer.json` receipt present, findings listed with category, resolution per finding.
 
 ### Tier 3 required (Tier 2 +)
+- Security review: `security-auditor.json` receipt present, tool output pasted, findings dispositioned.
 - Runbook path filled and the file exists at that path.
 - Rollback command filled with an exact command, not a description.
 - Reversal proof names a test id or path — and that test exists in the repo. If it reads `untestable in code`, a one-sentence deploy-time verification follows it.
@@ -55,12 +68,15 @@ Cannot mark complete. Missing or placeholder sections:
 - Adversarial review: no findings recorded, box unticked
 ```
 
-For each missing section, offer to fix:
-- Smoke test missing → suggest `/smoke-test`.
-- L1 missing → offer to dispatch the `l1-reviewer` agent now against the current diff.
-- Cross-layer missing → offer to dispatch the `cross-layer-auditor` agent now.
-- Adversarial missing → offer to dispatch the `adversarial-reviewer` agent now.
+For each missing section:
+- Smoke test missing → run `/smoke-test`.
+- L1 receipt missing or stale → dispatch the `exloom:l1-reviewer` agent now against the current diff.
+- Cross-layer receipt missing or stale → dispatch the `exloom:cross-layer-auditor` agent now.
+- Adversarial receipt missing or stale → dispatch the `exloom:adversarial-reviewer` agent now.
+- Security receipt missing or stale → dispatch the `exloom:security-auditor` agent now.
 - Runbook missing → ask the user for the path or tell them to write it.
+
+Dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
 Wait for the user. Do NOT mark complete while anything is missing.
@@ -80,9 +96,11 @@ Fill the Final Verdict section, writing that SHA into `Reviewed code commit:`:
 - [x] Ready to ship
 
 Reviewed code commit: <the `git rev-parse HEAD` output>
-Signed: Claude (exloom)
+Attested by: Claude (exloom session) — author self-attestation, not a reviewer sign-off
 Date: <YYYY-MM-DD>
 ```
+
+`Attested by` records who filled this document in. It is **not** evidence that anyone reviewed the code; the receipts under `.claude/reviews/<branch>.verdicts/` are. Never write a reviewer's name here.
 
 Capture the SHA **before** committing the checklist, so it names the last *code*
 commit — the tip that was actually reviewed, not the checklist commit.
@@ -109,7 +127,13 @@ Then fill the **Provenance** section — who and what produced this change:
 - Attested: <YYYY-MM-DD>
 ```
 
-Then stage the checklist and commit. **If** the repo has
+Then stage the checklist **and the verdict receipts** and commit them together — the gate reads receipts from the committed ref, so an uncommitted receipt does not exist as far as the hooks are concerned:
+
+```bash
+git add .claude/reviews/<branch>.md ".claude/reviews/<branch>.verdicts"
+```
+
+**If** the repo has
 `.claude/exloom-provenance-signed.enabled`, the commit MUST be signed
 (`git commit -S`) — the hooks `git verify-commit` it and block an unsigned commit.
 Otherwise a normal commit is fine:
@@ -138,5 +162,5 @@ Print:
 
 - You do NOT mark complete partially. All-or-nothing per the tier's required sections.
 - You do NOT accept "I'll do that later" — the gate is terminal.
-- Escape hatches (a skipped step with written justification in the "Escape hatches used" section) ARE acceptable — a step with a recorded escape hatch counts as "addressed" for this check. But an unjustified skip is not an escape hatch, it is an incomplete checklist.
-- If the user says "skip this, emergency", offer the `EXLOOM_REVIEW_SKIP=1` bypass — it must be set in the Claude Code session env (`settings.json` `env`), not inline before the command, or the hook won't see it — and require a written one-sentence justification in the checklist before the hooks will honor it.
+- Escape hatches (a skipped step with written justification in the "Escape hatches used" section) ARE acceptable for narrative sections — a step with a recorded escape hatch counts as "addressed" for this check. But an unjustified skip is not an escape hatch, it is an incomplete checklist. **Two things have no escape hatch: an under-declared tier, and a missing reviewer receipt.** Those are the checks the gate does not take your word on, and writing prose at them will not move them.
+- If the user says "skip this, emergency", the bypass is `EXLOOM_REVIEW_SKIP=1`, set in the Claude Code session env (`settings.json` `env`) — not inline before the command, or the hook won't see it. Be honest about what it does: the hooks honor it unconditionally and log the bypass to stderr; nothing requires or verifies a justification. Write one in the "Escape hatches used" section anyway, so the reason ships with the code, but do not tell the user the tooling enforces it.

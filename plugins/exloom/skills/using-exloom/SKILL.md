@@ -51,6 +51,16 @@ New to exloom? Find your situation and start with the named skill — it will pu
 
 The single most common flow: **`brainstorming` → `planning-for-handoff` → `isolating-execution` → `executing-handoff-plans` → `proving-done` → `requesting-review`.** When in doubt, start at `brainstorming` — it's the front door for any new work.
 
+**Review commands — invoke these, don't reproduce them.** The gate runs on three commands, and *you* call them with the Skill tool; they are not instructions for the user to type:
+
+```
+/review-init   (when work starts on the branch)
+    → /smoke-test   (before claiming done)
+        → /review-complete   (before push / PR)
+```
+
+`/review-init` declares the tier **before** the diff is finished, which is the point of it — the gate derives the tier from the diff and blocks a checklist that declares less. `/review-complete` dispatches the reviewer subagents the tier requires, and each real dispatch writes a receipt the gate demands and no one can write by hand. Reading these commands and doing the steps yourself produces the checklist but none of the receipts, so the push is blocked. Having the text in context is not running it.
+
 ## When Skills Apply
 
 Default rule: if a skill plausibly applies to the work in front of you, invoke it before acting. When genuinely unsure whether a skill applies, lean toward invoking it — the asymmetry favors it.

@@ -33,6 +33,10 @@ Use these rules mechanically first, then ask the user to confirm:
 
 Show the proposed tier, the rule that triggered it, and the `git diff --stat` output. Ask the user to confirm or override. Record the final tier and the one-sentence rationale.
 
+**The override is upward only.** When the gate is enabled, `lib.sh` derives the same minimum from the diff at push time and blocks a checklist that declares less — with no escape hatch, because the tier decides which gates apply and an escapable tier makes every other gate optional. So a user asking to go lower is asking for a push that will fail; say so, and either raise the tier or fix the derivation rule. Going higher is always allowed and is the documented response to uncertainty.
+
+Two of the rules above are judgment the hook cannot make, so it derives a lower floor and leaves the decision here: deployment/k8s/helm/docker paths floor at Tier 2 (raise to 3 when the change is flag- or prod-related), and "frontend AND backend changed" or "more than one module" need stack knowledge a file list does not carry. Apply them yourself.
+
 ## Step 3 — Create the checklist
 
 Copy the template from `${CLAUDE_PLUGIN_ROOT}/templates/review-checklist.md` to `.claude/reviews/<branch-name>.md`. Substitute:
@@ -69,6 +73,7 @@ Print:
 > Required remaining steps for Tier <N>:
 > - <list based on tier>
 > Next commands: `/smoke-test` to fill the smoke-test section, then `/review-complete` when ready to ship.
+> Tier <N> requires a real dispatch of: <reviewers for the tier>. exloom records a receipt under `.claude/reviews/<branch>.verdicts/` when each one completes; the gate requires those receipts and does not read any checkbox for them.
 
 ## Refusals
 

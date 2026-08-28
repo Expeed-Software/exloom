@@ -15,6 +15,21 @@ The retrospective was clear about which gates carried signal. L1 found real bugs
 
 This protocol encodes those lessons. Every change, regardless of size, needs an L1 code review and a real smoke test (booted system, executed user action, observed result). Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a rollback dry-run. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse to let you declare done or push without it filled.
 
+## What the gate actually verifies
+
+This matters more than the step list, because it is the difference between review and self-certification.
+
+Most of the checklist is **self-attested**: you write the findings, the smoke-test output, the dispositions. The gate checks those are present and not placeholder text. It cannot check they are true. That is the honest limit of any artifact the author writes, and no amount of extra fields changes it.
+
+Two things are **not** self-attested, and they are deliberately the two that decide everything else:
+
+- **Reviewer dispatch.** When a reviewer subagent actually completes, a `PostToolUse` hook writes a receipt to `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit that reviewer saw. A `PreToolUse` hook denies writing that file by hand. The gate requires one receipt per reviewer the tier needs, covering the reviewed commit — so "was this reviewed?" is answered by an event the harness recorded, not by a box you ticked. Fix findings and commit? The receipt no longer covers the tip, and that reviewer runs again.
+- **The tier.** `lib.sh` derives a minimum tier from the diff (the rules `/review-init` proposes) and blocks a checklist declaring less. There is no escape hatch, because the tier decides which gates apply: an escapable tier makes every other gate optional, and "this change is only Tier 1" is the specific judgment an author under time pressure gets wrong.
+
+Reading a reviewer agent's instructions and performing the review yourself produces no receipt. That is intentional — the gate cannot tell a careful self-review from a skipped one, so it only counts what it can observe.
+
+What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
+
 ## Tier matrix
 
 | Blast radius | Tier | Required gates |
@@ -24,7 +39,7 @@ This protocol encodes those lessons. Every change, regardless of size, needs an 
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + cross-layer contract check + adversarial review |
 | Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + exact rollback command + a reversal test in CI |
 
-Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
+Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight — the gate derives the minimum from the diff and blocks a downgrade, so this is enforced, not advised. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
 
 **Security review is triggered by surface, not only by tier.** Any change — at any tier — that touches user input, authentication/authorization, tenancy, secrets, deserialization, server-side outbound requests, cryptography, or dependencies also runs the security review (Step 5). This matters most for AI-generated code, which introduces exactly those flaws.
 
@@ -140,5 +155,7 @@ It is **evidence, not compliance certification**, and a branch-level declaration
 - `/review-init` — create the checklist for the current branch.
 - `/smoke-test` — fill the smoke-test section with real commands and observed output.
 - `/review-complete` — verify all required sections populated for the tier, run any missing reviewer agents, mark ready to ship.
+
+**Invoke these yourself, with the Skill tool.** They are not instructions for the user to type. Reading them and performing the steps by hand produces the same checklist file but none of the receipts, so the gate will block the push — the commands exist to cause events, not to describe them.
 
 The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) without it — so switching from the shell to the MCP integration doesn't bypass the gate. All honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.

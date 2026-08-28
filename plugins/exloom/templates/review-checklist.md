@@ -5,8 +5,14 @@
 **Blast radius:** <N files changed, M modules touched, user-facing yes/no>
 **Started:** YYYY-MM-DD
 
+> Reviewer dispatch is NOT self-attested. exloom records a verdict receipt under
+> `.claude/reviews/<branch-name>.verdicts/` when a reviewer subagent actually
+> completes, and the gate requires one per reviewer the tier needs, covering the
+> reviewed commit. Ticking a box here proves nothing and is not what is checked —
+> dispatch the reviewer, then commit its receipt with this file.
+
 ## L1 code review (all tiers)
-- [ ] Dispatched l1-reviewer
+- Verdict receipt: `l1-reviewer.json` (written by exloom on dispatch — not by hand)
 - Findings:
   - Critical: <file:line — problem, or "none">
   - Important: <file:line — problem, or "none">
@@ -22,7 +28,7 @@
 - [ ] Test passed
 
 ## Cross-layer contract check (Tier 2+)
-- [ ] Dispatched cross-layer-auditor
+- Verdict receipt: `cross-layer-auditor.json` (written by exloom on dispatch)
 - Grep 1 — Orphan fields (UI writes → backend reads):
 - Grep 2 — Orphan endpoints (backend declares → frontend calls):
 - Grep 3 — Unhandled events (emitted → handled):
@@ -32,13 +38,13 @@
 - Intentional orphans with justification: <list, or "none">
 
 ## Adversarial review (Tier 2+)
-- [ ] Dispatched adversarial-reviewer
+- Verdict receipt: `adversarial-reviewer.json` (written by exloom on dispatch)
 - Blocking findings: <category + file:line + disposition, or "none">
 - Non-blocking findings: <category + file:line + disposition, or "none">
 - Reviewer's meta-notes: <which hostile question surfaced the most issues>
 
 ## Security review (Tier 3, or any change touching input / auth / secrets / deserialization / dependencies)
-- [ ] Dispatched security-auditor
+- Verdict receipt: `security-auditor.json` (written by exloom on dispatch)
 - Tools run (and unavailable): <secrets / dep-audit / static — ran or missing, one-line result each>
 - Findings: <severity + category + file:line + disposition, or "none found by the checks run">
 - New dependencies verified real (not hallucinated / typo-squatted): <list, or N/A>
@@ -69,5 +75,10 @@
 - [ ] Ready to ship
 
 Reviewed code commit: <reviewed-sha>
-Signed: <Claude-session-or-human-reviewer>
+Attested by: <who-attests>
 Date: YYYY-MM-DD
+
+<!-- "Attested by" is the AUTHOR's self-attestation, not a reviewer's sign-off.
+     Who reviewed is recorded in .claude/reviews/<branch-name>.verdicts/, by
+     exloom, on real dispatches. Do not treat this line as review evidence. -->
+
