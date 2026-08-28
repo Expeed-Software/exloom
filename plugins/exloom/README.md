@@ -29,6 +29,15 @@ Be clear about the mechanism, because it matters:
 - **Most of exloom is discipline** — skills Claude reads and follows. They guide the work; they don't force it.
 - **One part is enforcement** — the optional review-gate hooks. When a repo turns them on, the Claude Code harness (not the model) **blocks "done" and `git push`** until the review evidence is committed to `.claude/reviews/<branch>.md`.
 
+And enforcement means more than "a document exists." Most of the checklist is self-attested and the gate can only check it is filled in — but the two fields that decide everything else are not the author's to write:
+
+- **Reviewer dispatch is recorded, not claimed.** A `PostToolUse` hook writes a receipt to `.claude/reviews/<branch>.verdicts/<agent>.json` when a reviewer subagent actually completes; another hook refuses to let that file be written by hand. The gate requires one receipt per reviewer the tier needs, covering the reviewed commit. Fix findings afterwards and the receipt no longer covers the tip — that reviewer runs again.
+- **The tier is derived from the diff, not declared.** A migration or an auth/tenancy/secrets/crypto path earns Tier 3, a deployment or API surface or a five-file blast radius earns Tier 2, and a checklist declaring less is blocked. There is no escape hatch, because an escapable tier makes every other gate optional.
+
+It proves a reviewer ran; it does not prove the review was good, and a determined author can still disable the plugin or use the documented bypass. This is a cooperating-team gate. What it changes is that the lazy path no longer produces a passing artifact.
+
+> **Upgrading from 1.x** — this is why 2.0 is a major version. A branch whose checklist was completed under 1.x has no verdict receipts and may declare a tier below what its diff derives to, so its next push is blocked. Re-run `/review-complete` on it: the reviewers dispatch for real, the receipts are written and committed, and it passes. Nothing is lost, but in-flight branches need one extra pass.
+
 That's the difference between *hoping* review happened and *guaranteeing* it did — the one thing you can't get from instructions alone. It's also what separates exloom from most workflow plugins: they *guide* the loop; exloom guides it and, with the gate on, **enforces** it — committed evidence, a smoke proof, and a review bound to the exact commit you're shipping.
 
 ## The loop
@@ -90,6 +99,11 @@ Prove the enforcement is real on a throwaway branch:
 7. Make **another** code commit without re-reviewing, then `git push` again — the gate **blocks** it: the review no longer covers the tip. Re-run `/review-complete` and it passes.
 
 Step 7 is the point: the review is bound to the exact commit it reviewed, not just "some checklist exists."
+
+Two more worth trying, because they are what stops a checklist from being self-written:
+
+8. Try to create `.claude/reviews/<branch>.verdicts/l1-reviewer.json` yourself — the gate **denies the write**. Receipts are only produced by real reviewer dispatches.
+9. Set the checklist's `Tier:` to `1` on a branch that touches `auth/` or a migration — `git push` is **blocked** with the tier the diff actually earns. There is no way to talk it down.
 
 ## What's inside
 

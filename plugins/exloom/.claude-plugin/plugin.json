@@ -1,7 +1,7 @@
 {
   "name": "exloom",
   "description": "Team-oriented development workflow for Claude Code — discipline, handoff, and an enforced evidence-based review gate. Scales from one developer to a whole org.",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "author": {
     "name": "Expeed Software",
     "email": "support@expeed.com"
@@ -42,6 +42,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record-reviewer-verdict.sh"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -49,6 +60,15 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/block-unverified-push.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/protect-verdicts.sh"
           }
         ]
       },

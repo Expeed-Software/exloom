@@ -130,6 +130,135 @@ exloom_push_target_branches() {
   done
 }
 
+# ---------- tier derivation ----------
+# The declared tier decides which gates apply, so letting the author declare it
+# after the fact reopens every loop the gate is meant to close. This derives a
+# MINIMUM tier from the diff itself, using the same rules /review-init proposes,
+# and exloom_validate_checklist blocks when the declared tier is below it.
+# Over-declaration is always allowed — going one tier higher is the documented
+# response to uncertainty.
+#
+# Echoes 0-3 and returns 0; returns 1 when the tier cannot be derived (no fork
+# point, no diff) so the caller can fail open. Deliberately encodes only rules
+# that are unambiguous from a file list — "frontend AND backend changed" and
+# "more than one module" need stack knowledge the hook does not have, and stay
+# with the skill as judgment.
+exloom_derive_tier() {
+  local tip="$1" base files f n docs_only=1
+  base="$(git merge-base "$tip" origin/main 2>/dev/null \
+       || git merge-base "$tip" origin/master 2>/dev/null \
+       || git merge-base "$tip" origin/dev 2>/dev/null \
+       || git merge-base "$tip" origin/develop 2>/dev/null || true)"
+  [[ -n "$base" ]] || return 1
+  # Review artifacts are not the change under review.
+  files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+
+  # Docs-only is checked FIRST so a markdown file under an `auth/` path does not
+  # score Tier 3 on a path match.
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    case "$f" in
+      *.md|*.txt|docs/*|*/docs/*|README*|*/README*) ;;
+      *) docs_only=0; break ;;
+    esac
+  done <<< "$files"
+  if [[ $docs_only -eq 1 ]]; then printf '0'; return 0; fi
+
+  # Tier 3 — data migration, or the security surface /review-init enumerates.
+  if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
+    printf '3'; return 0
+  fi
+  if printf '%s\n' "$files" | grep -Eqi 'auth|tenant|secret|crypto|jwt|apikey|api[-_]key'; then
+    printf '3'; return 0
+  fi
+
+  # Tier 2 — deployment surface, an API/route surface, or a five-file blast
+  # radius. Deployment paths floor at 2 rather than 3 because /review-init's rule
+  # is conditional on the change being flag/prod-related, which a file list
+  # cannot decide; the skill still says go to 3 when it is.
+  if printf '%s\n' "$files" | grep -Eqi '(^|/)(deployment|deploy|k8s|kubernetes|helm|docker)(/|$)|docker-compose|Dockerfile'; then
+    printf '2'; return 0
+  fi
+  if printf '%s\n' "$files" | grep -Eqi 'controller|(^|/)routes?[/.]|(^|/)api[/.]|endpoint|resolver'; then
+    printf '2'; return 0
+  fi
+  n="$(printf '%s\n' "$files" | grep -c . || true)"
+  if [[ "${n:-0}" -ge 5 ]]; then printf '2'; return 0; fi
+
+  printf '1'
+}
+
+# ---------- reviewer verdict receipts ----------
+# A receipt is the one piece of review evidence the authoring session does not
+# author: hooks/record-reviewer-verdict.sh writes it when a reviewer subagent
+# actually completes, and hooks/protect-verdicts.sh denies writing one by hand.
+# So requiring a receipt tests an EVENT, where every checkbox in the checklist
+# only tests an assertion.
+#
+# Receipts are read from the ref being validated, which means they must be
+# committed with the checklist — the same rule the checklist itself lives under.
+exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
+
+# Reviewers required at a given tier. Security review is surface-triggered as
+# well as tier-triggered, but the surface that triggers it (auth / tenancy /
+# secrets / crypto) also derives to Tier 3 above, so the tier list covers it.
+exloom_required_reviewers() {
+  case "$1" in
+    0|1) printf 'l1-reviewer' ;;
+    2)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer' ;;
+    3)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor' ;;
+  esac
+}
+
+# exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
+# Returns 0 when every reviewer the tier requires has a receipt covering the
+# reviewed commit; prints a BLOCK message and returns 2 otherwise.
+exloom_check_verdicts() {
+  local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
+  local vdir agent file content sha ok
+  local -a missing=() stale=()
+  vdir="$(exloom_verdict_dir "$checklist")"
+
+  for agent in $(exloom_required_reviewers "$tier"); do
+    file="${vdir}/${agent}.json"
+    # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
+    content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
+    if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
+    ok=0
+    while IFS= read -r sha; do
+      [[ -z "$sha" ]] && continue
+      git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
+      # A receipt covers the reviewed commit when no code differs between the two
+      # — a checklist-only commit landing in between must not invalidate a real
+      # review, and a code commit must.
+      if [[ -z "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+        ok=1; break
+      fi
+    done < <(printf '%s\n' "$content" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')
+    [[ $ok -eq 1 ]] || stale+=( "$agent" )
+  done
+
+  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 ]]; then return 0; fi
+
+  local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier")."
+  [[ ${#missing[@]} -gt 0 ]] && detail="${detail}
+
+Never dispatched (no receipt in ${vdir}/):
+$(printf '  - %s\n' "${missing[@]}")"
+  [[ ${#stale[@]} -gt 0 ]] && detail="${detail}
+
+Dispatched, but only against code that has since changed (re-run them):
+$(printf '  - %s\n' "${stale[@]}")"
+
+  _exloom_block "$action" "${detail}
+
+Receipts are written by exloom when a reviewer subagent actually completes — they
+cannot be written by hand. Dispatch the reviewers, commit the receipts with the
+checklist, and re-run /review-complete."
+  return 2
+}
+
 # ---------- shared checklist validator ----------
 # exloom_validate_checklist <checklist-path> <tip-ref> <worktree:0|1> <action>
 #   checklist-path : .claude/reviews/<branch>.md (relative to repo root)
@@ -183,7 +312,7 @@ Run /review-complete — it names each tier-required section still missing."
 
   # Placeholder scan, scoped to the sections that apply to the declared tier.
   local placeholder_re drop scan
-  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
   drop=''
   if   [[ "$tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
@@ -225,6 +354,25 @@ ${stale}
 Re-run /review-complete to review the current tip."
       return 2
     fi
+
+    # The declared tier must not be below the tier the diff itself derives to.
+    # Fail open when it cannot be derived (no fork point / no diff).
+    local derived
+    if derived="$(exloom_derive_tier "$tip")" && [[ "$derived" =~ ^[0-3]$ ]]; then
+      if [[ "$tier" -lt "$derived" ]]; then
+        _exloom_block "$action" "$checklist declares Tier ${tier}, but this diff derives to Tier ${derived}.
+
+The tier decides which gates apply, so a tier chosen after the diff is finished
+reopens every gate it skips. Raise the tier to ${derived} (or higher) and run the
+gates it requires. There is deliberately no escape hatch for this — if the
+derivation is wrong for your repo, that is a rule to fix, not a review to skip."
+        return 2
+      fi
+    fi
+
+    # Reviewer verdict receipts — the one check that tests an event rather than
+    # an assertion. Uses the DECLARED tier, which is >= derived by the check above.
+    exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action" || return 2
 
     # Provenance attestation.
     if ! printf '%s\n' "$content" | grep -q '^- AI-assisted:' \
