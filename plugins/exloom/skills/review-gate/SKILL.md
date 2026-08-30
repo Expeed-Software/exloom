@@ -28,6 +28,12 @@ Two things are **not** self-attested, and they are deliberately the two that dec
 
 Reading a reviewer agent's instructions and performing the review yourself produces no receipt. That is intentional — the gate cannot tell a careful self-review from a skipped one, so it only counts what it can observe.
 
+- **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction. Before this, a reviewer that returned nine blocking findings satisfied the gate exactly as well as one that approved: the mechanism enforced attendance, not review.
+  Receipts written before exloom recorded verdicts carry no verdict key and are **grandfathered** — they still count, so installing this version does not block work already in flight.
+
+- **Plan and spec review, before execution.** The `block-unreviewed-execution` hook blocks the first source edit (including shell writes) on a branch carrying a plan or spec that no `plan-reviewer` receipt approves. The receipt binds to the document's **content hash**, so editing it after review invalidates the approval and it must be reviewed again — the freeze rule as a mechanism rather than a paragraph.
+  This exists because `reviewing-plans` opens with *"Plan author and executor are different people. No exceptions."* and shipped no agent and no receipt, so it degraded to self-review by default. A defect in a plan is reproduced by every regeneration of the code from it, which is exactly what breaks the premise that the spec is durable and the code is throwaway.
+
 What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
 
 ## Tier matrix

@@ -199,84 +199,10 @@ Use exactly one verdict line, not all three. The three options above are the pos
 
 ## Failure Modes
 
-These are the most common ways auditors get the audit wrong. Each follows the same pattern: a plausible-sounding shortcut that undermines the audit's purpose.
-
-**1. "The diff is small, the plan was followed."**
-The thought pattern is: small diff means small scope means nothing could have drifted. This feels right because volume is a proxy for complexity. But small diffs can hide significant deviations. A one-line change in an unplanned file is drift. A missing file that was supposed to be created is an unmet criterion. Audit systematically by comparing lists, not by estimating risk from diff size. Correction: run every step regardless of diff size. The steps are fast on small diffs anyway.
-
-**2. "The executor is experienced, I trust them."**
-The thought pattern is: senior developers do not need auditing. This feels right because experienced developers generally make good decisions. But the audit does not exist because developers are untrustworthy — it exists because memory is unreliable and context is lossy. An experienced developer who improvised a better solution still needs to record it. Trust the process, not the person. Correction: apply the same audit steps regardless of who executed the plan.
-
-**3. "These extra files were obviously necessary."**
-The thought pattern is: the unplanned file changes are self-evidently required. This feels right because developers reading the diff can see why a utility file or config change was needed. But obvious to the auditor now is not obvious to the team later. If the changes were necessary, they should have been in the plan or the deviation log. Unlogged changes erode the plan-as-contract model even when the changes are correct. Correction: flag every unplanned+unlogged change. Let the executor add it to the deviation log — that takes 30 seconds and preserves the record.
-
-**4. "The acceptance criteria are mostly met."**
-The thought pattern is: 4 out of 5 criteria met is close enough. This feels right because partial credit is how most things work. But "mostly met" is a precise statement: it means at least one criterion is deviated. A deviated criterion that is not logged is silent drift on a requirement the team agreed to. Partial completion is fine — but it must be explicit. Correction: mark each criterion individually. If one is deviated, the verdict depends on whether it was logged, not on the percentage met.
-
-**5. "Auditing takes too long for this small change."**
-The thought pattern is: the overhead of a formal audit is not justified for a 3-file change. This feels right because process should be proportional to risk. But if the plan was small, the audit is fast — a 3-file plan audits in under 2 minutes. If the audit reveals drift even on a small change, that is exactly the kind of silent deviation that compounds across a codebase. Correction: run the audit. If it takes less than 5 minutes, the overhead argument does not hold. If the plan was so small it did not need a plan, the audit is moot — but that is a planning question, not an auditing one.
-
+See [failure-modes.md](failure-modes.md).
 ## Worked Example
 
-**Scenario:** Auditing the plan for "Add rate limiting to the payments API" (Node.js Express backend) after execution. The plan was approved via `exloom:reviewing-plans`, specified 4 files in its "Files to Touch" section, listed 3 acceptance criteria, and was executed on the `feature/rate-limiting` branch. The executor ran `exloom:executing-handoff-plans` and populated the Deviation Log with 2 entries.
-
-We will walk through all 4 audit steps and arrive at a verdict.
-
-### Step 1: File Audit
-
-Plan's "Files to Touch" listed:
-- `src/middleware/rate-limiter.ts` [new]
-- `src/routes/payments.ts` (modify — wire middleware)
-- `src/config/app-config.ts` (modify — add rate limit settings)
-- `tests/middleware/rate-limiter.test.ts` [new]
-
-Actual files changed (`git diff --name-only <base>...HEAD`, where `<base>` resolved to `main` for this repo):
-- `src/middleware/rate-limiter.ts` (new)
-- `src/routes/payments.ts` (modified)
-- `src/config/app-config.ts` (modified)
-- `src/config/rate-limits.ts` (new) — NOT in plan
-- `tests/middleware/rate-limiter.test.ts` (new)
-
-Categorization:
-- `src/middleware/rate-limiter.ts` — Planned [new] + Created = **expected**
-- `src/routes/payments.ts` — Planned [modify] + Modified = **expected**
-- `src/config/app-config.ts` — Planned [modify] + Modified = **expected**
-- `tests/middleware/rate-limiter.test.ts` — Planned [new] + Created = **expected**
-- `src/config/rate-limits.ts` — NOT in plan + Created = **drift**
-
-Result: 4 files planned+changed (expected). 0 files planned+unchanged. 1 file unplanned+changed (drift). Check deviation log for the unplanned file: Deviation #1 says "Extracted rate limit constants to dedicated config file for reusability across future endpoints." Logged and justified — this drift is accounted for.
-
-### Step 2: Acceptance Criteria Verification
-
-Criterion 1: "Rate limiting returns HTTP 429 when threshold exceeded."
-Status: **Verified.** Diff shows `rate-limiter.ts` returns `res.status(429).json({ error: 'Rate limit exceeded' })`. Test file includes assertion for 429 response.
-
-Criterion 2: "Rate limit state uses Redis for multi-instance support."
-Status: **Deviated.** Diff shows rate limiter uses an in-memory `Map` with TTL, not Redis. Check deviation log: not logged. This is silent drift on a core acceptance criterion.
-
-Criterion 3: "Rate limit window resets after 60 seconds."
-Status: **Unverified.** The diff shows a `windowMs: 60000` config value, which suggests 60-second windows, but actual reset behavior depends on runtime timing. Needs manual test with timed requests.
-
-### Step 3: Deviation Log Review
-
-The executor's deviation log contains 2 entries:
-- Deviation #1: "Extracted rate limit config to `src/config/rate-limits.ts`." Justification: "Keeps rate limit constants separate for reuse when we add rate limiting to other endpoints." Complete and justified.
-- Deviation #2: "Used TypeScript strict mode for new files." Justification: "Existing `tsconfig.json` has strict enabled; new files follow existing convention." Complete and justified.
-
-Missing: the Redis-to-memory change is not in the deviation log. This is a significant unlogged deviation — it affects a core acceptance criterion (multi-instance support) and changes the operational characteristics of the feature.
-
-### Step 4: Verdict
-
-**FAIL.** One unlogged deviation: acceptance criterion #2 (Redis for multi-instance support) was silently changed to in-memory storage. This affects production behavior and was not recorded.
-
-Blockers before code review can proceed:
-1. The executor must add a deviation log entry explaining why Redis was dropped and what triggered the decision during implementation.
-2. The team must confirm whether in-memory rate limiting is acceptable for the deployment topology (single instance vs. multi-instance).
-3. If in-memory is not acceptable, the executor must implement Redis as originally planned.
-4. Re-run this audit after the deviation log is updated or the implementation is corrected.
-
-Note what a Pass would have looked like here: if the executor had logged "Dropped Redis in favor of in-memory Map because the staging environment has no Redis instance and the rate limiter needs to work in local dev. Will revisit for production multi-instance deployment," that would be a complete deviation log entry. The verdict would shift to Pass with notes, and the reviewer would know to evaluate the tradeoff rather than discovering it by accident in the diff.
-
+See [worked-example.md](worked-example.md).
 ## Integration
 
 **Timing.** Run this audit after the executor marks execution complete and before any code review begins. The audit is a gate — it determines whether the PR is ready for review or needs corrections first.
