@@ -297,7 +297,12 @@ echo "== remediation commands in block messages must actually run =="
 # set in the Bash environment, so every sanctioned escape printed to a blocked
 # session failed with "No such file or directory" — leaving EXLOOM_REVIEW_SKIP,
 # which the same message advertises, as the only reachable option.
-ok "no block message tells the session to use CLAUDE_PLUGIN_ROOT"   "$(grep -c 'bash \\${CLAUDE_PLUGIN_ROOT}' "$HOOKS_ABS"/block-unreviewed-execution.sh "$HOOKS_ABS"/lib.sh 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')" "0"
+# Scoped to EVERY hook and command, not just the files already fixed — the first
+# version of this test grepped only the two files the fix touched, so it could
+# never have caught a third. That is the same "fix the instance" defect the whole
+# branch is about, committed inside the regression test for it.
+ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}"   "$(grep -rlE '(bash|sh|cat|find|cp) [^
+]*\\$\{CLAUDE_PLUGIN_ROOT\}' "$HOOKS_ABS" "$HOOKS_ABS/../commands" "$HOOKS_ABS/../scripts" 2>/dev/null | wc -l | tr -d ' ')" "0"
 ok "exit-review.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/exit-review.sh" ]] && echo yes || echo no)" "yes"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
@@ -820,6 +825,153 @@ VERDICT: REJECTED (n items)
 
 VERDICT: REJECTED (1 items)'
 ok "echoed template does not win over the real verdict" "$(vof)" "REJECTED"
+
+cd "$WORK" || exit 1
+
+echo "== round-2 regressions (every one was a defect a FIX introduced) =="
+
+# Each case reproduces something that broke while closing round 1. On this branch a
+# fix has been worse than the bug more than once, so these are permanent guards.
+
+git checkout -q -b feat/r2 main
+mkdir -p r2
+r2beh() { git add -A >/dev/null 2>&1; git commit -qm "$1" >/dev/null 2>&1
+          exloom_diff_is_behavioural "$2" HEAD && echo yes || echo no; }
+
+# Pointer dereference was classified as a javadoc continuation — a sibling of the
+# `#define` hole, in the same function, introduced by the fix for it.
+printf 'int f(int *o){ *o = 1; return 0; }\n' > r2/d.c
+git add -A >/dev/null 2>&1; git commit -qm dbase >/dev/null 2>&1; RB="$(git rev-parse HEAD)"
+printf 'int f(int *o){ *o = 999; return 0; }\n' > r2/d.c
+ok "pointer deref -> behavioural" "$(r2beh deref "$RB")" "yes"
+
+printf '/**\n * explains f\n */\nint f(void){ return 1; }\n' > r2/j.java
+git add -A >/dev/null 2>&1; git commit -qm jbase >/dev/null 2>&1; RB="$(git rev-parse HEAD)"
+printf '/**\n * explains f much better\n */\nint f(void){ return 1; }\n' > r2/j.java
+ok "javadoc continuation -> NOT behavioural" "$(r2beh javadoc "$RB")" "no"
+
+# A shell script emitting markdown from a heredoc: the `#` marker treated heredoc
+# BODY lines as comments, so exloom mis-classified its own hooks.
+printf 'cat <<EOF\n# heading one\nEOF\n' > r2/e.sh
+git add -A >/dev/null 2>&1; git commit -qm ebase >/dev/null 2>&1; RB="$(git rev-parse HEAD)"
+printf 'cat <<EOF\n# heading TWO CHANGED\nEOF\n' > r2/e.sh
+ok "heredoc body in .sh -> behavioural" "$(r2beh heredoc "$RB")" "yes"
+git checkout -q feat/x
+
+echo "== verdict decoration: every form an LLM actually emits =="
+
+subrepo vdec
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+VVD=".claude/reviews/feat/plan.verdicts"
+vsay() { rm -rf .claude/reviews
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
+ 'tool_output':sys.argv[1]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$VVD/l1-reviewer.json" 2>/dev/null | tail -1; }
+
+ok "VERDICT: **APPROVED**"         "$(vsay 'VERDICT: **APPROVED**')" "APPROVED"
+ok "**VERDICT:** REJECTED (2)"     "$(vsay '**VERDICT:** REJECTED (2 items)')" "REJECTED"
+ok "- **VERDICT:** APPROVED"       "$(vsay '- **VERDICT:** APPROVED')" "APPROVED"
+ok "VERDICT: APPROVED."            "$(vsay 'VERDICT: APPROVED.')" "APPROVED"
+ok "APPROVED WITH CHANGES -> UNKNOWN" "$(vsay 'VERDICT: APPROVED WITH CHANGES')" "UNKNOWN"
+
+# A heading containing "clean" cleared severity and dropped every finding under it.
+rm -rf .claude/reviews
+python3 -c "
+import json
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
+ 'tool_output':'## Critical (cleanup of stale handlers)\n- src/one.go:4 — real defect\n\nVERDICT: REJECTED (1 items)'}))" \
+ | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "'Critical (cleanup...)' still records findings" \
+   "$(grep -c . "$VVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
+
+echo "== the escape a block prints must actually run =="
+
+subrepo escape
+rm -rf docs/plans
+ok "no plan visible -> blocked" \
+   "$(x '{"tool_name":"Edit","tool_input":{"file_path":"src/one.go"}}')" "2"
+ok "the escape the message prints is NOT blocked" \
+   "$(x '{"tool_name":"Bash","tool_input":{"command":"touch .claude/exloom-no-plan"}}')" "0"
+: > .claude/exloom-no-plan
+ok "after the recorded decision -> allowed" \
+   "$(x '{"tool_name":"Edit","tool_input":{"file_path":"src/one.go"}}')" "0"
+
+echo "== read-only commands must not be gated =="
+
+subrepo ro; printf '# plan\n- src/one.go\n' > docs/plans/p.md
+ok "read-only: git branch"        "$(x '{"tool_name":"Bash","tool_input":{"command":"git branch"}}')" "0"
+ok "read-only: git worktree list" "$(x '{"tool_name":"Bash","tool_input":{"command":"git worktree list"}}')" "0"
+ok "read-only: npm ls"            "$(x '{"tool_name":"Bash","tool_input":{"command":"npm ls"}}')" "0"
+ok "read-only: go version"        "$(x '{"tool_name":"Bash","tool_input":{"command":"go version"}}')" "0"
+ok "write form still gated: git switch -c" \
+   "$(x '{"tool_name":"Bash","tool_input":{"command":"git switch -c other"}}')" "2"
+
+echo "== scope: basename uniqueness must count repo-root files =="
+
+subrepo rootbase
+mkdir -p cmd/x
+printf 'package main\n' > main.go
+printf 'package main\n' > cmd/x/main.go
+printf '# plan\n- cmd/x/main.go\n' > docs/plans/p.md
+git add -A >/dev/null 2>&1; git commit -qm two-mains >/dev/null 2>&1
+RBD=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RBD"
+printf '{"agent":"plan-reviewer","artifact":"docs/plans/p.md","artifact_hash":"%s","verdict":"APPROVED","at":"now"}\n' \
+  "$(git hash-object docs/plans/p.md)" > "$RBD/plan-reviewer.json"
+ok "plan names cmd/x/main.go -> root main.go blocked" \
+   "$(x '{"tool_name":"Edit","tool_input":{"file_path":"main.go"}}')" "2"
+ok "the file the plan names -> allowed" \
+   "$(x '{"tool_name":"Edit","tool_input":{"file_path":"cmd/x/main.go"}}')" "0"
+
+echo "== proof: the three-run protocol, which shipped with no fixtures =="
+
+PRV="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+prv() { local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+        git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+        : > .claude/exloom-gate.enabled; printf 'bash tests/t.sh\n' > .claude/exloom-test-command; }
+prvrun() { bash "$PRV" --base "$1" >/dev/null 2>&1; echo $?; }
+
+prv void
+printf 'g(){ return 0; }\n' > src/l.sh
+printf '. ./missing/dep.sh\ng\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1; PB="$(git rev-parse HEAD)"
+printf 'g(){ return 0; }\nh(){ return 0; }\n' > src/l.sh
+printf '. ./missing/dep.sh\ng && h\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+ok "base suite cannot run -> PROOF VOID" "$(prvrun "$PB")" "2"
+
+prv real
+printf 'calc(){ echo 4; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "4" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1; PB="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "5" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+ok "genuine behavioural test -> PROVED" "$(prvrun "$PB")" "0"
+ok "--cmd false -> PROOF VOID" \
+   "$(bash "$PRV" --base "$PB" --cmd false >/dev/null 2>&1; echo $?)" "2"
+
+echo "== re-find disposition: next-line keyword, and legacy checklists =="
+
+subrepo disp
+LD=".claude/reviews/feat/plan.verdicts"; mkdir -p "$LD"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:10","fingerprint":"HIGH|a.go|nullderef","head":"h","at":"t"}\n{"round":2,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:20","fingerprint":"HIGH|a.go|nullderef","head":"h","at":"t"}\n' > "$LD/l1-reviewer.findings.jsonl"
+DCHK=".claude/reviews/feat/plan.md"
+
+printf '# checklist\n' > "$DCHK"
+CHECKLIST_CONTENT="$(cat "$DCHK")" exloom_check_refinds "$DCHK" HEAD "test" 2>/dev/null
+ok "undisposed re-find -> blocked" "$?" "2"
+
+printf '# checklist\n\n## Re-finds\n- src/a.go:10\n  FIXED THE CLASS: property test over every branch.\n\n## Other\n' > "$DCHK"
+CHECKLIST_CONTENT="$(cat "$DCHK")" exloom_check_refinds "$DCHK" HEAD "test" 2>/dev/null
+ok "keyword on the NEXT line disposes it" "$?" "0"
+
+printf '# legacy checklist\n\n## L1 code review\n- src/a.go:10 — fixed\n' > "$DCHK"
+CHECKLIST_CONTENT="$(cat "$DCHK")" exloom_check_refinds "$DCHK" HEAD "test" 2>/dev/null
+ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
 
 cd "$WORK" || exit 1
 

@@ -39,7 +39,17 @@ Two of the rules above are judgment the hook cannot make, so it derives a lower 
 
 ## Step 3 — Create the checklist
 
-Copy the template from `${CLAUDE_PLUGIN_ROOT}/templates/review-checklist.md` to `.claude/reviews/<branch-name>.md`. Substitute:
+Copy the plugin's `templates/review-checklist.md` to `.claude/reviews/<branch-name>.md`.
+
+`${CLAUDE_PLUGIN_ROOT}` is interpolated by the harness into `plugin.json` hook
+commands only — it is **not** set in your shell, so a command using it fails with
+"No such file or directory". Locate the template instead:
+
+```bash
+find ~/.claude/plugins -path '*exloom*/templates/review-checklist.md' | head -1
+```
+
+Substitute:
 
 - `<branch-name>` → actual branch.
 - `[0 | 1 | 2 | 3]` → the confirmed tier.

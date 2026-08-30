@@ -78,7 +78,14 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -n "$CMD" ]] || exit 0
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|touch|chmod|ln|make|npx|protoc|awk|gofmt|goimports|black|ruff|isort|prettier|eslint|dotnet|cargo|npm|yarn|pnpm|mvn|gradle|\./gradlew|go|rustfmt|clang-format)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|switch|branch|worktree|clean|merge|rebase|reset|cherry-pick|restore|stash|revert|am)' || exit 0
+    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|touch|chmod|ln|make|npx|protoc|gofmt|goimports|black|ruff|isort|prettier|eslint|rustfmt|clang-format)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|awk[[:space:]]+[^|;]*-i[[:space:]]*inplace|(npm|yarn|pnpm)[[:space:]]+(run|install|ci)|(go|cargo|dotnet)[[:space:]]+(generate|build|fmt)|(mvn|gradle|\./gradlew)[[:space:]]|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|switch|clean|merge|rebase|reset|cherry-pick|restore|stash|revert|am)|git[[:space:]]+branch[[:space:]]+-[mMdD]|git[[:space:]]+worktree[[:space:]]+(add|remove|prune)' || exit 0
+    # A shell command whose only target is under `.claude/` is configuration, not
+    # execution. Without this, the no-plan block tells the session to run
+    # `touch .claude/exloom-no-plan` and then blocks that very command.
+    if printf '%s' "$CMD" | grep -qE '[.]claude/' \
+       && ! printf '%s' "$CMD" | grep -qE '(^|[[:space:]])(src|lib|app|test|tests|pkg|cmd)/'; then
+      exit 0
+    fi
     IS_SHELL=1
     TARGET="$CMD"
     ;;
@@ -173,7 +180,7 @@ done
 # A repo may name additional plan roots (one path per line, committed).
 if [[ -f ".claude/exloom-plan-dirs" ]]; then
   while IFS= read -r d; do
-    d="${d%%#*}"; d="$(printf '%s' "$d" | tr -d '[:space:]')"
+    d="${d%%#*}"; d="${d#"${d%%[![:space:]]*}"}"; d="${d%"${d##*[![:space:]]}"}"
     [[ -n "$d" && -d "$d" ]] && PLAN_DIRS+=( "$d" )
   done < ".claude/exloom-plan-dirs"
 fi
@@ -309,13 +316,23 @@ if [[ -z "$UNCOVERED" ]]; then
   in_scope=0
   while IFS= read -r plan; do
     [[ -n "$plan" && -f "$plan" ]] || continue
-    if grep -qF -- "$REL" "$plan" 2>/dev/null; then in_scope=1; break; fi
+    # Anchored, not a bare substring. `grep -F "main.go"` matched INSIDE
+    # `cmd/x/main.go`, so a plan naming a nested file authorised the root one — and
+    # a plan naming `src/api/user.ts` authorised `src/api/user.ts.bak`. The path
+    # must be followed by end-of-line or a character that cannot continue a path.
+    rel_re="$(printf '%s' "$REL" | sed 's/[^A-Za-z0-9_/-]/[&]/g')"
+    if grep -qE -- "(^|[^A-Za-z0-9_./-])${rel_re}([^A-Za-z0-9_./-]|$)" "$plan" 2>/dev/null; then in_scope=1; break; fi
     # Basename fallback ONLY when that basename is unique in the repo. Otherwise a
     # plan naming src/app.ts authorised tools/scratch/app.ts, and any plan
     # mentioning package.json / index.ts / __init__.py / main.go opened every
     # same-named file there is.
     base="$(basename "$REL")"
-    if [[ "$(git ls-files | grep -c "/${base}$")" -le 1 ]]        && grep -qF -- "$base" "$plan" 2>/dev/null; then in_scope=1; break; fi
+    # Anchored `(^|/)` so a repo-ROOT file is counted — `/${base}$` never matched
+    # one, so the uniqueness rule never fired for root files and a plan naming
+    # cmd/x/main.go still authorised editing ./main.go. `$base` is also escaped
+    # before entering the ERE; unescaped, `.` in `app.ts` matched any character.
+    base_re="$(printf '%s' "$base" | sed 's/[^A-Za-z0-9_-]/[&]/g')"
+    if [[ "$(git ls-files | grep -cE "(^|/)${base_re}$")" -le 1 ]] && grep -qF -- "$base" "$plan" 2>/dev/null; then in_scope=1; break; fi
   done <<< "$PLANS"
 
   [[ $in_scope -eq 1 ]] && exit 0

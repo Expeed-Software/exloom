@@ -154,11 +154,12 @@ try:
 except Exception:
     pass' 2>/dev/null || true)"
   fi
-  if [[ -z "$out" ]]; then
-    # Last resort: the raw payload with tool_input stripped, so author-written
-    # prompt text can never be mistaken for the reviewer's report.
-    out="$(printf '%s' "$HOOK_INPUT" | sed 's/"tool_input"[[:space:]]*:[[:space:]]*{[^}]*}//g')"
-  fi
+  # NO raw-payload fallback. Stripping tool_input with a brace-delimited pattern
+  # stops at the first `}`, so any prompt containing a brace (a code sample, a
+  # ${...}, JSON) left author-written text in the scan, and a prompt quoting the
+  # required output format then supplied the verdict. Reachable exactly where it
+  # matters: Git Bash with neither jq nor python3. UNKNOWN is the honest answer,
+  # and it blocks rather than opens.
   printf '%s' "$out"
 }
 
@@ -183,8 +184,16 @@ SCAN="$(printf '%s' "$SCAN" | sed 's/\\n/\n/g')"
 # the line to be exactly APPROVED/REJECTED with an optional parenthetical, and
 # take the LAST such line in the report.
 VERDICT="UNKNOWN"
+# Decoration is stripped from the WHOLE line before matching. Tolerating it only at
+# the edges left `VERDICT: **APPROVED**`, `**VERDICT:** REJECTED (2 items)`,
+# `- **VERDICT:** APPROVED` and `VERDICT: APPROVED.` all recording UNKNOWN — only the
+# single form the fixture covered worked, so the parser was fitted to its own test a
+# second time. A missed APPROVED is a false block, and the block message answers a
+# false block by naming EXLOOM_REVIEW_SKIP.
 VLINE="$(printf '%s\n' "$SCAN" \
-  | sed -n 's/^[[:space:]*#>_-]*VERDICT:[[:space:]]*\([A-Za-z]*\)[[:space:]]*\((.*)\)\{0,1\}[[:space:]*_]*$/\1/p' \
+  | tr -d '*_`#>' \
+  | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:].]*$//' \
+  | sed -n 's/^VERDICT:[[:space:]]*\([A-Za-z]*\)[[:space:]]*\((.*)\)\{0,1\}$/\1/p' \
   | tr '[:lower:]' '[:upper:]' | grep -E '^(APPROVED|REJECTED)$' | tail -1 || true)"
 case "$VLINE" in
   APPROVED) VERDICT="APPROVED" ;;
@@ -232,7 +241,7 @@ while IFS= read -r fline; do
       case "$head_txt" in
         *pre-existing*) cur_scope="PRE-EXISTING"; [[ -n "$cur_sev" ]] || cur_sev="MED" ;;
       esac
-      case "$head_txt" in *nothing\ to\ flag*|*clean*) cur_sev="" ;; esac
+      case "$head_txt" in *nothing\ to\ flag*) cur_sev="" ;; esac
       continue ;;
   esac
   [[ -n "$cur_sev" ]] || continue
@@ -260,7 +269,7 @@ while IFS= read -r fline; do
 done <<< "$SCAN"
 
 if [[ $n_found -gt 0 ]]; then
-  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) — see scripts/findings-ledger.sh" >&2
+  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) — run scripts/findings-ledger.sh from the repo root" >&2
 fi
 # ---------- artifact reviewers bind to CONTENT, not to a commit ----------
 # A plan or spec is reviewed and then executed, usually before anything is

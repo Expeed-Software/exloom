@@ -210,11 +210,18 @@ if [[ $rc -eq 126 || $rc -eq 127 ]]; then
   exit 1
 fi
 
+# Signatures cover the modal "symbol does not exist at base" form in each language
+# the script auto-detects. Go says `undefined: Foo`, Python NameError/AttributeError,
+# Rust `cannot find function` / error[E0425], C# error CS0103 — none of which the
+# first list had, so those repos still minted a false PROVED. `no such file or
+# directory` was REMOVED: it is a normal assertion failure when a test checks that
+# the change produces an output artifact, and matching it misreported a real proof.
+#
 # A failure that is a BUILD failure rather than a test failure proves only that
 # the tests mention new code — not that they assert anything about its behaviour.
 # The vacuous case is real: a test asserting `typeof f === 'function'` against a
 # deliberately broken `f` produced PROVED, because at base `f` did not exist.
-if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|no such file or directory' "$WT/.exloom-out" 2>/dev/null; then
+if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|NameError|AttributeError: module|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|undefined: [A-Za-z_]|cannot find function|cannot find value|cannot find type|error CS[0-9]+|error\[E0[0-9]+\]|command not found' "$WT/.exloom-out" 2>/dev/null; then
   _receipt NOT_PROVED
   echo
   echo "NOT PROVED — the base run failed to BUILD, not to assert (exit $rc)."

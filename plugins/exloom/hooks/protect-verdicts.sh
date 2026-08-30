@@ -84,13 +84,23 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    # Wholesale destruction of the whole reviews tree names neither the verdicts
-    # directory nor the state file, so it passed both checks below and destroyed
-    # every receipt, the round counter and the findings ledger unopposed.
-    # Checked FIRST and short-circuited: `git clean -fdx` contains no `rm` and no
-    # redirect, so the write-form filter further down would drop it.
-    if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|git[[:space:]]+clean)([^[:alnum:]_]|$)' \
-       && printf '%s' "$CMD" | grep -Eq '\.claude[/\\]reviews|(^|[[:space:]])-[a-z]*[dfx][a-z]*[dfx]'; then
+    # Destruction of the reviews tree names neither the verdicts dir nor the state
+    # file, so it passed both checks below. Reproduced as ALLOWED: `rm -rf
+    # .claude/reviews`, `mv .claude/reviews /tmp`, `git checkout -- .claude/reviews`.
+    # All three destroy every receipt, the round counter and the findings ledger.
+    #
+    # The verb must be in COMMAND position: `grep -rn rm .claude/reviews` merely
+    # mentions `rm` as an argument and is read-only.
+    # Requires the path to be NAMED, deliberately. An earlier version matched a bare
+    # `rm` plus a loose flag heuristic and blocked `rm -f build.log && tar -xzf x.tgz`
+    # — over-blocking is what teaches people to reach for the bypass.
+    if printf '%s' "$CMD" | grep -Eq '[.]claude/reviews' \
+       && printf '%s' "$CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
+      TARGET="$CMD"
+    elif printf '%s' "$CMD" | grep -Eq '(^|[;&|(][[:space:]]*)git[[:space:]]+clean([[:space:]]|$)' \
+         && printf '%s' "$CMD" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*[dx]'; then
+      # `git clean -fdx` removes untracked files repo-wide, which includes an
+      # uncommitted checklist, state file and receipts, without naming them.
       TARGET="$CMD"
     elif ! printf '%s' "$CMD" | grep -Eq "$VERDICT_RE"; then
       exit 0

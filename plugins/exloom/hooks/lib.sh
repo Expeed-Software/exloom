@@ -342,15 +342,21 @@ exloom_diff_is_behavioural() {
   #
   # So the marker set is chosen per file, and any file whose language is unknown
   # is treated as having NO comment markers — i.e. every changed line counts.
-  files="$(git diff --name-only "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  # -z + tr: `git diff --name-only` quotes paths containing non-ASCII or special
+  # characters (core.quotepath), and the quoted form then matched no file at all.
+  files="$(git -c core.quotepath=false diff --name-only "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)"
   [[ -n "$files" ]] || return 1
 
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     ext="${f##*.}"
     case "$ext" in
-      py|rb|sh|bash|zsh|yaml|yml|toml|ini|cfg|conf|tf|Dockerfile|dockerfile|gitignore|env)
+      py|rb|yaml|yml|toml|ini|cfg|conf|tf|Dockerfile|dockerfile|gitignore|env)
         marker='#' ;;
+      sh|bash|zsh)
+        # No marker: a `#` line may be a heredoc body, and there is no way to tell
+        # from a diff line. Every changed line counts.
+        marker='' ;;
       java|kt|kts|scala|groovy|js|jsx|ts|tsx|mjs|cjs|go|swift|dart|php|c|h|cc|cpp|hpp|cs|rs|proto)
         # `//` only. NOT `#` (C preprocessor, C# directives, Rust attributes) and
         # NOT `--` (a wrapped CLI flag). `//go:` is a directive, excluded below.
@@ -377,7 +383,8 @@ exloom_diff_is_behavioural() {
         '//') case "$stripped" in
                 '//go:'*) return 0 ;;            # build/generate directive: code
                 '//'*|'/*'*|'*/'*) continue ;;
-                '*'*) continue ;;                # javadoc continuation
+                '* '*) continue ;;               # javadoc continuation: star SPACE
+                '*'*) return 0 ;;                # `*p = x` is a dereference, not a comment
               esac ;;
         '--') case "$stripped" in '--'*) continue ;; esac ;;
         '<!--') case "$stripped" in '<!--'*|'-->'*) continue ;; esac ;;
@@ -424,13 +431,32 @@ exloom_check_refinds() {
     cite="$(printf '%s\n' "$content" | grep -F "\"fingerprint\":\"${fp}\"" \
             | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p' | head -1)"
     # Disposed when the checklist names the cite in its Re-finds section.
-    # Must appear inside the `## Re-finds` section AND carry a disposition
-    # keyword. Same section-scoped extraction the escape-hatch audit already uses.
+    # Disposition rules, in order of strictness:
+    #
+    #   1. A `## Re-finds` section exists -> the cite must appear inside it, and a
+    #      disposition keyword must appear on that line OR within the two lines
+    #      after it. Requiring the keyword on the SAME physical line rejected the
+    #      natural two-line entry (cite, then `FIXED THE CLASS:` beneath), which
+    #      neither the block message nor the template asked for.
+    #
+    #   2. NO `## Re-finds` section -> the checklist predates this mechanism.
+    #      Fall back to the cite appearing anywhere. Scoping without this made every
+    #      in-flight branch permanently unblockable, with no migration path: a
+    #      regression worse than the weak check it replaced.
     if [[ -n "$cite" ]]; then
       local refind_section
-      refind_section="$(printf '%s
-' "$CHECKLIST_CONTENT"         | awk '/^## Re-finds/{f=1;next} /^## /{f=0} f')"
-      if printf '%s' "$refind_section" | grep -F -- "$cite"          | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE'; then continue; fi
+      refind_section="$(printf '%s\n' "$CHECKLIST_CONTENT" \
+        | awk '/^## Re-finds/{f=1;next} /^## /{f=0} f')"
+      if [[ -n "$refind_section" ]]; then
+        if printf '%s\n' "$refind_section" \
+           | grep -A2 -F -- "$cite" \
+           | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE'; then continue; fi
+      else
+        if printf '%s' "$CHECKLIST_CONTENT" | grep -qF -- "$cite"; then
+          echo "exloom: '$cite' disposed by a checklist with no '## Re-finds' section (legacy format, audit)" >&2
+          continue
+        fi
+      fi
     fi
     refinds="${refinds}  - ${cite:-<uncited>}  (reported in rounds ${rounds})"$'\n'
   done < <(printf '%s\n' "$content" | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u)
