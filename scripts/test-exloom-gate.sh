@@ -279,6 +279,28 @@ ok "reading a receipt -> allowed" \
 ok "unrelated command -> allowed" \
   "$(deny '{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}')" "0"
 
+echo "== protection: state file and wholesale deletion =="
+
+# The freeze was liftable by writing one JSON file: `.claude/*` was exempt in the
+# execution gate and protect-verdicts matched only `.verdicts/`. And `rm -rf
+# .claude/reviews` / `git clean -fdx` name neither, so both destroyed every
+# receipt, the round counter and the findings ledger unopposed.
+ok "writing the review STATE file -> denied"   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.state"}}')" "2"
+ok "editing the CHECKLIST is still allowed"   "$(deny '{"tool_name":"Edit","tool_input":{"file_path":".claude/reviews/feat/x.md"}}')" "0"
+ok "rm -rf of the reviews tree -> denied"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"rm -rf .claude/reviews"}}')" "2"
+ok "git clean -fdx -> denied"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"git clean -fdx"}}')" "2"
+ok "reading the state file -> allowed"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"cat .claude/reviews/feat/x.state"}}')" "0"
+
+echo "== remediation commands in block messages must actually run =="
+
+# ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is NOT
+# set in the Bash environment, so every sanctioned escape printed to a blocked
+# session failed with "No such file or directory" — leaving EXLOOM_REVIEW_SKIP,
+# which the same message advertises, as the only reachable option.
+ok "no block message tells the session to use CLAUDE_PLUGIN_ROOT"   "$(grep -c 'bash \\${CLAUDE_PLUGIN_ROOT}' "$HOOKS_ABS"/block-unreviewed-execution.sh "$HOOKS_ABS"/lib.sh 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')" "0"
+ok "exit-review.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/exit-review.sh" ]] && echo yes || echo no)" "yes"
+ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
+
 echo "== record-reviewer-verdict hook (a real dispatch writes one) =="
 
 git checkout -q -b feat/rec main
@@ -641,9 +663,13 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 }
 LEDGER="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/findings-ledger.sh"
 
-report enter 'VERDICT: REJECTED (2 items)
-- Critical src/one.go:42 null deref on the empty branch
-- Minor src/one.go:9 name could be clearer'
+report enter '## Critical (must fix before merge)
+- src/one.go:42 — null deref on the empty branch
+
+## Minor (may defer with a reason in the checklist)
+- src/one.go:9 — name could be clearer
+
+VERDICT: REJECTED (2 items)'
 ok "findings recorded with severity and cite" \
    "$(grep -c '"severity"' "$LVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "2"
 ok "no re-find after one round" \
@@ -651,8 +677,10 @@ ok "no re-find after one round" \
 
 bash "$EXIT_RV" >/dev/null 2>&1
 # Round 2 re-reports the same defect: the fix addressed the instance, not the rule.
-report enter 'VERDICT: REJECTED (1 items)
-- Critical src/one.go:57 null deref on the empty branch'
+report enter '## Critical (must fix before merge)
+- src/one.go:57 — null deref on the empty branch
+
+VERDICT: REJECTED (1 items)'
 ok "same defect in round 2 -> flagged as a re-find" \
    "$(bash "$LEDGER" | grep -c 'rounds 1,2')" "1"
 ok "ledger reports both review rounds" \
@@ -660,8 +688,10 @@ ok "ledger reports both review rounds" \
 
 # Pre-existing findings are counted separately and never as blocking.
 bash "$EXIT_RV" >/dev/null 2>&1
-report enter 'VERDICT: APPROVED
-- PRE-EXISTING Important src/legacy.go:12 unrelated resource leak'
+report enter '## Pre-existing (backlog, not this branch)
+- src/legacy.go:12 — unrelated resource leak
+
+VERDICT: APPROVED'
 ok "pre-existing finding is classified, not counted as blocking" \
    "$(grep -c '"scope":"PRE-EXISTING"' "$LVD/l1-reviewer.findings.jsonl" | head -1)" "1"
 ok "severity trend shows round 3 with zero blocking" \
@@ -681,6 +711,117 @@ ok "undisposed re-find -> blocked" "$?" "2"
 printf '# checklist\n\n## Re-finds\n- src/one.go:42 — FIXED THE CLASS: added a property test over every branch.\n' > "$LCHK"
 CHECKLIST_CONTENT="$(cat "$LCHK")" exloom_check_refinds "$LCHK" HEAD "test" 2>/dev/null
 ok "re-find with a recorded disposition -> allowed" "$?" "0"
+
+echo "== classifier: real code the old version called non-behavioural =="
+
+# Every case below was reproduced by review as a FALSE non-behavioural, which
+# kept a stale reviewer receipt "covering" a changed commit.
+git checkout -q -b feat/cls main
+mkdir -p csrc
+beh() { git add -A >/dev/null 2>&1; git commit -qm "$1" >/dev/null 2>&1;
+        exloom_diff_is_behavioural "$2" HEAD && echo yes || echo no; }
+
+printf '#define TIMEOUT 5\n#include <stdio.h>\nint main(){return 0;}\n' > csrc/a.c
+git add -A >/dev/null 2>&1; git commit -qm c-base >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '#define TIMEOUT 300\n#include <stdio.h>\nint main(){return 0;}\n' > csrc/a.c
+ok "C #define change -> behavioural" "$(beh cdef "$CB")" "yes"
+
+CB="$(git rev-parse HEAD)"
+printf '#define TIMEOUT 300\n#include <stdlib.h>\nint main(){return 0;}\n' > csrc/a.c
+ok "C #include change -> behavioural" "$(beh cinc "$CB")" "yes"
+
+CB="$(git rev-parse HEAD)"
+printf '#login{display:block}\n' > csrc/s.css
+git add -A >/dev/null 2>&1; git commit -qm cssbase >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '#login{display:none}\n' > csrc/s.css
+ok "CSS #id rule change -> behavioural" "$(beh css "$CB")" "yes"
+
+printf '//go:build linux\npackage m\n' > csrc/m.go
+git add -A >/dev/null 2>&1; git commit -qm gobase >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '//go:build ignore\npackage m\n' > csrc/m.go
+ok "Go build directive -> behavioural" "$(beh godir "$CB")" "yes"
+
+printf '#!/bin/sh\necho hi\n' > csrc/r.sh
+git add -A >/dev/null 2>&1; git commit -qm shbase >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '#!/usr/bin/env bash\necho hi\n' > csrc/r.sh
+ok "shebang change -> behavioural" "$(beh shebang "$CB")" "yes"
+
+printf 'BINARY-v1\x00\x01' > csrc/lib.jar
+git add -A >/dev/null 2>&1; git commit -qm binbase >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf 'TOTALLY-DIFFERENT-v2\x00\x02' > csrc/lib.jar
+ok "binary file swap -> behavioural" "$(beh bin "$CB")" "yes"
+
+CB="$(git rev-parse HEAD)"
+git mv csrc/a.c csrc/renamed.c >/dev/null 2>&1
+ok "pure rename -> behavioural" "$(beh ren "$CB")" "yes"
+
+# And the true negatives must still hold.
+printf '// explains it\npackage m\n' > csrc/m2.go
+git add -A >/dev/null 2>&1; git commit -qm m2 >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '// explains it much better\npackage m\n' > csrc/m2.go
+ok "Go // comment change -> NOT behavioural" "$(beh gocmt "$CB")" "no"
+
+printf '# a python comment\nx = 1\n' > csrc/p.py
+git add -A >/dev/null 2>&1; git commit -qm pbase >/dev/null 2>&1; CB="$(git rev-parse HEAD)"
+printf '# a different python comment\nx = 1\n' > csrc/p.py
+ok "Python # comment change -> NOT behavioural" "$(beh pycmt "$CB")" "no"
+git checkout -q feat/x
+
+echo "== reviewer output parsed as the shipped agents actually print it =="
+
+# Fixtures copied from agents/l1-reviewer.md's own "Output format — strict" block.
+# The previous fixtures put severity and cite on ONE line — a shape no agent emits —
+# so the parser passed its tests while recording nothing from a real report.
+subrepo realfmt
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+RVD=".claude/reviews/feat/plan.verdicts"
+rpt() { rm -rf .claude/reviews
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review. Format: VERDICT: APPROVED'},
+ 'tool_output':sys.argv[1]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
+vof() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$RVD/l1-reviewer.json" 2>/dev/null | tail -1; }
+nf()  { grep -c . "$RVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1; }
+
+rpt '## Critical (must fix before merge)
+- src/one.go:42 — null deref when the list is empty
+- src/two.go:17 — unclosed reader on the error path
+
+## Minor (may defer with a reason in the checklist)
+- src/three.go:5 — name could be clearer
+
+## Nothing to flag in
+- src/four.go
+
+VERDICT: REJECTED (3 items)'
+ok "shipped format -> findings recorded" "$(nf)" "3"
+ok "shipped format -> REJECTED" "$(vof)" "REJECTED"
+ok "'Nothing to flag in' is not a finding" \
+   "$(grep -c 'four.go' "$RVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "0"
+ok "severity comes from the heading" \
+   "$(grep -c '"severity":"HIGH"' "$RVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "2"
+
+rpt '## Critical (must fix before merge)
+- src/one.go:9 — boom
+
+**VERDICT: REJECTED (1 items)**'
+ok "bold verdict is read" "$(vof)" "REJECTED"
+
+rpt 'VERDICT: APPROVED WITH CHANGES'
+ok "APPROVED WITH CHANGES is not an approval" "$(vof)" "UNKNOWN"
+
+rpt 'My output format is:
+VERDICT: APPROVED
+VERDICT: REJECTED (n items)
+
+## Critical (must fix before merge)
+- src/one.go:3 — real defect
+
+VERDICT: REJECTED (1 items)'
+ok "echoed template does not win over the real verdict" "$(vof)" "REJECTED"
+
+cd "$WORK" || exit 1
 
 echo "== prove-change-is-tested (author-side, before review) =="
 

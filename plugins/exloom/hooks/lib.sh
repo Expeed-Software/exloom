@@ -9,6 +9,13 @@
 # touch git. Every git failure fails OPEN (return/exit 0 at the call site) —
 # exloom blocks on missing evidence, never on an infrastructure hiccup.
 
+# Resolved once so block messages can print a command that actually runs.
+# `${CLAUDE_PLUGIN_ROOT}` is interpolated by the harness into plugin.json only;
+# it is NOT set in the Bash tool environment, so every remediation command that
+# used it failed with "No such file or directory" and left the bypass as the
+# only reachable option.
+EXLOOM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 # ---------- JSON field extraction (jq -> python3 -> sed) ----------
 # Extract a top-level string field from hook input. Args: <json> <field>.
 # The sed fallback truncates at the first quote, so callers that need a value
@@ -306,26 +313,79 @@ checklist, and re-run /review-complete."
 # direction costs one unnecessary review; being wrong in the other ships unreviewed
 # code, so the asymmetry is deliberate.
 exloom_diff_is_behavioural() {
-  local from="$1" to="$2" body line stripped
-  # Whitespace-only changes are already excluded by -w.
-  body="$(git diff -w --no-color "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)" || return 0
-  [[ -n "$body" ]] || return 1
+  local from="$1" to="$2" files f ext body line stripped marker
 
-  while IFS= read -r line; do
-    case "$line" in
-      '+++'*|'---'*|'@@'*|'diff --git'*|'index '*|'new file'*|'deleted file'*|'similarity'*|'rename '*) continue ;;
-      '+'*|'-'*) ;;
-      *) continue ;;                      # context line
+  # ---------- binary and metadata changes are ALWAYS behavioural ----------
+  # `git diff` emits only "Binary files a/x and b/x differ" for a binary change,
+  # which carries no +/- lines at all — so a line-based classifier called it
+  # non-behavioural and every reviewer receipt stayed "covering". Swapping a
+  # vendored .jar, a .dll, a model weight, a keystore or a wasm blob kept a stale
+  # review valid. Same shape for a pure rename and a file-mode change.
+  # --numstat reports "-\t-\tpath" for binary, which is unambiguous.
+  if git diff --numstat "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -qE '^-[[:space:]]+-[[:space:]]'; then
+    return 0
+  fi
+  if git diff --no-color "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -qE '^(old mode|new mode|rename from|rename to|deleted file|new file) '; then
+    return 0
+  fi
+
+  # ---------- comment markers are per-language, never universal ----------
+  # Treating `#` as a comment everywhere classified real code as inert:
+  #   #define TIMEOUT 300 / #include <stdlib.h>   (C/C++/ObjC/C#)
+  #   #[derive(...)] / #![allow]                  (Rust attributes)
+  #   #login { display: none }                    (CSS id selector)
+  #   //go:build linux / //go:generate            (Go directives)
+  #   #!/bin/sh                                   (shebang)
+  # Each was verified to flip the whole diff to non-behavioural.
+  #
+  # So the marker set is chosen per file, and any file whose language is unknown
+  # is treated as having NO comment markers — i.e. every changed line counts.
+  files="$(git diff --name-only "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    ext="${f##*.}"
+    case "$ext" in
+      py|rb|sh|bash|zsh|yaml|yml|toml|ini|cfg|conf|tf|Dockerfile|dockerfile|gitignore|env)
+        marker='#' ;;
+      java|kt|kts|scala|groovy|js|jsx|ts|tsx|mjs|cjs|go|swift|dart|php|c|h|cc|cpp|hpp|cs|rs|proto)
+        # `//` only. NOT `#` (C preprocessor, C# directives, Rust attributes) and
+        # NOT `--` (a wrapped CLI flag). `//go:` is a directive, excluded below.
+        marker='//' ;;
+      sql|hs|lua|elm)      marker='--' ;;
+      md|markdown|html|htm|xml|svg|vue) marker='<!--' ;;
+      *)                   marker='' ;;   # unknown language: nothing is a comment
     esac
-    stripped="${line:1}"
-    stripped="${stripped#"${stripped%%[![:space:]]*}"}"   # ltrim
-    [[ -z "$stripped" ]] && continue
-    case "$stripped" in
-      '//'*|'#'*|'*'*|'/*'*|'*/'*|'--'*|'<!--'*|'-->'*|'"""'*|"'''"*) continue ;;
-    esac
-    return 0                              # a real code line changed
-  done <<< "$body"
-  return 1                                # comments/blank only
+
+    body="$(git diff -w --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    while IFS= read -r line; do
+      # Real diff headers have a space then a path; `+++i;` and `---force` do not.
+      case "$line" in
+        '+++ '*|'--- '*|'@@'*|'diff --git '*|'index '*) continue ;;
+        '+'*|'-'*) ;;
+        *) continue ;;
+      esac
+      stripped="${line:1}"
+      stripped="${stripped#"${stripped%%[![:space:]]*}"}"
+      [[ -z "$stripped" ]] && continue
+
+      case "$marker" in
+        '#')  case "$stripped" in '#!'*) return 0 ;; '#'*) continue ;; esac ;;
+        '//') case "$stripped" in
+                '//go:'*) return 0 ;;            # build/generate directive: code
+                '//'*|'/*'*|'*/'*) continue ;;
+                '*'*) continue ;;                # javadoc continuation
+              esac ;;
+        '--') case "$stripped" in '--'*) continue ;; esac ;;
+        '<!--') case "$stripped" in '<!--'*|'-->'*) continue ;; esac ;;
+      esac
+      return 0
+    done <<< "$body"
+  done <<< "$files"
+  return 1
 }
 
 # ---------- re-finds: the instance-not-the-rule detector ----------
@@ -350,9 +410,8 @@ exloom_check_refinds() {
   local vdir content fp rounds refinds=""
 
   vdir="$(exloom_verdict_dir "$checklist")"
-  content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${vdir}" 2>/dev/null || true)"
-  # Findings files are per-agent; read them from the working tree (they are written
-  # by a hook and protected from hand-editing, same as every other receipt).
+  # Findings files are per-agent, read from the working tree: they are written by
+  # a hook and protected from hand-editing, same as every other receipt.
   content="$(cat "${vdir}"/*.findings.jsonl 2>/dev/null || true)"
   [[ -n "$content" ]] || return 0
 
@@ -365,7 +424,14 @@ exloom_check_refinds() {
     cite="$(printf '%s\n' "$content" | grep -F "\"fingerprint\":\"${fp}\"" \
             | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p' | head -1)"
     # Disposed when the checklist names the cite in its Re-finds section.
-    if [[ -n "$cite" ]] && printf '%s' "$CHECKLIST_CONTENT" | grep -qF -- "$cite"; then continue; fi
+    # Must appear inside the `## Re-finds` section AND carry a disposition
+    # keyword. Same section-scoped extraction the escape-hatch audit already uses.
+    if [[ -n "$cite" ]]; then
+      local refind_section
+      refind_section="$(printf '%s
+' "$CHECKLIST_CONTENT"         | awk '/^## Re-finds/{f=1;next} /^## /{f=0} f')"
+      if printf '%s' "$refind_section" | grep -F -- "$cite"          | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE'; then continue; fi
+    fi
     refinds="${refinds}  - ${cite:-<uncited>}  (reported in rounds ${rounds})"$'\n'
   done < <(printf '%s\n' "$content" | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u)
 
@@ -389,7 +455,7 @@ pick one:
   2. GENUINELY SEPARATE — say why this defect is unrelated to the earlier one
      despite matching it.
 
-Run: bash \${CLAUDE_PLUGIN_ROOT}/scripts/findings-ledger.sh"
+Run: bash \"$EXLOOM_LIB_DIR/../scripts/findings-ledger.sh\""
   return 2
 }
 
@@ -441,7 +507,7 @@ That is one of:
 
 Run it, then commit the receipt with the checklist:
 
-    bash \${CLAUDE_PLUGIN_ROOT}/scripts/prove-change-is-tested.sh
+    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\"
 
 It removes your source change in a throwaway worktree, keeps your tests, and runs
 them. Your working tree is never touched. The receipt is written by that script

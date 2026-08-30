@@ -66,7 +66,12 @@ except Exception:
 # `.verdicts/` is distinctive enough to match on its own; requiring the full
 # `.claude/reviews/` prefix would miss an absolute path on Windows, where the
 # separator is a backslash.
-VERDICT_RE='\.verdicts[/\\]'
+# Matches the verdicts dir, the review STATE file, and the reviews directory
+# itself. The state file was writable with the Edit tool, which lifted a review
+# freeze without a record and reset the round counter — the one number the
+# feature exists to surface. And `rm -rf .claude/reviews` / `git clean -fdx`
+# contain no `.verdicts` substring, so both destroyed every receipt unopposed.
+VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)'
 
 TARGET=""
 case "$TOOL" in
@@ -79,11 +84,22 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    printf '%s' "$CMD" | grep -Eq "$VERDICT_RE" || exit 0
-    # Reading, staging and committing receipts must keep working — only deny the
-    # forms that create or change one.
-    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
-    TARGET="$CMD"
+    # Wholesale destruction of the whole reviews tree names neither the verdicts
+    # directory nor the state file, so it passed both checks below and destroyed
+    # every receipt, the round counter and the findings ledger unopposed.
+    # Checked FIRST and short-circuited: `git clean -fdx` contains no `rm` and no
+    # redirect, so the write-form filter further down would drop it.
+    if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|git[[:space:]]+clean)([^[:alnum:]_]|$)' \
+       && printf '%s' "$CMD" | grep -Eq '\.claude[/\\]reviews|(^|[[:space:]])-[a-z]*[dfx][a-z]*[dfx]'; then
+      TARGET="$CMD"
+    elif ! printf '%s' "$CMD" | grep -Eq "$VERDICT_RE"; then
+      exit 0
+    else
+      # Reading, staging and committing receipts must keep working — only deny
+      # the forms that create or change one.
+      printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
+      TARGET="$CMD"
+    fi
     ;;
   *) exit 0 ;;
 esac

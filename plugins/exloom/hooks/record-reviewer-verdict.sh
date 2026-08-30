@@ -117,27 +117,13 @@ SUBAGENT="$(_safe "$SUBAGENT")"
 SESSION="$(_safe "$SESSION")"
 [[ -n "$SUBAGENT" ]] || exit 0
 
-# ---------- artifact reviewers bind to CONTENT, not to a commit ----------
-# A plan or spec is reviewed and then executed, usually before anything is
-# committed — so a commit SHA cannot express "this review covers this document".
-# The blob hash can, and it invalidates itself the moment the document is edited.
-# That is the FREEZE rule as a mechanism rather than a paragraph.
-#
-# The artifact is named in the dispatch prompt. If the prompt does not name one,
-# NO artifact is recorded — the receipt then covers nothing and the execution
-# gate stays shut. That is deliberate: a reviewer dispatched without naming what
-# it reviewed has not produced reviewable evidence.
-# ---------- what did the reviewer CONCLUDE? ----------
-# Until now the receipt recorded that a reviewer RAN, never what it found — so a
-# REJECTED verdict opened the gate exactly like an APPROVED one. "A reviewer was
-# dispatched" is not "the work was reviewed", and the gap between those two is
-# where a session gets nine findings back, decides they are nits, and proceeds.
-#
-# Shape-agnostic on purpose: the subagent's report may arrive as a string, as
-# {"content":[{"type":"text","text":...}]}, or under a different key entirely.
-# Rather than assume one, try the structured paths, then fall back to scanning
-# the raw payload. If none of them yields a verdict the answer is UNKNOWN, which
-# is treated as NOT approved — a gate may not guess in the permissive direction.
+# ---------- read the reviewer's report ----------
+# Shape-agnostic, and with a python3 fallback for the same reason every other
+# extractor in this codebase has one: jq is NOT present by default on Windows Git
+# Bash, and without a fallback the scan silently degraded to the RAW PAYLOAD —
+# which contains `tool_input.prompt`, i.e. author-written text. A dispatch prompt
+# that merely quoted the required output format flipped a rejection into an
+# approval. The raw scan is now a last resort AND has tool_input removed first.
 _response_text() {
   local out=""
   if command -v jq >/dev/null 2>&1; then
@@ -150,64 +136,142 @@ _response_text() {
            + "\n" + (.output // "") + "\n" + (.text // ""))
         else "" end' 2>/dev/null || true)"
   fi
+  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
+    out="$(printf '%s' "$HOOK_INPUT" | python3 -c '
+import json,sys
+def flat(v):
+    if isinstance(v,str): return v
+    if isinstance(v,list): return "\n".join(flat(x) for x in v)
+    if isinstance(v,dict):
+        if "text" in v and isinstance(v["text"],str): return v["text"]
+        return "\n".join(flat(v.get(k,"")) for k in ("content","output","text"))
+    return ""
+try:
+    d=json.load(sys.stdin)
+    for k in ("tool_output","tool_response","tool_result","response"):
+        if k in d:
+            print(flat(d[k])); break
+except Exception:
+    pass' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" ]]; then
+    # Last resort: the raw payload with tool_input stripped, so author-written
+    # prompt text can never be mistaken for the reviewer's report.
+    out="$(printf '%s' "$HOOK_INPUT" | sed 's/"tool_input"[[:space:]]*:[[:space:]]*{[^}]*}//g')"
+  fi
   printf '%s' "$out"
 }
 
-VERDICT="UNKNOWN"
 SCAN="$(_response_text)"
-[[ -n "$SCAN" ]] || SCAN="$HOOK_INPUT"
-# Match a real verdict LINE, and reject any line containing `|` — the agent's own
-# output-format template reads "VERDICT: APPROVED | REJECTED (n items)", and
-# matching that would hand out an APPROVED for a reviewer echoing its instructions.
-VLINE="$(printf '%s\n' "$SCAN" | grep -m1 -iE '(^|\\n)[[:space:]]*VERDICT:[[:space:]]*(APPROVED|REJECTED)' | grep -v '|' || true)"
-case "$(printf '%s' "$VLINE" | tr '[:lower:]' '[:upper:]')" in
-  *VERDICT:*APPROVED*) VERDICT="APPROVED" ;;
-  *VERDICT:*REJECTED*) VERDICT="REJECTED" ;;
+# JSON-escaped newlines become real ones so line-anchored matching works.
+SCAN="$(printf '%s' "$SCAN" | sed 's/\\n/\n/g')"
+
+# ---------- what did the reviewer CONCLUDE? ----------
+# Parsed against what the SHIPPED agents actually print. Their output block is a
+# bare `VERDICT: APPROVED` or `VERDICT: REJECTED (n items)`.
+#
+# Three defects this replaces, each reproduced:
+#   - `**VERDICT: APPROVED**` recorded UNKNOWN. Bold is the single most likely
+#     form an LLM emits, so the common case silently blocked a real approval and
+#     the block message then advertised EXLOOM_REVIEW_SKIP.
+#   - `VERDICT: APPROVED WITH CHANGES` recorded APPROVED — a non-approval opening
+#     the gate.
+#   - `grep -m1` took the FIRST match, so a report quoting its own template before
+#     stating a real verdict was scored on the template.
+#
+# So: tolerate markdown decoration before the keyword, require the remainder of
+# the line to be exactly APPROVED/REJECTED with an optional parenthetical, and
+# take the LAST such line in the report.
+VERDICT="UNKNOWN"
+VLINE="$(printf '%s\n' "$SCAN" \
+  | sed -n 's/^[[:space:]*#>_-]*VERDICT:[[:space:]]*\([A-Za-z]*\)[[:space:]]*\((.*)\)\{0,1\}[[:space:]*_]*$/\1/p' \
+  | tr '[:lower:]' '[:upper:]' | grep -E '^(APPROVED|REJECTED)$' | tail -1 || true)"
+case "$VLINE" in
+  APPROVED) VERDICT="APPROVED" ;;
+  REJECTED) VERDICT="REJECTED" ;;
 esac
 
 # ---------- findings become data, not chat ----------
-# Findings currently live in a transcript, so nobody can see that round 8 is
-# re-reporting what round 7 declared fixed. On one real branch, three of the four
-# blocking findings in rounds 8 and 9 were re-finds — visible only because the
-# author reconstructed it by hand at the end.
+# Parsed against the shipped output format, which is:
 #
-# A finding is recorded when a line carries BOTH a severity word and a file:line
-# cite. That joint signal is deliberately conservative: prose about severity, and
-# bare file references, are both ignored. The fingerprint drops line numbers (they
-# shift under edits) and keeps severity + filename + the first words of the text,
-# so the same defect re-reported next round matches even after the file moves.
+#     ## Critical (must fix before merge)
+#     - path/to/file.ext:123 — one sentence problem statement
+#
+# The severity is the HEADING; the finding line carries only a cite. The previous
+# parser required both on one line, so NO shipped agent produced a single
+# recorded finding — the ledger was empty and re-find detection was inert. The
+# suite passed because its fixture put severity and cite on one line, a format
+# nothing emits.
 ROUND="$(sed -n 's/.*"round":\([0-9]*\).*/\1/p' ".claude/reviews/${BRANCH}.state" 2>/dev/null | tail -1)"
 [[ -n "$ROUND" ]] || ROUND=0
 
 FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
 n_found=0
+cur_sev=""
+cur_scope="IN-SCOPE"
+
 while IFS= read -r fline; do
-  [[ -n "$fline" ]] || continue
-  sev="$(printf '%s' "$fline" | grep -oiE '\b(Critical|Blocking|Important|High|Medium|Minor|Low)\b' | head -1 | tr '[:lower:]' '[:upper:]')"
-  [[ -n "$sev" ]] || continue
+  # A heading switches the active severity, and closes it for non-finding sections.
+  case "$fline" in
+    '#'*)
+      head_txt="$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')"
+      cur_sev=""
+      cur_scope="IN-SCOPE"
+      # Normalised across agents: l1 says Critical/Important/Minor, adversarial
+      # says Blocking, security says High/Medium/Low. Unnormalised, the same
+      # defect reported by two reviewers never matched as a re-find.
+      case "$head_txt" in
+        *critical*|*blocking*|*" high"*|*"(high"*) cur_sev="HIGH" ;;
+        *important*|*medium*)                      cur_sev="MED" ;;
+        *minor*|*" low"*|*"(low"*|*advisory*)      cur_sev="LOW" ;;
+      esac
+      # A pre-existing section carries no severity word ("## Pre-existing
+      # (backlog, not this branch)"), so without this its findings were dropped
+      # entirely and the ledger's pre-existing column was permanently zero. They
+      # are recorded — they are simply never blocking.
+      case "$head_txt" in
+        *pre-existing*) cur_scope="PRE-EXISTING"; [[ -n "$cur_sev" ]] || cur_sev="MED" ;;
+      esac
+      case "$head_txt" in *nothing\ to\ flag*|*clean*) cur_sev="" ;; esac
+      continue ;;
+  esac
+  [[ -n "$cur_sev" ]] || continue
+
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   [[ -n "$cite" ]] || continue
-  scope="IN-SCOPE"
+
+  scope="$cur_scope"
   printf '%s' "$fline" | grep -qiE 'PRE-EXISTING' && scope="PRE-EXISTING"
+  printf '%s' "$fline" | grep -qiE 'IN-SCOPE'     && scope="IN-SCOPE"
+
   file="${cite%%:*}"
-  # Fingerprint: severity + basename + first 48 LETTERS of the finding text.
-  # Digits are dropped entirely, not merely the cite: the same defect re-reported
-  # next round almost always carries a different line number (the file moved under
-  # the fix), and keeping digits made `:42` and `:57` two different findings — which
-  # is precisely the re-find this is built to catch.
-  fp="$(printf '%s|%s|%s' "$sev" "$(basename "$file")" \
-        "$(printf '%s' "$fline" | tr -cd 'A-Za-z' | tr '[:upper:]' '[:lower:]' | cut -c1-48)")"
+  # Fingerprint from the text AFTER the cite is removed. Keeping the cite meant
+  # the path dominated the 48-character window, so two unrelated findings in one
+  # deep-path file collapsed into a fabricated re-find, and a moved file never
+  # matched itself.
+  text="$(printf '%s' "$fline" | sed "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||g" \
+          | tr -cd 'A-Za-z' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
+  fp="$(printf '%s|%s|%s' "$cur_sev" "$(basename "$file")" "$text" | tr -cd 'A-Za-z0-9|._-')"
+
   printf '{"round":%s,"agent":"%s","severity":"%s","scope":"%s","cite":"%s","fingerprint":"%s","head":"%s","at":"%s"}\n' \
-    "$ROUND" "$AGENT" "$sev" "$scope" "$cite" \
-    "$(printf '%s' "$fp" | tr -cd 'A-Za-z0-9|._-')" \
-    "$HEAD_SHA" "$STAMP" >> "$FINDINGS_FILE" 2>/dev/null || break
+    "$ROUND" "$AGENT" "$cur_sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
+    >> "$FINDINGS_FILE" 2>/dev/null || break
   n_found=$((n_found + 1))
-done < <(printf '%s\n' "$SCAN" | sed 's/\\n/\n/g')
+done <<< "$SCAN"
 
 if [[ $n_found -gt 0 ]]; then
-  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) — see /review-ledger" >&2
+  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) — see scripts/findings-ledger.sh" >&2
 fi
-
+# ---------- artifact reviewers bind to CONTENT, not to a commit ----------
+# A plan or spec is reviewed and then executed, usually before anything is
+# committed — so a commit SHA cannot express "this review covers this document".
+# The blob hash can, and it invalidates itself the moment the document is edited.
+# That is the FREEZE rule as a mechanism rather than a paragraph.
+#
+# The artifact is named in the dispatch prompt. If the prompt does not name one,
+# NO artifact is recorded — the receipt then covers nothing and the execution
+# gate stays shut. That is deliberate: a reviewer dispatched without naming what
+# it reviewed has not produced reviewable evidence.
 ARTIFACTS=""
 case "$AGENT" in
   plan-reviewer)

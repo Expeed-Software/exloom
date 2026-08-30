@@ -57,6 +57,19 @@
 - [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
 - [ ] Reversal proof runs in CI on this commit
 
+## Re-finds (the same finding reported in more than one round)
+
+A re-find means the previous fix addressed the instance you were shown, not the
+rule behind it — which is why the next round found the adjacent case. Each one
+needs a decision here, naming the cite:
+
+- `<file:line>` — FIXED THE CLASS: <name the test that quantifies over the whole
+  set — every codepoint, every branch, every member — not the instance>
+- `<file:line>` — GENUINELY SEPARATE: <why this defect is unrelated to the earlier
+  one despite matching it>
+
+(none, if no finding was reported twice)
+
 ## Escape hatches used
 - [ ] None (default)
 - Skipped steps with written justification:

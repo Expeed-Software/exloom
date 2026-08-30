@@ -131,23 +131,8 @@ trap cleanup EXIT
 
 git worktree add --detach -q "$WT" "$BASE" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
 
-# Source stays at BASE (the change removed); tests come from the working tree.
-copied=0
-while IFS= read -r t; do
-  [[ -z "$t" ]] && continue
-  [[ -f "$t" ]] || continue
-  mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
-  cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
-done <<< "$TST"
-[[ $copied -gt 0 ]] || { echo "could not stage test files into the worktree" >&2; exit 2; }
-
 echo "base:    ${BASE:0:12}"
 echo "command: $TESTCMD"
-echo "source held at base; $copied test file(s) taken from the working tree"
-echo "running…"
-
-( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
-rc=$?
 
 # ---------- write the receipt ----------
 # Into the SAME protected directory as reviewer receipts, for the same reason:
@@ -172,6 +157,79 @@ _receipt() {
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}) at ${vdir}/proof.json — commit it with the checklist" >&2
 }
+
+# ---------- RUN 1: base source + base tests. MUST PASS. ----------
+# Without this control the whole check was meaningless. The decision used to be
+# `rc != 0 -> PROVED`, so ANY failure in the base worktree minted the receipt:
+#   - the new test references a symbol the change introduced, so it does not
+#     compile at base (the modal case for every change that adds a function);
+#   - `git worktree add` does not copy gitignored files, so node_modules/.venv/
+#     vendor/target are absent and every run fails on a missing dependency —
+#     a repo with gitignored deps got an unconditional PROVED forever;
+#   - a broken runner, an OOM, a daemon crash, or `--cmd false`.
+# Reproduced twice by review. This control turns all of those into "the
+# environment cannot run the suite", which is not evidence of anything.
+echo "run 1/2: base source + base tests (control — must pass)…"
+( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
+base_rc=$?
+if [[ $base_rc -ne 0 ]]; then
+  echo
+  echo "PROOF VOID — the suite does not pass at the base commit (exit $base_rc)."
+  echo "Nothing can be concluded: a failure with your tests added would be"
+  echo "indistinguishable from the environment simply not working here."
+  echo
+  echo "Most common cause: the throwaway worktree has no gitignored dependencies"
+  echo "(node_modules/, .venv/, vendor/, target/). Install them there, pin a"
+  echo "self-contained command in .claude/exloom-test-command, or run this from a"
+  echo "checkout where the suite passes."
+  echo
+  echo "--- last 25 lines ---"; tail -25 "$WT/.base-out" 2>/dev/null
+  exit 2                      # deliberately NO receipt: not proved, not disproved
+fi
+
+# ---------- RUN 2: base source + NEW tests. MUST FAIL, and for the right reason.
+copied=0
+while IFS= read -r t; do
+  [[ -z "$t" ]] && continue
+  [[ -f "$t" ]] || continue
+  mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
+  cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
+done <<< "$TST"
+[[ $copied -gt 0 ]] || { echo "could not stage test files into the worktree" >&2; exit 2; }
+
+echo "run 2/2: base source + your $copied test file(s) (must fail)…"
+( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
+rc=$?
+
+# 126/127 are "not executable" / "command not found" — a broken command, never a
+# test noticing anything.
+if [[ $rc -eq 126 || $rc -eq 127 ]]; then
+  _receipt NOT_PROVED
+  echo; echo "NOT PROVED — the test command could not run (exit $rc)."
+  tail -10 "$WT/.exloom-out" 2>/dev/null
+  exit 1
+fi
+
+# A failure that is a BUILD failure rather than a test failure proves only that
+# the tests mention new code — not that they assert anything about its behaviour.
+# The vacuous case is real: a test asserting `typeof f === 'function'` against a
+# deliberately broken `f` produced PROVED, because at base `f` did not exist.
+if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|no such file or directory' "$WT/.exloom-out" 2>/dev/null; then
+  _receipt NOT_PROVED
+  echo
+  echo "NOT PROVED — the base run failed to BUILD, not to assert (exit $rc)."
+  echo "Your tests reference code the change introduces, so they cannot compile"
+  echo "without it. That shows the tests depend on the change; it does not show"
+  echo "they would notice the change being WRONG."
+  echo
+  echo "To prove that, the test must be able to run against the old code and fail"
+  echo "on the assertion — e.g. exercise behaviour through an interface that"
+  echo "exists at base, or assert on an observable output rather than on a symbol."
+  echo
+  echo "--- last 25 lines ---"; tail -25 "$WT/.exloom-out" 2>/dev/null
+  exit 1
+fi
+
 
 if [[ $rc -ne 0 ]]; then
   _receipt PROVED

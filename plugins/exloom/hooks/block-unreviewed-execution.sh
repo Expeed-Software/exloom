@@ -78,7 +78,7 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -n "$CMD" ]] || exit 0
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|make|npx|protoc)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|restore|stash|revert|am)' || exit 0
+    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|touch|chmod|ln|make|npx|protoc|awk|gofmt|goimports|black|ruff|isort|prettier|eslint|dotnet|cargo|npm|yarn|pnpm|mvn|gradle|\./gradlew|go|rustfmt|clang-format)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|switch|branch|worktree|clean|merge|rebase|reset|cherry-pick|restore|stash|revert|am)' || exit 0
     IS_SHELL=1
     TARGET="$CMD"
     ;;
@@ -143,7 +143,7 @@ never have been reviewed at all.
 If you are acting on findings, leave review deliberately — it is recorded, and the
 round counter is what tells you whether review is converging:
 
-    bash \${CLAUDE_PLUGIN_ROOT}/scripts/exit-review.sh "acting on round ${RND:-?} findings"
+    bash "$SCRIPT_DIR/../scripts/exit-review.sh" "acting on round ${RND:-?} findings"
 
 Before you do: a PRE-EXISTING finding is a backlog entry, not work for this branch.
 
@@ -170,6 +170,39 @@ PLAN_DIRS=()
 for d in docs/plans docs/exloom/plans .claude/plans docs/specs docs/exloom/specs; do
   [[ -d "$d" ]] && PLAN_DIRS+=( "$d" )
 done
+# A repo may name additional plan roots (one path per line, committed).
+if [[ -f ".claude/exloom-plan-dirs" ]]; then
+  while IFS= read -r d; do
+    d="${d%%#*}"; d="$(printf '%s' "$d" | tr -d '[:space:]')"
+    [[ -n "$d" && -d "$d" ]] && PLAN_DIRS+=( "$d" )
+  done < ".claude/exloom-plan-dirs"
+fi
+
+# No plan anywhere the gate can see. Previously this exited 0 — so a session that
+# kept its plan in the conversation, in PLAN.md, in docs/design/ or in a ticket was
+# never gated at all, and nothing said so. The gate silently did not apply, which
+# is the failure mode it exists to prevent.
+if [[ ${#PLAN_DIRS[@]} -eq 0 ]] && [[ ! -f ".claude/exloom-no-plan" ]]; then
+  cat >&2 <<EOF
+exloom review gate: BLOCKED — the gate is enabled but no plan is visible to it.
+
+Looked in: docs/plans, docs/exloom/plans, .claude/plans, docs/specs, docs/exloom/specs
+
+A plan held in the conversation, in a ticket, or in a directory this gate does not
+know about means the plan gate and the scope gate both silently do nothing. That is
+worse than no gate, because the checklist still says the branch was gated.
+
+Pick one:
+  1. Put the plan somewhere above, or name its directory in a committed
+     .claude/exloom-plan-dirs (one path per line).
+  2. This branch genuinely has no plan (a one-line fix, a revert):
+       touch .claude/exloom-no-plan
+     Commit it. It is a recorded decision, visible in review, not a silent skip.
+
+Emergency bypass (audited): set EXLOOM_REVIEW_SKIP=1 in your session env.
+EOF
+  exit 2
+fi
 [[ ${#PLAN_DIRS[@]} -gt 0 ]] || exit 0
 
 ALL_PLANS="$(find "${PLAN_DIRS[@]}" -type f -name '*.md' 2>/dev/null | sed 's|^\./||' | sort -u)"
@@ -277,7 +310,12 @@ if [[ -z "$UNCOVERED" ]]; then
   while IFS= read -r plan; do
     [[ -n "$plan" && -f "$plan" ]] || continue
     if grep -qF -- "$REL" "$plan" 2>/dev/null; then in_scope=1; break; fi
-    if grep -qF -- "$(basename "$REL")" "$plan" 2>/dev/null; then in_scope=1; break; fi
+    # Basename fallback ONLY when that basename is unique in the repo. Otherwise a
+    # plan naming src/app.ts authorised tools/scratch/app.ts, and any plan
+    # mentioning package.json / index.ts / __init__.py / main.go opened every
+    # same-named file there is.
+    base="$(basename "$REL")"
+    if [[ "$(git ls-files | grep -c "/${base}$")" -le 1 ]]        && grep -qF -- "$base" "$plan" 2>/dev/null; then in_scope=1; break; fi
   done <<< "$PLANS"
 
   [[ $in_scope -eq 1 ]] && exit 0
