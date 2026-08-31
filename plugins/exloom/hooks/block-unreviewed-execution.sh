@@ -78,12 +78,21 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -n "$CMD" ]] || exit 0
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|touch|chmod|ln|make|npx|protoc|gofmt|goimports|black|ruff|isort|prettier|eslint|rustfmt|clang-format)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|awk[[:space:]]+[^|;]*-i[[:space:]]*inplace|(npm|yarn|pnpm)[[:space:]]+(run|install|ci)|(go|cargo|dotnet)[[:space:]]+(generate|build|fmt)|(mvn|gradle|\./gradlew)[[:space:]]|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|switch|clean|merge|rebase|reset|cherry-pick|restore|stash|revert|am)|git[[:space:]]+branch[[:space:]]+-[mMdD]|git[[:space:]]+worktree[[:space:]]+(add|remove|prune)' || exit 0
-    # A shell command whose only target is under `.claude/` is configuration, not
-    # execution. Without this, the no-plan block tells the session to run
-    # `touch .claude/exloom-no-plan` and then blocks that very command.
-    if printf '%s' "$CMD" | grep -qE '[.]claude/' \
-       && ! printf '%s' "$CMD" | grep -qE '(^|[[:space:]])(src|lib|app|test|tests|pkg|cmd)/'; then
+    # Redirections to /dev/null, &1 and &2 are NOT writes. `>>?` matched
+    # `2>/dev/null` and `2>&1`, so `grep -rn foo src/ 2>/dev/null`, `./gradlew test`,
+    # `npm run test` and `go build ./...` were all gated — and under a review freeze
+    # that locks out the reviewers just dispatched and the smoke test the gate
+    # itself requires. Strip those forms before shape-matching.
+    SHAPE="$(printf '%s' "$CMD" | sed -e 's/[0-9]*>&[0-9]*//g' -e 's/[0-9]*>>\{0,1\}[[:space:]]*\/dev\/null//g')"
+    printf '%s' "$SHAPE" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|install|dd|patch|touch|chmod|ln|npx|protoc|gofmt|goimports|black|ruff|isort|prettier|eslint|rustfmt|clang-format)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|awk[[:space:]]+[^|;]*-i[[:space:]]*inplace|(npm|yarn|pnpm)[[:space:]]+install|(go|cargo|dotnet)[[:space:]]+(generate|fmt)|(python[0-9.]*|perl|node|ruby|php|deno|bun)[[:space:]]+-[a-zA-Z]*[ce]|git[[:space:]]+(apply|checkout|switch|clean|merge|rebase|reset|cherry-pick|restore|stash|revert|am)|git[[:space:]]+branch[[:space:]]+-[mMdD]|git[[:space:]]+worktree[[:space:]]+(add|remove|prune)' || exit 0
+    # Narrowed to the LITERAL files the block messages tell a session to create.
+    # The previous rule exempted any command merely MENTIONING `.claude/` unless it
+    # also named src|lib|app|test|tests|pkg|cmd — so
+    #   `cat .claude/exloom-gate.enabled; sed -i s/a/b/ internal/server/handler.go`
+    # bypassed everything, and it silently ungated every Go (internal/), Java
+    # (main/java/), .NET and plugin-shaped repo whose source is not under those six
+    # names. It also sat above the freeze check, so it lifted the freeze too.
+    if printf '%s' "$CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(touch|:[[:space:]]*>|printf|echo)[^;&|]*[.]claude/exloom-(no-plan|plan-dirs|test-command)([[:space:]]|$)'; then
       exit 0
     fi
     IS_SHELL=1
@@ -213,6 +222,28 @@ fi
 [[ ${#PLAN_DIRS[@]} -gt 0 ]] || exit 0
 
 ALL_PLANS="$(find "${PLAN_DIRS[@]}" -type f -name '*.md' 2>/dev/null | sed 's|^\./||' | sort -u)"
+# An EMPTY plan directory must take the same branch as no plan directory. Otherwise
+# `mkdir -p docs/plans` is a one-command, permanent, silent disarm of both the plan
+# gate and the scope gate — "looks installed and enforces nothing", which is the
+# worst direction a gate can fail in.
+if [[ -z "$ALL_PLANS" ]] && [[ ! -f ".claude/exloom-no-plan" ]]; then
+  cat >&2 <<EOF
+exloom review gate: BLOCKED — a plan directory exists but contains no plan.
+
+Found: ${PLAN_DIRS[*]}
+
+An empty plan directory is treated exactly like no plan at all. Otherwise creating
+one would silently disable both the plan gate and the scope gate, and the checklist
+would still claim the branch was gated.
+
+Pick one:
+  1. Write the plan, and have it reviewed:  Agent(subagent_type: "exloom:plan-reviewer", ...)
+  2. This branch genuinely has no plan:     touch .claude/exloom-no-plan   (commit it)
+
+Emergency bypass (audited): set EXLOOM_REVIEW_SKIP=1 in your session env.
+EOF
+  exit 2
+fi
 [[ -n "$ALL_PLANS" ]] || exit 0
 
 # "In play" = this branch's work. A plan tracked and byte-identical to the fork

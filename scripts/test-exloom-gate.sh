@@ -413,7 +413,13 @@ ok "receipt for a different artifact -> still blocked" "$(x "$edit_src")" "2"
 # otherwise this case passes for the wrong reason.
 git checkout -q -b feat/noplan main
 mv "$PLAN" "$WORK/plan.stash"
-ok "no plan on branch -> allowed" "$(x "$edit_src")" "0"
+# An EMPTY docs/plans is treated as no plan: `mkdir -p docs/plans` was otherwise a
+# one-command, permanent, silent disarm of both the plan gate and the scope gate.
+ok "empty plan dir -> blocked, not silently allowed" "$(x "$edit_src")" "2"
+ok "the escape it prints is not itself blocked"    "$(x '{"tool_name":"Bash","tool_input":{"command":"touch .claude/exloom-no-plan"}}')" "0"
+: > .claude/exloom-no-plan
+ok "after the recorded no-plan decision -> allowed" "$(x "$edit_src")" "0"
+rm -f .claude/exloom-no-plan
 mv "$WORK/plan.stash" "$PLAN"
 
 # Gate off -> inert, like every other exloom hook.

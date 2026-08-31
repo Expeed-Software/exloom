@@ -184,7 +184,7 @@ exloom_derive_tier() {
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
     printf '3'; return 0
   fi
-  if printf '%s\n' "$files" | grep -Eqi '(auth([^a-z]|entic|oriz|z|n)|oauth|tenant|secret|crypto|jwt|api[-_]?key)'; then
+  if printf '%s\n' "$files" | grep -Eq '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey'; then
     printf '3'; return 0
   fi
 
