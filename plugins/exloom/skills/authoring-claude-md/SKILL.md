@@ -92,7 +92,7 @@ Bad pattern: writing aspirational conventions. If the tests use JUnit 4, documen
 
 Add the Baselines section. Standard baselines to include:
 - Planning: use `exloom:planning-for-handoff` for non-trivial changes (3+ steps or architectural decisions)
-- Review: run `exloom:auditing-plan-fidelity` before `exloom:reviewing-code`
+- Review: run `/review-complete` before opening a PR
 - New code follows your org's naming standards; existing code is not refactored to match
 - Test coverage: 80% line coverage for new code (not retroactive)
 - Secrets: environment variables only, never committed to source control
@@ -214,144 +214,14 @@ If no template matches, use `default.md` and fill in detected conventions manual
 
 ## Failure Modes
 
-**1. "I know what conventions this project should use."**
-
-Thought pattern: you have opinions about best practices — modern frameworks, clean architecture, certain naming styles — and you write the CLAUDE.md based on those opinions rather than what the code shows.
-
-Why it feels right: best practices are best practices. The project would benefit from following them.
-
-What happens: the CLAUDE.md documents a codebase that does not exist. Claude follows the CLAUDE.md, produces code that clashes with the actual codebase style, and every developer has to manually fix the mismatch on every task.
-
-Correction: the codebase tells you what conventions it uses. Read the code. Document what is there, not what you wish were there.
-
-**2. "The existing CLAUDE.md is wrong, let me fix it."**
-
-Thought pattern: you see something in the existing CLAUDE.md that contradicts your understanding of the project or what you consider technically correct.
-
-Why it feels right: accuracy matters. Wrong documentation is arguably worse than no documentation.
-
-What happens: you overwrite decisions the team made deliberately. The "wrong" entry might be an intentional workaround, a team preference, or context you lack entirely.
-
-Correction: propose changes with explanations. Let the user decide. The existing file represents team decisions you were not part of making.
-
-**3. "Baselines should always apply."**
-
-Thought pattern: baselines exist for a reason. Consistency across your org's projects reduces cognitive load when switching between them.
-
-Why it feels right: standardization is valuable, and exceptions dilute the standard.
-
-What happens: you override a working convention with a baseline that does not fit the project's reality. A repo with 60% coverage and no test infrastructure for legacy modules gets "80% required" — creating a mandate nobody can meet without a multi-sprint investment.
-
-Correction: baselines are defaults for new code in the absence of existing conventions. Existing code that works differently is not wrong — it is context that the baseline did not anticipate.
-
-**4. "I'll just use the Spring template — it's close enough."**
-
-Thought pattern: the project is Java, and Spring is the most common Java framework in your org. The template covers most of what is needed.
-
-Why it feels right: the templates are similar enough that it will work. Java is Java.
-
-What happens: a Micronaut project gets Spring conventions — wrong annotation style (`@Inject` vs `@Autowired`), wrong testing approach (Micronaut Test vs Spring Test), wrong build plugin configuration. Developers follow the CLAUDE.md and produce code that fails to compile.
-
-Correction: confirm the exact framework before choosing a template. Read the build file dependencies. A `pom.xml` with `spring-boot-starter-web` and a `build.gradle` with `io.micronaut:micronaut-http-server-netty` are fundamentally different projects that need different templates.
-
-**5. "The CLAUDE.md is done, I'll move on."**
-
-Thought pattern: you have written a thorough document and are confident it accurately reflects the codebase based on your analysis.
-
-Why it feels right: the document matches what you observed across multiple files.
-
-What happens: you commit without user review. The user discovers it contains a subtle error — the wrong test command, a misidentified framework version, or a convention from one module presented as a project-wide standard. The CLAUDE.md now actively misleads Claude on every task.
-
-Correction: always present the draft for review before writing it to disk. The user knows their project better than a scan of 5 files can reveal. A two-minute review catches errors that would cost hours across the team.
-
+See [failure-modes.md](failure-modes.md).
 ## Worked Example
 
-**Scenario:** Brownfield mode on an existing Node.js Express API with TypeScript. The developer just joined this project and ran `exloom:exploring-codebase`, which flagged the absence of a CLAUDE.md.
-
-**Step 1 — Detect stack.**
-
-Found `package.json` at the repo root. Reading its contents:
-- `engines.node`: `">=20"`
-- `devDependencies`: `typescript` 5.3, `jest` 29, `ts-jest`, `@types/express`
-- `dependencies`: `express` 4.18, `@prisma/client` 5.x, `pino` 8.x, `zod` 3.x
-- `scripts.start`: `"node dist/app.js"`, `scripts.dev`: `"tsx watch src/app.ts"`
-
-Also found `.nvmrc` specifying `20.11.0` and a `Dockerfile` with `FROM node:20-alpine`.
-
-No other build files at root. Checked subdirectories — no `pom.xml`, no `build.gradle`. This is a single-stack Node.js TypeScript project.
-
-**Step 2 — Scan structure.**
-
-Top two directory levels:
-```
-src/
-  controllers/    -- route handlers
-  services/       -- business logic
-  middleware/     -- auth, error handling, logging
-  prisma/         -- Prisma client setup
-  types/          -- shared TypeScript types
-  config.ts       -- environment config with zod validation
-  app.ts          -- Express app setup and middleware chain
-__tests__/
-  controllers/    -- unit tests for controllers
-  services/       -- unit tests for services
-  integration/    -- API integration tests with supertest
-prisma/
-  schema.prisma   -- database schema
-  migrations/     -- migration history
-.env.example
-tsconfig.json
-jest.config.ts
-package.json
-```
-
-Pattern: layered architecture (controllers call services, services call Prisma). Tests mirror the source structure in a separate `__tests__/` root. Integration tests are separated from unit tests. Prisma schema and migrations live at the repo root, not inside `src/`.
-
-**Step 3 — Sample conventions.**
-
-Read five files: `src/controllers/userController.ts`, `src/services/orderService.ts`, `src/middleware/authMiddleware.ts`, `__tests__/services/orderService.test.ts`, `src/config.ts`.
-
-Observations:
-- **Naming:** camelCase for variables and functions, PascalCase for types, interfaces, and classes. Files use camelCase (`userController.ts`, not `user-controller.ts`).
-- **Indentation:** 2 spaces, no tabs. Consistent across all sampled files.
-- **Error handling:** Services return `Result<T, AppError>` — a discriminated union. Services never throw. Controllers unwrap the Result and map `AppError` to HTTP status codes. This is stricter than thrown exceptions.
-- **Imports:** Grouped in three blocks separated by blank lines — Node stdlib, then npm packages, then internal modules. Sorted alphabetically within each block.
-- **Tests:** `describe`/`it` blocks. Test files named `*.test.ts`. Each test file mirrors one source file. Integration tests use `supertest` against the Express app.
-
-**Step 4 — Choose template.**
-
-`nodejs.md` matches — Node.js with TypeScript. Express is a standard Node.js framework covered by this template.
-
-**Step 5 — Draft CLAUDE.md.**
-
-Fill the `nodejs.md` template with observed patterns. Key decision point: the `Result<T, AppError>` pattern is stricter than your org's error handling baseline, which allows thrown domain errors caught by Express error middleware. The codebase's pattern is better for this project — it makes error handling explicit at every call site and prevents unhandled exceptions. Document the `Result` pattern as the project's error handling convention, not your org's default.
-
-Also noted: `zod` is used for runtime validation of environment config and request bodies. This is an established pattern worth documenting — new endpoints should use zod schemas for input validation.
-
-**Step 6 — Annotate baselines.**
-
-Add the Baselines section:
-- **Planning workflow:** added, no conflict with existing patterns
-- **Review workflow:** added, no conflict
-- **Error envelope:** added — compatible with the Result pattern. The controller layer already maps `AppError` variants to a consistent `{ error: string, code: string, details?: unknown }` JSON envelope.
-- **Logging:** added — project already uses `pino` structured logging, which aligns with the baseline. Noted `pino` specifically in the conventions.
-- **Security:** added — `.env.example` demonstrates the env-vars-only pattern. No secrets found in source.
-- **Test coverage 80% for new code:** added to baselines. Existing coverage is 73%. Added an Override: "Legacy service modules (`orderService`, `inventoryService`) are below 80% — coverage target applies to new code and new modules only."
-
-**Step 7 — Present to user.**
-
-Showed the complete draft. User feedback:
-- "We use pnpm, not npm — all build commands should reference pnpm." Fixed `npm run` to `pnpm` in the Build and Run section.
-- "The Result pattern was introduced by our tech lead — good that you caught it. Keep it prominent."
-
-User approved. File written with `docs: add CLAUDE.md for order-api`.
-
-**Key moment:** The codebase uses a stricter error handling pattern than the baseline recommends. Brownfield wins — document what is there, do not downgrade it to match the baseline. The CLAUDE.md reflects the project's actual `Result<T, AppError>` pattern, and your org's error baseline is noted as compatible rather than authoritative.
-
+See [worked-example.md](worked-example.md).
 ## Integration
 
-- **You arrive here from:** starting work on a new-to-you repo, or `exloom:exploring-codebase` discovers no CLAUDE.md exists and recommends creating one.
+- **You arrive here from:** starting work on a new-to-you repo that has no CLAUDE.md exists and recommends creating one.
 - **You leave here toward:** the CLAUDE.md is committed and becomes the project's working constitution. Future skills read it for project context — every other skill benefits from a well-authored CLAUDE.md.
 - **If the CLAUDE.md reveals a baseline conflict worth standardizing:** route to `exloom:capturing-learnings` so the conflict, its context, and its resolution are preserved for future projects facing the same situation.
-- **Related skill:** `exloom:switching-projects` reads CLAUDE.md as its primary input. A thorough CLAUDE.md directly improves how fast a developer can switch into a project with full Claude assistance.
+- **Why it matters:** CLAUDE.md is the first thing read when anyone — person or model — picks the repo up cold. A thorough one directly improves how fast someone switches into the project with full Claude assistance.
 - **Templates reference:** `../../assets/claude-md-templates/`

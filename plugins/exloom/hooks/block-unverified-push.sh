@@ -62,7 +62,7 @@ except Exception:
   # Collapse newlines/tabs so a multi-line command still matches on one line.
   # (A backslash line-continuation can still evade this — documented limit; the
   # gate is a cooperating-team tool, not an obfuscation-proof boundary.)
-  CMD_MATCH="${CMD//$'\n'/ }"; CMD_MATCH="${CMD_MATCH//$'\t'/ }"
+  CMD_MATCH="${CMD//$'\n'/ }"; CMD_MATCH="${CMD_MATCH//$'\r'/ }"; CMD_MATCH="${CMD_MATCH//$'\t'/ }"
   # git push (allowing git global options) or gh pr create. Trailing boundary is
   # any non-word char or end-of-string, so `git push;`, `cd x && git push`,
   # `(git push)` all match; `git pushx` does not.

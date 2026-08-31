@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# exloom — shared hook library. SOURCED by verify-review.sh and
-# block-unverified-push.sh; never executed directly. Keeping the checklist
+# exloom — shared hook library. SOURCED by block-unverified-push.sh and
+# protect-verdicts.sh; never executed directly. Keeping the checklist
 # validation, branch classification, and JSON extraction in one place means the
 # Stop hook and the push gate can never silently disagree about what "complete"
 # means (they used to duplicate ~150 lines).
@@ -8,6 +8,13 @@
 # All functions assume the caller has already cd'd to the repo root when they
 # touch git. Every git failure fails OPEN (return/exit 0 at the call site) —
 # exloom blocks on missing evidence, never on an infrastructure hiccup.
+
+# Resolved once so block messages can print a command that actually runs.
+# `${CLAUDE_PLUGIN_ROOT}` is interpolated by the harness into plugin.json only;
+# it is NOT set in the Bash tool environment, so every remediation command that
+# used it failed with "No such file or directory" and left the bypass as the
+# only reachable option.
+EXLOOM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # ---------- JSON field extraction (jq -> python3 -> sed) ----------
 # Extract a top-level string field from hook input. Args: <json> <field>.
@@ -27,8 +34,84 @@ except Exception:
     pass' 2>/dev/null || true)"
   fi
   if [[ -z "$out" ]]; then
-    out="$(printf '%s' "$json" | sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
+    out="$(printf '%s' "$json" | _exloom_sed_str "$field")"
   fi
+  out="${out//$'\r'$'\n'/$'\n'}"   # see exloom_tool_input: jq on Windows emits CRLF
+  printf '%s' "$out"
+}
+
+# Read a JSON string value with sed, when neither jq nor python3 is available.
+#
+# Do not "simplify" to `s/.*"key" *: *"\([^"]*\)".*/\1/`. `[^"]*` stops at the
+# first quote byte, truncating any value containing an escaped quote; the leading
+# `.*` is greedy, so it matches the LAST occurrence of the key. Both fail OPEN.
+# `\\.` consumes an escaped pair before `[^"\\]` can stop on it; `head -1` takes
+# the first occurrence. The value stays JSON-escaped, which is correct for
+# shape-matching — `\"` is not a quote character in the command.
+_exloom_sed_str() {
+  grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"\(\\\\.\|[^\"\\\\]\)*\"" 2>/dev/null \
+    | head -1 | sed -e "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
+}
+
+# Remove heredoc BODIES and here-string operands, keeping everything else, so a
+# scanner sees write targets and not prose. Commands AFTER the terminator must
+# still be scanned — truncating at the first `<<` lets `cat <<< '' ; rm <target>`
+# through.
+#
+# Bash string ops, not awk: the caller flattens newlines first, and an awk
+# program nested three quoting layers deep behaved differently in situ than
+# standalone. This is unit-testable on its own.
+exloom_strip_heredocs() {
+  local s="$1" pre rest tag
+  # A here-string carries a word, not a body.
+  s="$(printf '%s' "$s" | sed -E "s/<<<[[:space:]]*(\"[^\"]*\"|'[^']*'|[^[:space:];&|]*)/ /g")"
+  while [[ "$s" == *"<<"* ]]; do
+    pre="${s%%<<*}"
+    rest="${s#*<<}"
+    rest="${rest#-}"                       # <<- strips leading tabs in the body
+    rest="${rest#"${rest%%[![:space:]]*}"}" # skip space between << and the tag
+    tag="${rest%%[[:space:]]*}"
+    tag="${tag//\'/}"; tag="${tag//\"/}"
+    if [[ -z "$tag" ]]; then s="$pre"; break; fi
+    rest="${rest#*"$tag"}"
+    # Keep whatever follows the terminator: commands after a heredoc are
+    # ordinary commands and must still be scanned.
+    if [[ "$rest" == *" $tag "* ]]; then
+      s="$pre ${rest#*" $tag "}"
+    else
+      s="$pre"   # unterminated body: nothing after it can be a target
+    fi
+  done
+  printf '%s' "$s"
+}
+
+# Read a key from the NESTED tool_input object. Same ladder, same reasons.
+# Every hook that gates a tool call must use this rather than scanning the raw
+# payload: a hook that cannot parse its input must not conclude "allow".
+exloom_tool_input() {
+  local json="$1" key="$2" out=""
+  if command -v jq >/dev/null 2>&1; then
+    out="$(printf '%s' "$json" | jq -r --arg k "$key" '.tool_input[$k] // empty' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
+    out="$(printf '%s' "$json" | KEY="$key" python3 -c 'import json,os,sys
+try:
+    v = (json.load(sys.stdin).get("tool_input") or {}).get(os.environ["KEY"], "")
+    print(v if isinstance(v, str) else "")
+except Exception:
+    pass' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" ]]; then
+    out="$(printf '%s' "$json" | _exloom_sed_str "$key")"
+  fi
+  # jq built for Windows writes CRLF, so a multi-line command comes back as
+  # `cmd\r\nnext` and every downstream word/line match sees `next\r` instead of
+  # `next`. This silently defeated the heredoc-terminator match in
+  # exloom_strip_heredocs — the guard fell through to "unterminated" and dropped
+  # the real write target. On Git Bash, which is the whole environment here, a
+  # scanner that does not normalise line endings is a scanner that fails open.
+  # Normalise CRLF only; a lone CR is left alone.
+  out="${out//$'\r'$'\n'/$'\n'}"
   printf '%s' "$out"
 }
 
@@ -166,10 +249,16 @@ exloom_derive_tier() {
   if [[ $docs_only -eq 1 ]]; then printf '0'; return 0; fi
 
   # Tier 3 — data migration, or the security surface /review-init enumerates.
+  #
+  # `auth` matches as a WORD, not a substring — a bare `auth` matched
+  # `authoring-claude-md` and forced Tier 3 on a docs change, which the tier has
+  # no escape hatch from.
+  # Matches: auth/ auth- authentication authorization authz authn oauth
+  # Does not match: authoring author authors
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
     printf '3'; return 0
   fi
-  if printf '%s\n' "$files" | grep -Eqi 'auth|tenant|secret|crypto|jwt|apikey|api[-_]key'; then
+  if printf '%s\n' "$files" | grep -Eq '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey'; then
     printf '3'; return 0
   fi
 
@@ -200,48 +289,208 @@ exloom_derive_tier() {
 # committed with the checklist — the same rule the checklist itself lives under.
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
-# Reviewers required at a given tier. Security review is surface-triggered as
-# well as tier-triggered, but the surface that triggers it (auth / tenancy /
-# secrets / crypto) also derives to Tier 3 above, so the tier list covers it.
+# Does this diff touch a security surface that does NOT derive to Tier 3?
+# Dependency and deserialization changes derive to Tier 1 or 2, so without this
+# they would never require the security auditor the skill promises for them.
+#
+# Deliberately narrow: manifests and lockfiles by filename, deserialization entry
+# points by diff content. Outbound-request / SSRF shapes are NOT matched — every
+# formulation tried forced security review on ordinary HTTP client code.
+exloom_security_surface() {   # exloom_security_surface <base> <tip>
+  local base="$1" tip="$2" files
+  files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+
+  # Dependency manifests and lockfiles: a bumped or added dependency is the
+  # single most common way an unreviewed vulnerability enters a codebase, and a
+  # one-line manifest change otherwise derives to Tier 1.
+  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*\.csproj|packages\.lock\.json)$'; then
+    return 0
+  fi
+
+  # Deserialization of untrusted input, by the API actually called.
+  if git diff -U0 "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -Eq '^\+.*(ObjectInputStream|readObject\(|XMLDecoder|yaml\.load\(|pickle\.loads?\(|cPickle\.loads?\(|Marshal\.load|unserialize\(|JsonConvert\.DeserializeObject|BinaryFormatter|TypeNameHandling|SnakeYAML|readValue\(.*Object\.class)'; then
+    return 0
+  fi
+  return 1
+}
+
+# Reviewers required at a given tier, plus any the surface demands regardless.
 exloom_required_reviewers() {
-  case "$1" in
-    0|1) printf 'l1-reviewer' ;;
-    2)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer' ;;
-    3)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor' ;;
+  local tier="$1" extra="${2:-}" list=""
+  case "$tier" in
+    0|1) list='l1-reviewer' ;;
+    2)   list='l1-reviewer adversarial-reviewer' ;;
+    3)   list='l1-reviewer adversarial-reviewer security-auditor' ;;
   esac
+  if [[ "$extra" == "security" && "$list" != *security-auditor* ]]; then
+    list="$list security-auditor"
+  fi
+  printf '%s' "$list"
+}
+
+# How many review rounds has this branch had? Distinct commits appearing in the
+# L1 receipt, which is one JSON line per real dispatch. Deterministic — no model,
+# no judgement.
+exloom_round_count() {   # exloom_round_count <checklist> <tip>
+  local vdir content
+  vdir="$(exloom_verdict_dir "$1")"
+  content="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  [[ -n "$content" ]] || { printf '0'; return 0; }
+  printf '%s\n' "$content" \
+    | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
+    | sort -u | grep -c . || printf '0'
+}
+
+# The round cap. A repo may raise or lower it with a COMMITTED
+# .claude/exloom-max-rounds holding a single number — committed because raising
+# it weakens the gate, and that should be a reviewed change.
+exloom_max_rounds() {
+  local f=".claude/exloom-max-rounds" n=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    n="$(head -1 "$f" 2>/dev/null | tr -cd '0-9')"
+  fi
+  [[ -n "$n" && "$n" -ge 1 ]] 2>/dev/null && printf '%s' "$n" || printf '3'
+}
+
+# Has a human recorded a decision to ship at the cap? Mechanical: the checklist's
+# escape-hatch section must carry a line naming the cap. The reason is for the
+# next reader, not for the gate — the gate only checks that a person wrote one.
+exloom_cap_override() {   # exloom_cap_override <checklist> <tip>
+  local content
+  content="$(MSYS_NO_PATHCONV=1 git show "${2}:${1}" 2>/dev/null || true)"
+  [[ -n "$content" ]] || return 1
+  printf '%s\n' "$content" \
+    | grep -qiE '^[[:space:]]*-[[:space:]]*shipped at round cap[[:space:]]*—[[:space:]]*\S' || return 1
+  return 0
 }
 
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
-# Returns 0 when every reviewer the tier requires has a receipt covering the
-# reviewed commit; prints a BLOCK message and returns 2 otherwise.
+#
+# Only the L1 reviewer's approval must cover the shipped commit. The others must
+# have RUN and APPROVED at some point on this branch.
+#
+# Requiring every reviewer to approve the SAME commit is what produced the 7-12
+# round loop: any fix creates a new commit, which cancels every approval —
+# including from reviewers already satisfied — so N reviewers must simultaneously
+# approve a target that moves each time one of them is answered. Expected rounds
+# go as 1/p^N. Decoupling makes it 1/p: L1 covers what ships, the others cover
+# that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
-  local vdir agent file content sha ok
-  local -a missing=() stale=()
+  local vdir agent file content sha ok approved_at behind
+  local -a missing=() stale=() unapproved=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
-  for agent in $(exloom_required_reviewers "$tier"); do
+  # Security review is triggered by SURFACE as well as by tier — see
+  # exloom_security_surface. Computed once here rather than in the tier lookup,
+  # because only this function knows which commits are being compared.
+  local sec_base sec_extra=""
+  sec_base="$(git merge-base "$reviewed" origin/main 2>/dev/null \
+           || git merge-base "$reviewed" origin/master 2>/dev/null \
+           || git merge-base "$reviewed" origin/dev 2>/dev/null \
+           || git merge-base "$reviewed" origin/develop 2>/dev/null || true)"
+  if [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$reviewed"; then
+    sec_extra="security"
+  fi
+
+  for agent in $(exloom_required_reviewers "$tier" "$sec_extra"); do
     file="${vdir}/${agent}.json"
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0
-    while IFS= read -r sha; do
-      [[ -z "$sha" ]] && continue
+    ok=0; rejected=0; approved_at=""
+    # Read whole receipt LINES, so the commit and the verdict on one line are
+    # evaluated together. Reading them separately would let an APPROVED verdict
+    # from an old commit vouch for a REJECTED review of the current one.
+    while IFS= read -r rline || [[ -n "$rline" ]]; do
+      [[ -z "$rline" ]] && continue
+      sha="$(printf '%s' "$rline" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
+      [[ -n "$sha" ]] || continue
       git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
-      # A receipt covers the reviewed commit when no code differs between the two
-      # — a checklist-only commit landing in between must not invalidate a real
-      # review, and a code commit must.
-      if [[ -z "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
-        ok=1; break
+      # Only L1 must cover the SHIPPED commit. For the others, having run and
+      # approved anywhere on this branch is enough — see the header. A
+      # checklist-only or comment-only commit must not invalidate even L1.
+      if [[ "$agent" == "l1-reviewer" ]]; then
+        if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+          exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+        fi
       fi
-    done < <(printf '%s\n' "$content" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')
-    [[ $ok -eq 1 ]] || stale+=( "$agent" )
+
+      # A dispatch is not a review. A reviewer that returned REJECTED must not
+      # satisfy the gate it was dispatched to satisfy.
+      #
+      # GRANDFATHERED: receipts written before exloom recorded verdicts have no
+      # "verdict" key at all. Those still count — refusing them would block every
+      # in-flight branch the moment this version is installed, and a migration
+      # that breaks running work does not get adopted, it gets uninstalled.
+      case "$rline" in
+        *'"verdict":"APPROVED"'*) ok=1; approved_at="$sha"; break ;;
+        *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) rejected=1 ;;
+        *) ok=1; approved_at="$sha"; break ;;   # legacy receipt, no verdict recorded
+      esac
+    done < <(printf '%s\n' "$content")
+    if [[ $ok -ne 1 ]]; then
+      if [[ $rejected -eq 1 ]]; then unapproved+=( "$agent" ); else stale+=( "$agent" ); fi
+    elif [[ "$agent" != "l1-reviewer" && -n "$approved_at" ]]; then
+      # Decoupling means these reviewers approve code, then more code lands. That
+      # gap is a real exposure — this branch's own round-1 fixes introduced six
+      # round-2 defects, one of them at exactly the integration level only a
+      # hostile pass catches. It cannot be closed without either re-running them
+      # every commit (the loop) or delta review (unsound), so it is DISCLOSED
+      # instead: a fact for whoever reads the PR, never a block.
+      behind="$(git rev-list --count "${approved_at}..${reviewed}" 2>/dev/null || echo 0)"
+      if [[ "${behind:-0}" -gt 0 ]]; then
+        echo "exloom: ${agent} approved ${approved_at:0:12} — ${behind} commit(s) have landed since; it did not see them." >&2
+      fi
+    fi
   done
 
-  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 ]]; then return 0; fi
+  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
 
-  local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier")."
+  # ---------- the round cap ----------
+  # A loop whose exit depends on a reviewer's judgement has no guaranteed
+  # terminating state: the degenerate case where each fix introduces a new defect
+  # is not rare. At the cap the gate stops deciding and hands the decision to a
+  # person, with the outstanding findings in front of them. It does NOT ship
+  # automatically — a cap that silently allows the push is a slower no-gate.
+  local rounds max
+  rounds="$(exloom_round_count "$checklist" "$tip")"
+  max="$(exloom_max_rounds)"
+  if [[ "$rounds" -ge "$max" ]]; then
+    if exloom_cap_override "$checklist" "$tip"; then
+      echo "exloom: shipping at the round cap (${rounds}/${max}) on a recorded decision in ${checklist}." >&2
+      return 0
+    fi
+    local outstanding=""
+    [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
+    [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
+    [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
+    _exloom_block "$action" "Round cap reached on this branch: ${rounds} rounds, cap is ${max}.
+
+Outstanding:
+${outstanding}
+Findings are recorded in ${vdir}/*.findings.jsonl and in ${checklist}.
+
+Three rounds is where exloom stops deciding for you. Either fix what is
+outstanding and dispatch again, or ship deliberately by recording the decision
+in ${checklist} under 'Escape hatches used':
+
+  - Shipped at round cap — <one line: why this is acceptable>
+
+then list each outstanding finding with fixed / deferred + ticket / accepted +
+reason. Commit the checklist and push. The decision travels with the PR, so the
+next person reads why rather than guessing.
+
+To change the cap for this repo, commit .claude/exloom-max-rounds with a number."
+    return 2
+  fi
+
+  local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
+  [[ -n "$sec_extra" ]] && detail="${detail}
+security-auditor is required by the SURFACE this diff touches (a dependency
+manifest or a deserialization entry point), not by the tier."
   [[ ${#missing[@]} -gt 0 ]] && detail="${detail}
 
 Never dispatched (no receipt in ${vdir}/):
@@ -249,13 +498,294 @@ $(printf '  - %s\n' "${missing[@]}")"
   [[ ${#stale[@]} -gt 0 ]] && detail="${detail}
 
 Dispatched, but only against code that has since changed (re-run them):
-$(printf '  - %s\n' "${stale[@]}")"
+$(printf '  - %s\n' "${stale[@]}")
+Only l1-reviewer has to cover the commit you ship; if it is listed here, re-run
+just that one. The others need to have run and approved anywhere on this branch."
+  [[ ${#unapproved[@]} -gt 0 ]] && detail="${detail}
+
+Reviewed the current code, but did NOT approve it (fix the findings, then re-run):
+$(printf '  - %s\n' "${unapproved[@]}")
+A REJECTED verdict is not a passing review, and UNKNOWN means the reviewer's
+report carried no 'VERDICT: APPROVED' line — neither counts as approval."
 
   _exloom_block "$action" "${detail}
 
 Receipts are written by exloom when a reviewer subagent actually completes — they
 cannot be written by hand. Dispatch the reviewers, commit the receipts with the
 checklist, and re-run /review-complete."
+  return 2
+}
+
+# ---------- change classification ----------
+# exloom_diff_is_behavioural <from> <to>
+# Returns 0 when the diff could change behaviour, 1 when it provably cannot.
+#
+# Without this, a comment-only fix invalidates every receipt and mandates another
+# round, so the loop has no terminating state.
+#
+# CONSERVATIVE BY DESIGN: non-behavioural only when every added and removed line
+# is blank or starts with a comment marker. Being wrong here costs one extra
+# review; being wrong the other way ships unreviewed code.
+exloom_diff_is_behavioural() {
+  local from="$1" to="$2" files f ext body line stripped marker
+
+  # ---------- binary and metadata changes are ALWAYS behavioural ----------
+  # `git diff` emits only "Binary files a/x and b/x differ" for a binary change,
+  # which carries no +/- lines at all — so a line-based classifier called it
+  # non-behavioural and every reviewer receipt stayed "covering". Swapping a
+  # vendored .jar, a .dll, a model weight, a keystore or a wasm blob kept a stale
+  # review valid. Same shape for a pure rename and a file-mode change.
+  # --numstat reports "-\t-\tpath" for binary, which is unambiguous.
+  if git diff --numstat "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -qE '^-[[:space:]]+-[[:space:]]'; then
+    return 0
+  fi
+  if git diff --no-color "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -qE '^(old mode|new mode|rename from|rename to|deleted file|new file) '; then
+    return 0
+  fi
+
+  # ---------- comment markers are per-language, never universal ----------
+  # Treating `#` as a comment everywhere classified real code as inert:
+  #   #define TIMEOUT 300 / #include <stdlib.h>   (C/C++/ObjC/C#)
+  #   #[derive(...)] / #![allow]                  (Rust attributes)
+  #   #login { display: none }                    (CSS id selector)
+  #   //go:build linux / //go:generate            (Go directives)
+  #   #!/bin/sh                                   (shebang)
+  # Each was verified to flip the whole diff to non-behavioural.
+  #
+  # So the marker set is chosen per file, and any file whose language is unknown
+  # is treated as having NO comment markers — i.e. every changed line counts.
+  # -z + tr: `git diff --name-only` quotes paths containing non-ASCII or special
+  # characters (core.quotepath), and the quoted form then matched no file at all.
+  files="$(git -c core.quotepath=false diff --name-only "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    ext="${f##*.}"
+    case "$ext" in
+      py|rb|yaml|yml|toml|ini|cfg|conf|tf|Dockerfile|dockerfile|gitignore|env)
+        marker='#' ;;
+      sh|bash|zsh)
+        # No marker: a `#` line may be a heredoc body, and there is no way to tell
+        # from a diff line. Every changed line counts.
+        marker='' ;;
+      java|kt|kts|scala|groovy|js|jsx|ts|tsx|mjs|cjs|go|swift|dart|php|c|h|cc|cpp|hpp|cs|rs|proto)
+        # `//` only. NOT `#` (C preprocessor, C# directives, Rust attributes) and
+        # NOT `--` (a wrapped CLI flag). `//go:` is a directive, excluded below.
+        marker='//' ;;
+      sql|hs|lua|elm)      marker='--' ;;
+      md|markdown|html|htm|xml|svg|vue) marker='<!--' ;;
+      *)                   marker='' ;;   # unknown language: nothing is a comment
+    esac
+
+    # `-w` ignores whitespace-only changes, which is right for a brace language
+    # (reindenting a Java block changes nothing) and WRONG where indentation is
+    # syntax. In Python, de-indenting a line moves it out of an `if` branch; in
+    # YAML it re-parents a key. Both are behavioural and both are invisible to
+    # `-w`, so such a change scored "not behavioural", a stale receipt stayed
+    # valid, and the code shipped unreviewed. The suite pinned this as the spec:
+    # its only fixture was blank-line churn, the one case where `-w` is correct.
+    local wsflag='-w'
+    case "$ext" in
+      py|pyi|pyx|yaml|yml|sass|styl|pug|jade|haml|slim|coffee|nim|cr) wsflag='' ;;
+    esac
+    if [[ -n "$wsflag" ]]; then
+      body="$(git diff -w --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    else
+      body="$(git diff --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    fi
+    while IFS= read -r line; do
+      # Real diff headers have a space then a path; `+++i;` and `---force` do not.
+      case "$line" in
+        '+++ '*|'--- '*|'@@'*|'diff --git '*|'index '*) continue ;;
+        '+'*|'-'*) ;;
+        *) continue ;;
+      esac
+      stripped="${line:1}"
+      stripped="${stripped#"${stripped%%[![:space:]]*}"}"
+      [[ -z "$stripped" ]] && continue
+
+      case "$marker" in
+        '#')  case "$stripped" in '#!'*) return 0 ;; '#'*) continue ;; esac ;;
+        '//') case "$stripped" in
+                '//go:'*) return 0 ;;            # build/generate directive: code
+                '//'*|'/*'*|'*/'*) continue ;;
+                '* '*) continue ;;               # javadoc continuation: star SPACE
+                '*'*) return 0 ;;                # `*p = x` is a dereference, not a comment
+              esac ;;
+        '--') case "$stripped" in '--'*) continue ;; esac ;;
+        '<!--') case "$stripped" in '<!--'*|'-->'*) continue ;; esac ;;
+      esac
+      return 0
+    done <<< "$body"
+  done <<< "$files"
+  return 1
+}
+
+# ---------- re-finds: the instance-not-the-rule detector ----------
+# exloom_check_refinds <checklist> <tip> <action>
+# Blocks when the same finding was reported in more than one review round and the
+# checklist records no disposition for it.
+#
+# The same fingerprint two rounds apart is mechanical evidence that a fix
+# addressed the instance rather than the rule. It forces a decision, not a fix:
+# quantify the guard over the whole class, or say why this is a separate defect.
+exloom_check_refinds() {
+  local CHECKLIST_CONTENT="${CHECKLIST_CONTENT:-}"
+  local checklist="$1" tip="$2" action="$3"
+  local vdir content fp rounds refinds=""
+
+  vdir="$(exloom_verdict_dir "$checklist")"
+  # Findings files are per-agent, read from the working tree: they are written by
+  # a hook and protected from hand-editing, same as every other receipt.
+  content="$(cat "${vdir}"/*.findings.jsonl 2>/dev/null || true)"
+  [[ -n "$content" ]] || return 0
+
+  while IFS= read -r fp; do
+    [[ -n "$fp" ]] || continue
+    rounds="$(printf '%s\n' "$content" | grep -F "\"fingerprint\":\"${fp}\"" \
+              | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tr '\n' ',' | sed 's/,$//')"
+    [[ "$rounds" == *,* ]] || continue
+    local cite
+    cite="$(printf '%s\n' "$content" | grep -F "\"fingerprint\":\"${fp}\"" \
+            | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p' | head -1)"
+    # Disposed when the checklist names the cite in its Re-finds section.
+    # Disposition rules, in order of strictness:
+    #
+    #   1. A `## Re-finds` section exists -> the cite must appear inside it, with a
+    #      disposition keyword on that line or within the two lines after it (the
+    #      template's entry is two lines: cite, then `FIXED THE CLASS:` beneath).
+    #
+    #   2. No `## Re-finds` section -> the checklist predates this mechanism; fall
+    #      back to the cite appearing anywhere, so in-flight branches stay
+    #      unblockable rather than being stranded with no migration path.
+    if [[ -n "$cite" ]]; then
+      local refind_section
+      refind_section="$(printf '%s\n' "$CHECKLIST_CONTENT" \
+        | awk '/^## Re-finds/{f=1;next} /^## /{f=0} f')"
+      if [[ -n "$refind_section" ]]; then
+        if printf '%s\n' "$refind_section" \
+           | grep -A2 -F -- "$cite" \
+           | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE'; then continue; fi
+      else
+        if printf '%s' "$CHECKLIST_CONTENT" | grep -qF -- "$cite"; then
+          echo "exloom: '$cite' disposed by a checklist with no '## Re-finds' section (legacy format, audit)" >&2
+          continue
+        fi
+      fi
+    fi
+    refinds="${refinds}  - ${cite:-<uncited>}  (reported in rounds ${rounds})"$'\n'
+  done < <(printf '%s\n' "$content" | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u)
+
+  [[ -n "$refinds" ]] || return 0
+
+  _exloom_block "$action" "The same finding was reported in more than one review round, and the checklist
+records no disposition for it:
+
+${refinds}
+A re-find is not a new defect. It is evidence that the previous fix addressed the
+instance you were shown rather than the rule behind it — which is why the next
+round found the adjacent case. Patching this one schedules the third.
+
+Record a disposition under '## Re-finds' in ${checklist}, naming the cite, and
+pick one:
+
+  1. FIXED THE CLASS — name the test that quantifies over the whole set (every
+     codepoint, every branch, every member), not the instance. \"One test that
+     asserts no single codepoint in any position defeats the marker would have
+     found all of this before round one, and would keep finding it.\"
+  2. GENUINELY SEPARATE — say why this defect is unrelated to the earlier one
+     despite matching it.
+
+The findings are recorded per reviewer under the verdicts directory, one JSON
+line each, in <agent>.findings.jsonl."
+  return 2
+}
+
+# ---------- proof-of-testedness receipt ----------
+# exloom_check_proof <checklist> <tip> <reviewed-sha> <action>
+# Returns 0 when a PROVED receipt covers the reviewed commit; prints a BLOCK
+# message and returns 2 otherwise. Fails OPEN only on genuine git errors, never
+# on a missing or failing proof — a gate that waves through "the check did not
+# run" is the failure this whole mechanism exists to prevent.
+exloom_check_proof() {
+  local checklist="$1" tip="$2" reviewed="$3" action="$4"
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0
+
+  vdir="$(exloom_verdict_dir "$checklist")"
+  file="${vdir}/proof.json"
+  content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
+
+  if [[ -n "$content" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" ]] && continue
+      sha="$(printf '%s' "$line" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
+      [[ -n "$sha" ]] || continue
+      git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
+      # Same coverage rule as a reviewer receipt: it counts when no code differs
+      # between the proved commit and the one being shipped.
+      if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+        exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+      fi
+      # The receipt records the hash of the pinned test command. Comparing it
+      # here is what makes the proof bind to the command that was actually
+      # proved: without this, a repo could prove with a real suite, then change
+      # .claude/exloom-test-command to `true`, and the receipt stayed valid
+      # because nothing compared the recorded hash to the current one. The field
+      # was written and never read, and the suite asserted only that the key
+      # existed — text, not behaviour.
+      local rec_hash cur_hash="none"
+      rec_hash="$(printf '%s' "$line" | sed -n 's/.*"cmd_hash"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [[ -n "$rec_hash" && "$rec_hash" != "none" ]]; then
+        cur_hash="$(MSYS_NO_PATHCONV=1 git rev-parse "${reviewed}:.claude/exloom-test-command" 2>/dev/null || echo none)"
+        if [[ "$cur_hash" != "$rec_hash" ]]; then
+          seen_cmdswap=1
+          continue
+        fi
+      fi
+      case "$line" in
+        *'"result":"PROVED"'*)     ok=1; break ;;
+        *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
+      esac
+    done < <(printf '%s\n' "$content")
+  fi
+
+  [[ $ok -eq 1 ]] && return 0
+
+  local detail
+  if [[ $seen_cmdswap -eq 1 ]]; then
+    detail="A proof receipt covers this commit, but .claude/exloom-test-command has changed
+since it was written, so the receipt proves a command that is no longer the one
+this repo runs. Re-run the proof against the current command:
+
+    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\""
+  elif [[ $seen_notproved -eq 1 ]]; then
+    detail="The proof ran on this code and came back NOT_PROVED: with your source change
+removed and your tests kept, the tests still PASS. They do not notice the change.
+
+That is one of:
+  1. the assertions are too weak to detect it;
+  2. the test runner did not actually run them (cached / UP-TO-DATE / filtered);
+  3. the change genuinely has no observable behaviour — say so in the checklist."
+  else
+    detail="No proof receipt covers this commit (${vdir}/proof.json).
+
+Run it, then commit the receipt with the checklist:
+
+    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\"
+
+It removes your source change in a throwaway worktree, keeps your tests, and runs
+them. Your working tree is never touched. The receipt is written by that script
+alone and cannot be written by hand."
+  fi
+
+  _exloom_block "$action" "${detail}
+
+This check exists because review rounds are repeatedly spent on defects it finds
+first: an assertion satisfied by any string, a write-path test with no read-path
+test, a build that reported success without running the suite."
   return 2
 }
 
@@ -312,13 +842,18 @@ Run /review-complete — it names each tier-required section still missing."
 
   # Placeholder scan, scoped to the sections that apply to the declared tier.
   local placeholder_re drop scan
-  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)>'
+  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*)>'
   drop=''
   if   [[ "$tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
   fi
-  scan="$(printf '%s\n' "$content" | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
+  # HTML comments are guidance, not evidence, and the template uses them to show
+  # what a filled-in line looks like — which necessarily quotes the placeholder
+  # tokens. Scanning them made the template's own instructions block the push.
+  scan="$(printf '%s\n' "$content" \
+    | awk '/<!--/{inc=1} !inc{print} /-->/{inc=0}' \
+    | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
   if printf '%s' "$scan" | grep -Eq "$placeholder_re" || printf '%s' "$scan" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
     _exloom_block "$action" "A required section of $checklist still contains template placeholder text.
 Fill in the real evidence for the declared tier, or revert the final-verdict ticks."
@@ -347,6 +882,12 @@ Re-run /review-complete to record the reviewed tip."
       return 2
     fi
     stale="$(git diff --name-only "$reviewed_sha" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+    # Comment-only / doc-only commits do not invalidate a behavioural review.
+    if [[ -n "$stale" ]] && ! exloom_diff_is_behavioural "$reviewed_sha" "$tip"; then
+      echo "exloom: $(printf '%s
+' "$stale" | grep -c .) file(s) changed since review, but no behavioural lines — review still valid (audit)" >&2
+      stale=""
+    fi
     if [[ -n "$stale" ]]; then
       _exloom_block "$action" "The review is stale. These files changed after the reviewed commit ($reviewed_sha) and are not covered:
 ${stale}
@@ -373,6 +914,17 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     # Reviewer verdict receipts — the one check that tests an event rather than
     # an assertion. Uses the DECLARED tier, which is >= derived by the check above.
     exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action" || return 2
+
+    # Author-side proof that the change is actually tested (Tier 1+). The receipt
+    # is written only by scripts/prove-change-is-tested.sh, into the directory
+    # protect-verdicts.sh guards, so the result cannot be typed.
+    if [[ "$tier" -ge 1 ]]; then
+      exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" || return 2
+    fi
+
+    # Re-finds: the same defect reported across rounds means the fix was
+    # instance-level. Needs a recorded disposition, not another patch.
+    CHECKLIST_CONTENT="$content" exloom_check_refinds "$checklist" "$tip" "$action" || return 2
 
     # Provenance attestation.
     if ! printf '%s\n' "$content" | grep -q '^- AI-assisted:' \

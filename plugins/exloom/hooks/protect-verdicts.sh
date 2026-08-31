@@ -1,28 +1,12 @@
 #!/usr/bin/env bash
-# exloom — PreToolUse hook (verdict receipt protection).
+# exloom — PreToolUse hook. Denies hand-writing a verdict receipt, which is what
+# makes a receipt evidence rather than another author-written artifact.
 #
-# OPT-IN: does nothing unless the repo created `.claude/exloom-gate.enabled`.
+# OPT-IN: no-op unless `.claude/exloom-gate.enabled` exists.
+# Exit 0 = allow (including any parse failure), 2 = deny. Bypass: EXLOOM_REVIEW_SKIP=1.
 #
-# Verdict receipts under `.claude/reviews/<branch>.verdicts/` are the only review
-# evidence exloom does not let the authoring session author. They are written by
-# record-reviewer-verdict.sh when a reviewer subagent actually completes. This
-# hook denies direct writes to that directory, so the difference between "a
-# reviewer ran" and "a reviewer did not run" cannot be closed by writing a file.
-#
-# Without this, receipts are just another author-written artifact and buy nothing
-# over the checkbox they replace.
-#
-# Exit codes:
-#   0  — allow (gate off, path not a receipt, or any infrastructure parse failure)
-#   2  — deny with stderr message
-#
-# Bypass (when enabled): EXLOOM_REVIEW_SKIP=1
-#
-# Known limit, stated plainly: this matches the direct file-writing tools and the
-# obvious shell write forms. A deliberately obfuscated shell command can still
-# reach the directory, exactly as with the push gate. exloom is a cooperating-team
-# gate, not an adversarial security boundary — the goal is that forging a receipt
-# has to be a deliberate act, not the path of least resistance.
+# Matches the obvious write forms only; an obfuscated command can still get
+# through. Cooperating-team gate, not a security boundary.
 
 set -u
 
@@ -43,30 +27,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 
-# Pull a nested tool_input string field. The shared sed fallback truncates at the
-# first quote, which is fine for a path but not for a shell command — the command
-# path falls back to the raw hook input instead (same approach as the push gate).
-_tool_input() {
-  local key="$1" out=""
-  if command -v jq >/dev/null 2>&1; then
-    out="$(printf '%s' "$HOOK_INPUT" | jq -r --arg k "$key" '.tool_input[$k] // empty' 2>/dev/null || true)"
-  fi
-  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
-    out="$(printf '%s' "$HOOK_INPUT" | KEY="$key" python3 -c '
-import json, os, sys
-try:
-    v = (json.load(sys.stdin).get("tool_input") or {}).get(os.environ["KEY"], "")
-    print(v if isinstance(v, str) else "")
-except Exception:
-    pass' 2>/dev/null || true)"
-  fi
-  printf '%s' "$out"
-}
+_tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 
-# `.verdicts/` is distinctive enough to match on its own; requiring the full
-# `.claude/reviews/` prefix would miss an absolute path on Windows, where the
-# separator is a backslash.
-VERDICT_RE='\.verdicts[/\\]'
+# Bare `.verdicts/` rather than the full `.claude/reviews/` prefix: an absolute
+# Windows path uses backslashes. `exloom-gate.enabled` is included because
+# deleting it disables every other hook.
+VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)|\.claude[/\\]exloom-gate\.enabled'
 
 TARGET=""
 case "$TOOL" in
@@ -78,12 +44,36 @@ case "$TOOL" in
   Bash)
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
-    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
-    printf '%s' "$CMD" | grep -Eq "$VERDICT_RE" || exit 0
-    # Reading, staging and committing receipts must keep working — only deny the
-    # forms that create or change one.
-    printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
-    TARGET="$CMD"
+    # \r as well: exloom_tool_input normalises CRLF, but the raw-payload fallback
+    # on line 78 does not, and a lone CR leaves the last word of every line as
+    # `word\r` — so command-position anchors and terminator matches never fire.
+    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\r'/ }"; CMD="${CMD//$'\t'/ }"
+    # Match TARGETS, not content: heredoc bodies and `-m` messages are stripped so
+    # a command that merely NAMES the directory is allowed. Over-blocking is what
+    # teaches people to reach for EXLOOM_REVIEW_SKIP.
+    SCAN_CMD="$(exloom_strip_heredocs "$CMD")"
+    SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E "s/(-m|--message=?)[[:space:]]*'[^']*'//g")"
+    SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E 's/(-m|--message=?)[[:space:]]*"[^"]*"//g')"
+    # Destroying the whole reviews tree names neither the verdicts dir nor the
+    # state file, so it needs its own arm. The verb must be in COMMAND position
+    # and the path must be named: `grep -rn rm .claude/reviews` is read-only, and
+    # a bare-verb heuristic blocked `rm -f build.log && tar -xzf x.tgz`.
+    if printf '%s' "$SCAN_CMD" | grep -Eq '[.]claude/reviews' \
+       && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
+      TARGET="$CMD"
+    elif printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)git[[:space:]]+clean([[:space:]]|$)' \
+         && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*[dx]'; then
+      # `git clean -fdx` removes untracked files repo-wide, which includes an
+      # uncommitted checklist, state file and receipts, without naming them.
+      TARGET="$CMD"
+    elif ! printf '%s' "$SCAN_CMD" | grep -Eq "$VERDICT_RE"; then
+      exit 0
+    else
+      # Reading, staging and committing receipts must keep working — only deny
+      # the forms that create or change one.
+      printf '%s' "$SCAN_CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
+      TARGET="$CMD"
+    fi
     ;;
   *) exit 0 ;;
 esac
@@ -104,7 +94,7 @@ review evidence the authoring session does not author, which is the entire reaso
 the gate trusts them.
 
 To produce one, dispatch the reviewer for real:
-  exloom:l1-reviewer | exloom:cross-layer-auditor
+  exloom:l1-reviewer
   exloom:adversarial-reviewer | exloom:security-auditor
 
 Then commit the receipt alongside the checklist (git add/commit are not blocked).

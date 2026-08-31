@@ -1,9 +1,12 @@
-# Review Checklist — <branch-name>
+# Review Checklist — feat/exloom-review-loop-mechanisms
 
-**Tier:** [0 | 1 | 2 | 3]
-**Tier rationale:** <one sentence>
-**Blast radius:** <N files changed, M modules touched, user-facing yes/no>
-**Started:** YYYY-MM-DD
+**Tier:** 2
+**Tier rationale:** 66 files across multiple modules of the plugin (hooks, agents, scripts, skills, templates, test suite); security review added by SURFACE trigger, not tier — the diff evals a repo-tracked file and a subagent_type injection vector was found and fixed in it.
+**Blast radius:** 66 files changed, 6 modules touched (hooks, agents, scripts, skills, templates, test suite), user-facing: no — but it changes the enforcement mechanism 17 gate-enabled repos depend on, so a defect here silently disables review rather than breaking visibly.
+**Plan:** none — built without one. The scope gate this branch implements would
+have refused its first edit had the gate been enabled when it started. Recorded
+rather than omitted: the absent plan is itself the finding.
+**Started:** 2026-08-31
 
 > Reviewer dispatch is NOT self-attested. exloom records a verdict receipt under
 > `.claude/reviews/<branch-name>.verdicts/` when a reviewer subagent actually
@@ -27,13 +30,8 @@
 - Actual observed result: `<paste output / screenshot link>`
 - [ ] Test passed
 
-## Proof the change is tested (Tier 1+)
-- Proof receipt: `proof.json` (written only by `scripts/prove-change-is-tested.sh` — not by hand)
-- Test command used: `<exact command, or "detected">`
-- Result: `<PROVED / NOT_PROVED>`
-- If NOT_PROVED: `<what is missing — a test that fails without this change>`
-
-## Cross-layer contract check (Tier 2+) — part of the adversarial dispatch
+## Cross-layer contract check (Tier 2+)
+- Verdict receipt: `cross-layer-auditor.json` (written by exloom on dispatch)
 - Grep 1 — Orphan fields (UI writes → backend reads):
 - Grep 2 — Orphan endpoints (backend declares → frontend calls):
 - Grep 3 — Unhandled events (emitted → handled):
@@ -62,33 +60,23 @@
 - [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
 - [ ] Reversal proof runs in CI on this commit
 
-<!-- Keep examples OUT of the section below: exloom scans it for a cite and reads
-     two lines past it for a keyword, so an example would dispose a real finding.
-     Each entry is `FILE:LINE  FIXED THE CLASS: name the test` or
-     `FILE:LINE  GENUINELY SEPARATE: why it is unrelated`. -->
-
 ## Re-finds (the same finding reported in more than one round)
 
-none
+A re-find means the previous fix addressed the instance you were shown, not the
+rule behind it — which is why the next round found the adjacent case. Each one
+needs a decision here, naming the cite:
+
+- `<file:line>` — FIXED THE CLASS: <name the test that quantifies over the whole
+  set — every codepoint, every branch, every member — not the instance>
+- `<file:line>` — GENUINELY SEPARATE: <why this defect is unrelated to the earlier
+  one despite matching it>
+
+(none, if no finding was reported twice)
 
 ## Escape hatches used
 - [ ] None (default)
-
-<!-- Add a line per skipped step, in this form — the example lives in this comment
-     because `<step name>` is a placeholder the gate rejects, so leaving it in the
-     document blocks every branch that correctly skipped nothing:
-
-       - Skipped steps with written justification:
-         - smoke test — headless CI box, verified on staging instead
-
-     At the round cap the gate stops and asks a person to decide. To ship with
-     findings outstanding, add a line in exactly this form, then list each
-     outstanding finding with fixed / deferred + ticket / accepted + reason:
-
-       - Shipped at round cap — the remaining findings are style-only
-
-     The gate checks that the line exists and carries a reason; it does not judge
-     the reason. That is for whoever reads the PR. -->
+- Skipped steps with written justification:
+  - <step name> — <one sentence why>
 
 ## Provenance
 - AI-assisted: <ai-assisted>

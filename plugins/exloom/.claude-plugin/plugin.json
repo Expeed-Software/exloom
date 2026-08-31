@@ -1,7 +1,7 @@
 {
   "name": "exloom",
-  "description": "Team-oriented development workflow for Claude Code — discipline, handoff, and an enforced evidence-based review gate. Scales from one developer to a whole org.",
-  "version": "2.0.0",
+  "description": "Evidence for team code review on Claude Code — a spec, a plan, a mechanical proof that your tests notice your change, and reviewer receipts, gated once at push.",
+  "version": "4.0.0",
   "author": {
     "name": "Expeed Software",
     "email": "support@expeed.com"
@@ -21,30 +21,9 @@
     "handoff"
   ],
   "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/verify-review.sh"
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
-        "matcher": "Task",
+        "matcher": "Task|Agent",
         "hooks": [
           {
             "type": "command",
@@ -55,15 +34,6 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/block-unverified-push.sh"
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
@@ -73,7 +43,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*(push_files|create_or_update_file|create_pull_request|merge_pull_request|delete_file)",
+        "matcher": "Bash|mcp__.*(push_files|create_or_update_file|create_pull_request|merge_pull_request|delete_file)",
         "hooks": [
           {
             "type": "command",
