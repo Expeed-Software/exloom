@@ -1003,6 +1003,74 @@ ok "ordinary source -> NOT a security surface (no over-block)" \
 
 cd "$WORK" || exit 1
 
+echo "== reviewers are decoupled: only L1 must cover the shipped commit =="
+
+# Requiring every reviewer to approve the SAME commit is what produced the loop:
+# a fix cancels approvals from reviewers that were already satisfied, so N
+# reviewers chase a target that moves each time one is answered.
+subrepo decouple
+DC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$DC")"
+DCV="$(exloom_verdict_dir "$DC")"; mkdir -p "$DCV"
+printf 'a\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/null 2>&1
+A="$(git rev-parse HEAD)"
+printf '{"agent":"adversarial-reviewer","head":"%s","verdict":"APPROVED"}\n' "$A" > "$DCV/adversarial-reviewer.json"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$A" > "$DCV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+dchk() { exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1; echo $?; }
+ok "both approved at the tip -> allowed" "$(dchk)" "0"
+
+# Fix a finding. Under the old rule this cancelled BOTH approvals.
+printf 'b\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+B="$(git rev-parse HEAD)"
+ok "after a fix, stale L1 -> still blocked" "$(dchk)" "2"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$B" >> "$DCV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm l1again >/dev/null 2>&1
+ok "re-running ONLY L1 unblocks it" "$(dchk)" "0"
+ok "...and the adversarial receipt never had to be refreshed" \
+   "$(grep -c "$A" "$DCV/adversarial-reviewer.json" | head -1)" "1"
+
+echo "== the round cap: three rounds, then a person decides =="
+
+subrepo roundcap
+RC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$RC")"
+RCV="$(exloom_verdict_dir "$RC")"; mkdir -p "$RCV"
+cp "$WORK/../$(basename "$WORK")/.claude/reviews/feat/x.md" "$RC" 2>/dev/null || printf '# checklist\n\n## Escape hatches used\n- [ ] None (default)\n' > "$RC"
+rounds_at() {   # rounds_at <n> — n distinct reviewed commits, each REJECTED
+  : > "$RCV/l1-reviewer.json"
+  local i
+  for i in $(seq 1 "$1"); do
+    printf 'r%s\n' "$i" > src/one.go; git add -A >/dev/null 2>&1; git commit -qm "r$i" >/dev/null 2>&1
+    printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
+  done
+  git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+}
+rchk() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1; echo $?; }
+
+rounds_at 2
+ok "round count is distinct reviewed commits" "$(exloom_round_count "$RC" HEAD)" "2"
+ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
+ok "...and the message is NOT the cap message" \
+   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"
+
+rounds_at 3
+ok "at the cap -> still blocked (a cap must not auto-ship)" "$(rchk)" "2"
+ok "...and now it IS the cap message" \
+   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "1"
+
+printf '\n## Escape hatches used\n- Shipped at round cap — remaining findings are style-only, tracked in PROJ-9\n' >> "$RC"
+git add -A >/dev/null 2>&1; git commit -qm override >/dev/null 2>&1
+ok "a recorded human decision at the cap -> allowed" "$(rchk)" "0"
+
+echo "== the cap is configurable, but only from a COMMITTED file =="
+
+ok "default cap" "$(exloom_max_rounds)" "3"
+printf '5\n' > .claude/exloom-max-rounds
+ok "uncommitted config is ignored" "$(exloom_max_rounds)" "3"
+git add -A >/dev/null 2>&1; git commit -qm cap >/dev/null 2>&1
+ok "committed config is honoured" "$(exloom_max_rounds)" "5"
+
+cd "$WORK" || exit 1
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1

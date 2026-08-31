@@ -76,6 +76,15 @@ none
 - Skipped steps with written justification:
   - <step name> — <one sentence why>
 
+<!-- At the round cap the gate stops and asks a person to decide. To ship with
+     findings outstanding, add a line in exactly this form, then list each
+     outstanding finding with fixed / deferred + ticket / accepted + reason:
+
+       - Shipped at round cap — the remaining findings are style-only
+
+     The gate checks that the line exists and carries a reason; it does not judge
+     the reason. That is for whoever reads the PR. -->
+
 ## Provenance
 - AI-assisted: <ai-assisted>
 - Model(s): <model-id>

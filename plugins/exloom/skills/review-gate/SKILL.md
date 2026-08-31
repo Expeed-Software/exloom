@@ -40,6 +40,17 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 
 **Run the cheap pass often and the expensive pass once.** `l1-reviewer` runs at low effort, per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push.
 
+**Only L1 has to cover the commit you ship.** The other reviewers must have run and approved somewhere on this branch; a later fix does not invalidate them. Requiring all of them to approve the *same* commit is what produces a long review loop: a fix cancels the approvals of reviewers that were already satisfied, so every round starts over. Fix a finding, re-run L1, push.
+
+**Three rounds, then a person decides.** A round is a distinct commit that L1 reviewed. At the third, the gate stops deciding and blocks with the outstanding findings listed. It does not ship automatically — you either fix them, or record the decision in the checklist:
+
+```
+## Escape hatches used
+- Shipped at round cap — remaining findings are style-only, tracked in PROJ-9
+```
+
+then list each outstanding finding as fixed / deferred with a ticket / accepted with a reason. The gate checks the line exists; judging the reason is for whoever reads the PR. Change the cap by committing `.claude/exloom-max-rounds` with a number.
+
 What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
 
 ## Tier matrix

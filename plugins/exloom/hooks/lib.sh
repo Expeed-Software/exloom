@@ -330,9 +330,53 @@ exloom_required_reviewers() {
   printf '%s' "$list"
 }
 
+# How many review rounds has this branch had? Distinct commits appearing in the
+# L1 receipt, which is one JSON line per real dispatch. Deterministic — no model,
+# no judgement.
+exloom_round_count() {   # exloom_round_count <checklist> <tip>
+  local vdir content
+  vdir="$(exloom_verdict_dir "$1")"
+  content="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  [[ -n "$content" ]] || { printf '0'; return 0; }
+  printf '%s\n' "$content" \
+    | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
+    | sort -u | grep -c . || printf '0'
+}
+
+# The round cap. A repo may raise or lower it with a COMMITTED
+# .claude/exloom-max-rounds holding a single number — committed because raising
+# it weakens the gate, and that should be a reviewed change.
+exloom_max_rounds() {
+  local f=".claude/exloom-max-rounds" n=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    n="$(head -1 "$f" 2>/dev/null | tr -cd '0-9')"
+  fi
+  [[ -n "$n" && "$n" -ge 1 ]] 2>/dev/null && printf '%s' "$n" || printf '3'
+}
+
+# Has a human recorded a decision to ship at the cap? Mechanical: the checklist's
+# escape-hatch section must carry a line naming the cap. The reason is for the
+# next reader, not for the gate — the gate only checks that a person wrote one.
+exloom_cap_override() {   # exloom_cap_override <checklist> <tip>
+  local content
+  content="$(MSYS_NO_PATHCONV=1 git show "${2}:${1}" 2>/dev/null || true)"
+  [[ -n "$content" ]] || return 1
+  printf '%s\n' "$content" \
+    | grep -qiE '^[[:space:]]*-[[:space:]]*shipped at round cap[[:space:]]*—[[:space:]]*\S' || return 1
+  return 0
+}
+
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
-# Returns 0 when every reviewer the tier requires has a receipt covering the
-# reviewed commit; prints a BLOCK message and returns 2 otherwise.
+#
+# Only the L1 reviewer's approval must cover the shipped commit. The others must
+# have RUN and APPROVED at some point on this branch.
+#
+# Requiring every reviewer to approve the SAME commit is what produced the 7-12
+# round loop: any fix creates a new commit, which cancels every approval —
+# including from reviewers already satisfied — so N reviewers must simultaneously
+# approve a target that moves each time one of them is answered. Expected rounds
+# go as 1/p^N. Decoupling makes it 1/p: L1 covers what ships, the others cover
+# that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
   local vdir agent file content sha ok
@@ -365,14 +409,13 @@ exloom_check_verdicts() {
       sha="$(printf '%s' "$rline" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
       [[ -n "$sha" ]] || continue
       git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
-      # A receipt covers the reviewed commit when no code differs between the two
-      # — a checklist-only commit landing in between must not invalidate a real
-      # review, and a code commit must.
-      # Covers the reviewed commit when nothing behavioural differs. A
-      # checklist-only or comment-only commit landing in between must not
-      # invalidate a real review; a code commit must.
-      if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
-        exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+      # Only L1 must cover the SHIPPED commit. For the others, having run and
+      # approved anywhere on this branch is enough — see the header. A
+      # checklist-only or comment-only commit must not invalidate even L1.
+      if [[ "$agent" == "l1-reviewer" ]]; then
+        if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+          exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+        fi
       fi
 
       # A dispatch is not a review. A reviewer that returned REJECTED must not
@@ -395,6 +438,44 @@ exloom_check_verdicts() {
 
   if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
 
+  # ---------- the round cap ----------
+  # A loop whose exit depends on a reviewer's judgement has no guaranteed
+  # terminating state: the degenerate case where each fix introduces a new defect
+  # is not rare. At the cap the gate stops deciding and hands the decision to a
+  # person, with the outstanding findings in front of them. It does NOT ship
+  # automatically — a cap that silently allows the push is a slower no-gate.
+  local rounds max
+  rounds="$(exloom_round_count "$checklist" "$tip")"
+  max="$(exloom_max_rounds)"
+  if [[ "$rounds" -ge "$max" ]]; then
+    if exloom_cap_override "$checklist" "$tip"; then
+      echo "exloom: shipping at the round cap (${rounds}/${max}) on a recorded decision in ${checklist}." >&2
+      return 0
+    fi
+    local outstanding=""
+    [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
+    [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
+    [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
+    _exloom_block "$action" "Round cap reached on this branch: ${rounds} rounds, cap is ${max}.
+
+Outstanding:
+${outstanding}
+Findings are recorded in ${vdir}/*.findings.jsonl and in ${checklist}.
+
+Three rounds is where exloom stops deciding for you. Either fix what is
+outstanding and dispatch again, or ship deliberately by recording the decision
+in ${checklist} under 'Escape hatches used':
+
+  - Shipped at round cap — <one line: why this is acceptable>
+
+then list each outstanding finding with fixed / deferred + ticket / accepted +
+reason. Commit the checklist and push. The decision travels with the PR, so the
+next person reads why rather than guessing.
+
+To change the cap for this repo, commit .claude/exloom-max-rounds with a number."
+    return 2
+  fi
+
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
   [[ -n "$sec_extra" ]] && detail="${detail}
 security-auditor is required by the SURFACE this diff touches (a dependency
@@ -406,7 +487,9 @@ $(printf '  - %s\n' "${missing[@]}")"
   [[ ${#stale[@]} -gt 0 ]] && detail="${detail}
 
 Dispatched, but only against code that has since changed (re-run them):
-$(printf '  - %s\n' "${stale[@]}")"
+$(printf '  - %s\n' "${stale[@]}")
+Only l1-reviewer has to cover the commit you ship; if it is listed here, re-run
+just that one. The others need to have run and approved anywhere on this branch."
   [[ ${#unapproved[@]} -gt 0 ]] && detail="${detail}
 
 Reviewed the current code, but did NOT approve it (fix the findings, then re-run):
