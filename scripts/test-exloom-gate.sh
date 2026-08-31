@@ -85,6 +85,30 @@ mkdir -p src/auth; printf 'z\n' > src/auth/NOTES.md; git add -A; git commit -qm 
 ok "markdown under auth/ -> 0, not 3" "$(exloom_derive_tier HEAD)" "0"
 git checkout -q feat/x
 
+# `auth` must match as a WORD, not a substring. A bare `auth` matched
+# `authoring-claude-md`, so three markdown docs forced Tier 3 — and tier has no
+# escape hatch, making the gate unsatisfiable. Found by running exloom's own
+# /review-init against this branch.
+git checkout -q -b docs/authoring main
+mkdir -p skills/authoring-claude-md
+printf 'z
+' > skills/authoring-claude-md/SKILL.md
+printf 'z
+' > skills/authoring-claude-md/notes.md
+git add -A; git commit -qm authoring
+ok "'authoring' path -> 0, not a false Tier 3" "$(exloom_derive_tier HEAD)" "0"
+
+git checkout -q -b feat/realauth main
+mkdir -p src/auth; printf 'a
+' > src/auth/login.go; git add -A; git commit -qm realauth
+ok "a real auth/ path -> 3" "$(exloom_derive_tier HEAD)" "3"
+
+git checkout -q -b feat/authz main
+printf 'a
+' > src/authz.go; git add -A; git commit -qm authz
+ok "authz -> 3" "$(exloom_derive_tier HEAD)" "3"
+git checkout -q feat/x
+
 echo "== verdict receipts (dispatch is recorded, not claimed) =="
 
 CHECK=".claude/reviews/feat/x.md"

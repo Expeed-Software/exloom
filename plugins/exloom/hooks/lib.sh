@@ -173,10 +173,18 @@ exloom_derive_tier() {
   if [[ $docs_only -eq 1 ]]; then printf '0'; return 0; fi
 
   # Tier 3 — data migration, or the security surface /review-init enumerates.
+  #
+  # `auth` is matched as a WORD, not a substring. A bare `auth` matched
+  # `authoring-claude-md` — three markdown documentation files forced Tier 3 on a
+  # docs change, and tier has no escape hatch by design, so the gate became
+  # unsatisfiable and the only way forward was EXLOOM_REVIEW_SKIP. Over-blocking is
+  # how a gate teaches people to disable it.
+  # Matches: auth/ auth- authentication authorization authz authn oauth
+  # Does not match: authoring author authors
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
     printf '3'; return 0
   fi
-  if printf '%s\n' "$files" | grep -Eqi 'auth|tenant|secret|crypto|jwt|apikey|api[-_]key'; then
+  if printf '%s\n' "$files" | grep -Eqi '(auth([^a-z]|entic|oriz|z|n)|oauth|tenant|secret|crypto|jwt|api[-_]?key)'; then
     printf '3'; return 0
   fi
 
