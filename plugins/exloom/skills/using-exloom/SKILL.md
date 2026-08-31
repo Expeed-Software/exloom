@@ -48,7 +48,7 @@ Three reviewers remain, and the effort levels are deliberate:
 - `adversarial-reviewer` — **medium**, once, before push. Carries the cross-layer contract check.
 - `security-auditor` — **medium**, at Tier 3 or when the diff touches a security surface.
 
-Run the cheap pass often and the expensive pass once. An earlier version ran the whole panel at full effort and re-ran all of it on every fix commit, because receipts bind to the tip — which turned one fix into three more reviews, and each extra round surfaced thinner findings that were then treated as work. If a reviewer's receipt says `"verdict":"APPROVED"` and `"round_needed":"NO"`, stop. Another round to be thorough is the specific way a two-round change becomes a nine-round one.
+Run the cheap pass often and the expensive pass once. When a receipt says `"verdict":"APPROVED"` and `"round_needed":"NO"`, stop — running another round to be thorough is how a two-round change becomes a nine-round one.
 
 ## Is the gate on in this repo?
 

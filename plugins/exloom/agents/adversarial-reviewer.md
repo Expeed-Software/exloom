@@ -1,6 +1,7 @@
 ---
 name: adversarial-reviewer
 description: Pre-push hostile reviewer for Tier 2+ changes. Invoke once, after L1 passes and before marking complete. Assumes every previous review missed something and tries to break the system. Highest-signal review type in practice — carries the load on integration gaps a per-file review cannot see, including producer/consumer seams where one side was changed and the other was not.
+model: opus
 effort: medium
 ---
 

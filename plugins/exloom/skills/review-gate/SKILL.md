@@ -38,7 +38,7 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 - **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
   Two rules make the receipt worth having: the pinned `.claude/exloom-test-command` must be **committed**, because its contents are `eval`d; and an unresolvable `--base` is refused rather than recorded.
 
-**Where the cost goes, and why it is shaped this way.** Review accuracy holds at low effort, so the passes are split rather than repeated: `l1-reviewer` runs at **low** effort and is cheap enough for every commit; `adversarial-reviewer` and `security-auditor` run at **medium**, once, before push. An earlier version ran the whole panel at full effort and re-ran all of it on every fix commit, because receipts bind to the tip. That turned each fix into three more full reviews, and the extra rounds surfaced progressively thinner findings that were then treated as work. If you take one thing from this file: run the cheap pass often and the expensive pass once.
+**Run the cheap pass often and the expensive pass once.** `l1-reviewer` runs at low effort, per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push.
 
 What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
 
@@ -88,7 +88,7 @@ If the change is not user-facing (e.g. a background service refactor), the smoke
 
 Dispatch the `adversarial-reviewer` agent, once, before push. This carries the highest signal of any review type. The prompt is hostile by design and lives in the agent file; in short: assume every previous review missed things, try to break the change, look specifically for the integration gaps a per-file review cannot see.
 
-Include the cross-layer contract check in that same dispatch — it used to be a separate agent, and splitting it bought nothing but a second full pass:
+Include the cross-layer contract check in the same dispatch:
 
 1. For every field the frontend persists in this change: grep the backend for reads of that field name. Report fields with zero backend readers as orphans.
 2. For every new API endpoint added: grep the frontend for the URL path or the generated client call. Report endpoints with zero frontend callers as orphans.

@@ -42,45 +42,25 @@ except Exception:
 
 # Read a JSON string value with sed, when neither jq nor python3 is available.
 #
-# Two defects that shipped in the naive version, both of which made a gate fail
-# OPEN on the modal shell command:
-#
-#   s/.*"key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/
-#
-#   - The value class `[^"]*` stops at the first quote BYTE, so it cannot see
-#     past an escaped quote. `echo "hi" > src/Main.java` arrives as
-#     "echo \"hi\" > src/Main.java" and was truncated to `echo `, whose shape is
-#     not a write, so the review freeze allowed it. `sed -i s/a/b/ src/Main.java`
-#     — quote-free — was blocked. The freeze held only for commands without
-#     quotes, which is not a property anyone would design.
-#   - The leading `.*` is greedy, so it matches the LAST occurrence of the key.
-#     A command whose own text contains `"command": "ls"` shadowed the real one.
-#
-# `\\.` consumes an escaped pair before `[^"\\]` can stop on it, and `head -1`
-# takes the first occurrence. The value is returned still JSON-escaped, which is
-# correct for shape-matching: `\"` is not a quote character in the command.
+# Do not "simplify" to `s/.*"key" *: *"\([^"]*\)".*/\1/`. `[^"]*` stops at the
+# first quote byte, truncating any value containing an escaped quote; the leading
+# `.*` is greedy, so it matches the LAST occurrence of the key. Both fail OPEN.
+# `\\.` consumes an escaped pair before `[^"\\]` can stop on it; `head -1` takes
+# the first occurrence. The value stays JSON-escaped, which is correct for
+# shape-matching — `\"` is not a quote character in the command.
 _exloom_sed_str() {
   grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"\(\\\\.\|[^\"\\\\]\)*\"" 2>/dev/null \
     | head -1 | sed -e "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
 }
 
-# Remove heredoc BODIES and here-string operands from a command, keeping
-# everything else — so a scanner looking for write targets sees the real targets
-# and not the prose.
+# Remove heredoc BODIES and here-string operands, keeping everything else, so a
+# scanner sees write targets and not prose. Commands AFTER the terminator must
+# still be scanned — truncating at the first `<<` lets `cat <<< '' ; rm <target>`
+# through.
 #
-# The version this replaces was `${CMD%%<<*}`: discard from the first `<<`
-# onward. Any command with a here-string before the write was scanned as an
-# empty prefix and allowed, which made every verdict receipt, proof.json, the
-# .state file and the gate marker hand-writable in one command:
-#
-#   rc=2  printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
-#   rc=0  cat <<< '' ; printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
-#
-# Bash string ops rather than awk on purpose: the caller has already flattened
-# newlines to spaces, so the body sits on one line with its opener and
-# terminator, and an awk program nested inside `"$( ... | awk '...' )"` inside a
-# case arm was three quoting layers deep and behaved differently in situ than
-# it did standalone. This is testable on its own.
+# Bash string ops, not awk: the caller flattens newlines first, and an awk
+# program nested three quoting layers deep behaved differently in situ than
+# standalone. This is unit-testable on its own.
 exloom_strip_heredocs() {
   local s="$1" pre rest tag
   # A here-string carries a word, not a body.
@@ -270,11 +250,9 @@ exloom_derive_tier() {
 
   # Tier 3 — data migration, or the security surface /review-init enumerates.
   #
-  # `auth` is matched as a WORD, not a substring. A bare `auth` matched
-  # `authoring-claude-md` — three markdown documentation files forced Tier 3 on a
-  # docs change, and tier has no escape hatch by design, so the gate became
-  # unsatisfiable and the only way forward was EXLOOM_REVIEW_SKIP. Over-blocking is
-  # how a gate teaches people to disable it.
+  # `auth` matches as a WORD, not a substring — a bare `auth` matched
+  # `authoring-claude-md` and forced Tier 3 on a docs change, which the tier has
+  # no escape hatch from.
   # Matches: auth/ auth- authentication authorization authz authn oauth
   # Does not match: authoring author authors
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
@@ -312,18 +290,12 @@ exloom_derive_tier() {
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
 # Does this diff touch a security surface that does NOT derive to Tier 3?
+# Dependency and deserialization changes derive to Tier 1 or 2, so without this
+# they would never require the security auditor the skill promises for them.
 #
-# The comment this replaces asserted that "the surface that triggers security
-# review also derives to Tier 3, so the tier list covers it." That was false for
-# two surfaces the review-gate skill explicitly promises: a dependency change and
-# a deserialization change both derive to Tier 1 or 2 and never required the
-# security auditor. The skill promised a review the code did not require.
-#
-# Deliberately narrow: dependency manifests and lockfiles by filename, and
-# deserialization entry points by diff content. Outbound-request / SSRF shapes
-# are NOT matched — every formulation tried was noisy enough to force security
-# review on ordinary HTTP client code, and an over-broad gate is how a team
-# learns to set EXLOOM_REVIEW_SKIP.
+# Deliberately narrow: manifests and lockfiles by filename, deserialization entry
+# points by diff content. Outbound-request / SSRF shapes are NOT matched — every
+# formulation tried forced security review on ordinary HTTP client code.
 exloom_security_surface() {   # exloom_security_surface <base> <tip>
   local base="$1" tip="$2" files
   files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
@@ -454,19 +426,12 @@ checklist, and re-run /review-complete."
 # exloom_diff_is_behavioural <from> <to>
 # Returns 0 when the diff could change behaviour, 1 when it provably cannot.
 #
-# WHY. The gate invalidates a review on ANY code change, which is correct for
-# freezing an artifact and catastrophic when combined with fixing findings: every
-# fix invalidates the review, so every round mandates another round, and there is
-# no terminating state. On one real branch the outstanding items at round 9 were
-# stale comments, two test parameter names and a javadoc sentence — none of which
-# changes behaviour — and the gate would still have demanded a full adversarial
-# round including a codepoint sweep. That is how a gate teaches people to bypass it.
+# Without this, a comment-only fix invalidates every receipt and mandates another
+# round, so the loop has no terminating state.
 #
-# CONSERVATIVE BY DESIGN. A change counts as non-behavioural only when every
-# added and removed line is blank or begins with a comment marker. Any line that
-# is not obviously a comment makes the whole diff behavioural. Being wrong in this
-# direction costs one unnecessary review; being wrong in the other ships unreviewed
-# code, so the asymmetry is deliberate.
+# CONSERVATIVE BY DESIGN: non-behavioural only when every added and removed line
+# is blank or starts with a comment marker. Being wrong here costs one extra
+# review; being wrong the other way ships unreviewed code.
 exloom_diff_is_behavioural() {
   local from="$1" to="$2" files f ext body line stripped marker
 
@@ -570,17 +535,9 @@ exloom_diff_is_behavioural() {
 # Blocks when the same finding was reported in more than one review round and the
 # checklist records no disposition for it.
 #
-# WHY. "I fix the instance rather than the rule, declare it done, and the next
-# reviewer finds the adjacent case. That's what turned one bug fix into nine
-# rounds." A re-find is the only mechanical evidence of that pattern available, and
-# it is objective: the same fingerprint, two rounds apart, after the author declared
-# it fixed.
-#
-# The response this forces is a decision, not a fix: either quantify the guard over
-# the whole class (a property test that enumerates the set, rather than a case for
-# the instance you were shown), or state why this genuinely is a separate defect.
-# Both are legitimate; silently patching the second instance is not, because it
-# schedules the third.
+# The same fingerprint two rounds apart is mechanical evidence that a fix
+# addressed the instance rather than the rule. It forces a decision, not a fix:
+# quantify the guard over the whole class, or say why this is a separate defect.
 exloom_check_refinds() {
   local CHECKLIST_CONTENT="${CHECKLIST_CONTENT:-}"
   local checklist="$1" tip="$2" action="$3"
@@ -603,16 +560,13 @@ exloom_check_refinds() {
     # Disposed when the checklist names the cite in its Re-finds section.
     # Disposition rules, in order of strictness:
     #
-    #   1. A `## Re-finds` section exists -> the cite must appear inside it, and a
-    #      disposition keyword must appear on that line OR within the two lines
-    #      after it. Requiring the keyword on the SAME physical line rejected the
-    #      natural two-line entry (cite, then `FIXED THE CLASS:` beneath), which
-    #      neither the block message nor the template asked for.
+    #   1. A `## Re-finds` section exists -> the cite must appear inside it, with a
+    #      disposition keyword on that line or within the two lines after it (the
+    #      template's entry is two lines: cite, then `FIXED THE CLASS:` beneath).
     #
-    #   2. NO `## Re-finds` section -> the checklist predates this mechanism.
-    #      Fall back to the cite appearing anywhere. Scoping without this made every
-    #      in-flight branch permanently unblockable, with no migration path: a
-    #      regression worse than the weak check it replaced.
+    #   2. No `## Re-finds` section -> the checklist predates this mechanism; fall
+    #      back to the cite appearing anywhere, so in-flight branches stay
+    #      unblockable rather than being stranded with no migration path.
     if [[ -n "$cite" ]]; then
       local refind_section
       refind_section="$(printf '%s\n' "$CHECKLIST_CONTENT" \
@@ -862,16 +816,9 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     # an assertion. Uses the DECLARED tier, which is >= derived by the check above.
     exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action" || return 2
 
-    # Author-side proof that the change is actually tested (Tier 1+).
-    #
-    # This is deliberately NOT "run a script and remember to look at it". The
-    # proof receipt is written only by scripts/prove-change-is-tested.sh, into
-    # the same directory protect-verdicts.sh guards, and required here — so the
-    # check cannot be skipped by forgetting, and its result cannot be typed.
-    #
-    # It answers one question: with the source change removed and the tests kept,
-    # do the tests fail? A NOT_PROVED result means the tests do not notice the
-    # change — weak assertions, a runner that did not run, or no test at all.
+    # Author-side proof that the change is actually tested (Tier 1+). The receipt
+    # is written only by scripts/prove-change-is-tested.sh, into the directory
+    # protect-verdicts.sh guards, so the result cannot be typed.
     if [[ "$tier" -ge 1 ]]; then
       exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" || return 2
     fi

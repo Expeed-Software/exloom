@@ -62,17 +62,10 @@
 - [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
 - [ ] Reversal proof runs in CI on this commit
 
-<!--
-  Re-finds legend (deliberately ABOVE the heading, outside the scanned section).
-  A re-find means the previous fix addressed the instance you were shown, not the
-  rule behind it — which is why the next round found the adjacent case.
-  Each one needs a decision naming the cite, in one of exactly two forms:
-    - FILE:LINE  FIXED THE CLASS: name the test that quantifies over the whole set
-    - FILE:LINE  GENUINELY SEPARATE: why it is unrelated despite matching
-  The examples live here, not below, because exloom scans the section for a cite
-  and looks two lines past it for a keyword — an example inside the section can
-  dispose a real finding written next to it.
--->
+<!-- Keep examples OUT of the section below: exloom scans it for a cite and reads
+     two lines past it for a keyword, so an example would dispose a real finding.
+     Each entry is `FILE:LINE  FIXED THE CLASS: name the test` or
+     `FILE:LINE  GENUINELY SEPARATE: why it is unrelated`. -->
 
 ## Re-finds (the same finding reported in more than one round)
 

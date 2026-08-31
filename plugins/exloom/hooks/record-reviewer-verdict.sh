@@ -3,21 +3,15 @@
 #
 # OPT-IN: does nothing unless the repo created `.claude/exloom-gate.enabled`.
 #
-# WHY THIS EXISTS. Every other piece of review evidence in exloom is written by
-# the same session that wrote the code: the checklist, the tier, the findings,
-# the "Dispatched" boxes. That makes the gate an artifact check — it proves a
-# document exists, never that a review happened — and the cheapest way to make it
-# green is to write the document. This hook is the one exception. It fires when a
-# reviewer subagent ACTUALLY completes, and it records that event to disk. The
-# model does not write this file (protect-verdicts.sh denies direct writes to the
-# directory), so a receipt is evidence of a dispatch, not an assertion of one.
+# Fires when a reviewer subagent actually completes and records that event, so a
+# receipt is evidence of a dispatch rather than an assertion of one. Every other
+# piece of review evidence is written by the session that wrote the code.
 #
 # Receipt: .claude/reviews/<branch>.verdicts/<agent>.json — JSONL, one line per
-# dispatch, each naming the HEAD commit the reviewer saw. lib.sh requires, per
-# tier, one receipt per required reviewer covering the reviewed commit.
+# dispatch, each naming the HEAD commit the reviewer saw.
 #
-# NEVER blocks and never fails the tool call: always exit 0. A missing receipt
-# surfaces later, at the gate, as a blocked push — not here as a broken workflow.
+# NEVER blocks and always exits 0: a missing receipt surfaces later at the gate,
+# not here as a broken workflow.
 
 set -u
 
@@ -97,16 +91,11 @@ SESSION="$(_field session_id)"
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
 
 # ---------- sanitise every value that reaches the receipt ----------
-# These fields are interpolated into JSON with printf, and the gate matches
-# receipt lines by substring. A `subagent_type` containing a quote can therefore
-# CLOSE the field and append its own `"artifact"` / `"artifact_hash"` keys,
-# forging coverage for a plan that was never reviewed — without ever writing to
-# the verdicts directory that protect-verdicts.sh guards. Verified: the forged
-# line opened the gate.
-#
-# Real agent and session names are alphanumerics plus `:._-`; anything else is
-# stripped rather than escaped, because the goal is a value that cannot alter
-# the shape of the line no matter how it is later parsed.
+# These are interpolated into JSON with printf and the gate matches receipt lines
+# by substring, so a value containing a quote can close its field and append its
+# own keys — forging coverage without ever writing to the guarded directory.
+# Stripped, not escaped: the goal is a value that cannot alter the line's shape
+# however it is later parsed.
 _safe() { printf '%s' "$1" | tr -cd 'A-Za-z0-9:._-' | cut -c1-200; }
 SUBAGENT="$(_safe "$SUBAGENT")"
 SESSION="$(_safe "$SESSION")"
@@ -166,18 +155,11 @@ SCAN="$(printf '%s' "$SCAN" | sed 's/\\n/\n/g')"
 # Parsed against what the SHIPPED agents actually print. Their output block is a
 # bare `VERDICT: APPROVED` or `VERDICT: REJECTED (n items)`.
 #
-# Three defects this replaces, each reproduced:
-#   - `**VERDICT: APPROVED**` recorded UNKNOWN. Bold is the single most likely
-#     form an LLM emits, so the common case silently blocked a real approval and
-#     the block message then advertised EXLOOM_REVIEW_SKIP.
-#   - `VERDICT: APPROVED WITH CHANGES` recorded APPROVED — a non-approval opening
-#     the gate.
-#   - `grep -m1` took the FIRST match, so a report quoting its own template before
-#     stating a real verdict was scored on the template.
-#
-# So: tolerate markdown decoration before the keyword, require the remainder of
-# the line to be exactly APPROVED/REJECTED with an optional parenthetical, and
-# take the LAST such line in the report.
+# Three rules, each load-bearing: tolerate markdown decoration anywhere on the
+# line (`**VERDICT: APPROVED**` is the modal form); require the remainder to be
+# exactly APPROVED/REJECTED plus an optional parenthetical (so `APPROVED WITH
+# CHANGES` is not an approval); and take the LAST match, not the first (a report
+# quoting its own template would otherwise be scored on the template).
 VERDICT="UNKNOWN"
 # Decoration is stripped from the WHOLE line before matching. Tolerating it only at
 # the edges left `VERDICT: **APPROVED**`, `**VERDICT:** REJECTED (2 items)`,
@@ -196,15 +178,9 @@ case "$VLINE" in
 esac
 
 # ---------- the loop-termination signal ----------
-# All five agents emit `ROUND NEEDED AFTER FIX: YES | NO` as a mandatory closing
-# line, and nothing read it — the one signal designed to END the review loop was
-# written and never consumed. That is the whole presenting problem: rounds do not
-# stop because nobody is told they have reached the exit, so another round runs
-# and surfaces thinner findings that then get treated as work.
-#
-# Recorded on the receipt so /review-complete and the ledger can act on it.
-# Default UNKNOWN, and UNKNOWN is treated as YES by any consumer: a reviewer that
-# did not answer has not told you the loop can stop.
+# Every agent emits `ROUND NEEDED AFTER FIX: YES | NO`; recording it is what lets
+# /review-complete decide the loop is over. UNKNOWN counts as YES to any
+# consumer — a reviewer that did not answer has not said the loop can stop.
 ROUND_NEEDED="UNKNOWN"
 RLINE="$(printf '%s\n' "$SCAN" \
   | tr -d '*_`#>' \
@@ -222,11 +198,8 @@ esac
 #     ## Critical (must fix before merge)
 #     - path/to/file.ext:123 — one sentence problem statement
 #
-# The severity is the HEADING; the finding line carries only a cite. The previous
-# parser required both on one line, so NO shipped agent produced a single
-# recorded finding — the ledger was empty and re-find detection was inert. The
-# suite passed because its fixture put severity and cite on one line, a format
-# nothing emits.
+# The severity is on the HEADING; the finding line carries only a cite. Requiring
+# both on one line records nothing from any shipped agent.
 ROUND="$(sed -n 's/.*"round":\([0-9]*\).*/\1/p' ".claude/reviews/${BRANCH}.state" 2>/dev/null | tail -1)"
 [[ -n "$ROUND" ]] || ROUND=0
 
@@ -287,16 +260,11 @@ while IFS= read -r fline; do
     *critical*|*blocking*|*severity:\ high*|*\[high\]*|*" high "*) line_sev="HIGH" ;;
     *important*|*severity:\ medium*|*\[medium\]*|*" medium "*)     line_sev="MED" ;;
     *minor*|*severity:\ low*|*\[low\]*|*" low "*|*orphan*)         line_sev="LOW" ;;
-    # cross-layer-auditor reports one line per checked item and marks the actual
-    # orphan with `read at: NONE` / `called at: NONE` / `handled at: NONE`. Its
-    # five headings (`## Grep 1 — Orphan fields` …) carry no severity word and
-    # neither do its lines, so `sev` stayed empty and EVERY finding from the one
-    # reviewer whose entire job is orphan detection was dropped — permanently,
-    # and with it re-find detection for that reviewer. The `*orphan*` arm above
-    # looked for the word on the finding line; the shipped format never puts it
-    # there. Keying on NONE records the orphans and leaves the clean rows alone.
-    # A cite is required before this point, so l1's `- Critical: none` (no cite)
-    # cannot reach here.
+    # The cross-layer check reports one line per item and marks the actual orphan
+    # with `read at: NONE` / `called at: NONE` / `handled at: NONE`. Neither its
+    # headings nor its lines carry a severity word, so keying on NONE is what
+    # records the orphans while leaving the clean rows alone. A cite is required
+    # above, so l1's `- Critical: none` cannot reach here.
     *": none"*|*":none"*)                                          line_sev="MED" ;;
   esac
   # A non-blocking line is LOW whatever else it says.

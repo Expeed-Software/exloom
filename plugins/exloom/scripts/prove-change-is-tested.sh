@@ -1,38 +1,18 @@
 #!/usr/bin/env bash
 # exloom — prove-change-is-tested.sh
 #
-# Answers one question mechanically, before review, in the author's own session:
+# Answers one question mechanically, before review:
 #
 #     If I take my source change away and keep my tests, do my tests fail?
 #
-# If they still pass, the tests do not test the change. That is the author's own
-# item 4 ("my tests assert text, not behaviour") turned into a command instead of
-# a resolution — and a resolution is exactly the thing that does not hold.
+# If they still pass, the tests do not test the change.
 #
-# WHY THIS AND NOT MORE REVIEW. Real review transcripts show rounds 2..7 spent on
-# defects a script catches before the first commit:
-#   - a test asserting `hasMessageContaining("a")` on an object named `a`,
-#     satisfied by the letter "a" in any sentence — a reviewer gutted the code and
-#     the suite stayed green;
-#   - a committed test proving a value reached the builder, none proving it came
-#     back out;
-#   - a Gradle test task reported UP-TO-DATE for javadoc-only edits, so the suite
-#     silently did not run for precisely the change class it existed to catch.
-# All three fail this check. None of them needed a reviewer.
-#
-# WHAT THE WORKTREE PROTECTS, AND WHAT IT DOES NOT. Everything runs in a throwaway
-# `git worktree`, so your working tree is never modified and there is nothing to
-# restore if this is interrupted. That is ALL it protects.
-#
-# It is NOT a sandbox. A worktree isolates git state, not the process: `eval
-# "$TESTCMD"` runs with your full filesystem, network and credential access, and
-# $TESTCMD may come from `.claude/exloom-test-command` — a file the branch under
-# review authors. Only run this on a branch you would already be willing to run
-# `npm test` on.
-#
-# The previous version of this comment asserted "no reviewer-written command is
-# executed", directly above the eval. Security review flagged that confident, wrong
-# claim as the reason the risk was easy to wave through in review.
+# NOT A SANDBOX. Everything runs in a throwaway `git worktree`, so your working
+# tree is never modified — that is ALL it protects. A worktree isolates git
+# state, not the process: `eval "$TESTCMD"` runs with your full filesystem,
+# network and credential access, and $TESTCMD may come from a committed
+# `.claude/exloom-test-command`. Only run this on a branch you would already be
+# willing to run `npm test` on.
 #
 # Usage:
 #   bash prove-change-is-tested.sh [--base <ref>] [--cmd "<test command>"]
@@ -70,35 +50,16 @@ if [[ -z "$BASE" ]]; then
 fi
 [[ -n "$BASE" ]] || { echo "cannot determine a base commit; pass --base" >&2; exit 2; }
 
-# Resolve to a commit id before ANY use. `--base` was interpolated raw into the
-# proof receipt while every other value on that line was sanitised, so
-#
-#   --base '","result":"PROVED","x":"'
-#
-# minted a receipt carrying both the real NOT_PROVED and an injected PROVED —
-# and exloom_check_proof tests for PROVED first, so the forgery won. The early
-# receipt path is reachable with an unresolvable ref because `CHANGED` is also
-# fed by `git ls-files --others`, so the failed `git diff` does not abort.
-#
-# Sanitising the string would leave the next caller to remember. Resolving it
-# means a value that is not a commit cannot exist past this line, so neither
-# receipt writer can emit one — and an unresolvable base now fails loudly
-# instead of proceeding with a ref git never accepted.
+# Resolve to a commit id before ANY use: `--base` reaches the receipt, so a value
+# that is not a commit must not be able to exist past this line.
 BASE="$(git rev-parse --verify --quiet "${BASE}^{commit}" 2>/dev/null || true)"
 [[ -n "$BASE" ]] || { echo "--base does not resolve to a commit in this repo" >&2; exit 2; }
 
 # ---------- test command ----------
 # A repo may pin its own, which is always better than detection.
-# The file must be TRACKED, the same rule .claude/exloom-protected-branches and
-# .claude/exloom-skip-branches already carry (lib.sh:149,170). This value is
-# `eval`d three times with full filesystem, network and credential access, so an
-# UNTRACKED file was arbitrary command execution that appears in no diff and no
-# PR — on a fork PR, that is RCE on the reviewer's machine at the moment they run
-# the command the gate's own block message tells them to run. `-f` alone checked
-# that the file existed, not that anyone could see it.
-#
-# Requiring it tracked means widening this boundary is a committed, reviewable
-# change, which is the same reason the other two config files require it.
+# Must be TRACKED: this value is `eval`d with full filesystem and credential
+# access, so an untracked file is arbitrary code execution that appears in no
+# diff and no PR. Same rule as exloom-protected-branches / exloom-skip-branches.
 if [[ -z "$TESTCMD" && -f ".claude/exloom-test-command" ]]; then
   if git ls-files --error-unmatch ".claude/exloom-test-command" >/dev/null 2>&1; then
     TESTCMD="$(head -1 .claude/exloom-test-command)"
@@ -258,18 +219,9 @@ fi
 
 # RUN 3: your change + your tests. MUST PASS.
 #
-# This replaces an output heuristic that asked whether the failure "looked like" a
-# test failing. It rejected the forgery and also rejected `[ "$(calc)" = "5" ]` —
-# a perfectly good shell assertion that fails silently. Guessing from output was
-# the wrong instrument; behaviour is the right one.
-#
-# The forgery security review demonstrated is `[ ! -e tests/t.sh ]`: exit 0 at base
-# because the test file is absent, exit 1 in run 2 because it has been copied in.
-# It survives runs 1 and 2. It cannot survive this one — with the change AND the
-# tests both present, it still exits 1, so the branch fails its own tests.
-#
-# This also catches something worth catching on its own: tests that do not actually
-# pass on the change they were written for.
+# Catches a command that inverts on the test file's existence (`[ ! -e tests/t.sh ]`
+# passes runs 1 and 2 while testing nothing), and, on its own merit, tests that do
+# not pass on the change they were written for.
 if [[ $rc -ne 0 ]]; then
   while IFS= read -r sf; do
     [[ -n "$sf" && -f "$sf" ]] || continue
@@ -295,17 +247,11 @@ if [[ $rc -ne 0 ]]; then
   fi
 fi
 
-# Signatures cover the modal "symbol does not exist at base" form in each language
-# the script auto-detects. Go says `undefined: Foo`, Python NameError/AttributeError,
-# Rust `cannot find function` / error[E0425], C# error CS0103 — none of which the
-# first list had, so those repos still minted a false PROVED. `no such file or
-# directory` was REMOVED: it is a normal assertion failure when a test checks that
-# the change produces an output artifact, and matching it misreported a real proof.
-#
-# A failure that is a BUILD failure rather than a test failure proves only that
-# the tests mention new code — not that they assert anything about its behaviour.
-# The vacuous case is real: a test asserting `typeof f === 'function'` against a
-# deliberately broken `f` produced PROVED, because at base `f` did not exist.
+# A BUILD failure proves only that the tests mention new code, not that they
+# assert anything about it — `typeof f === 'function'` yields PROVED purely
+# because `f` does not exist at base. Signatures cover the "symbol missing at
+# base" form per language. Do NOT add `no such file or directory`: that is a
+# normal assertion failure when a test checks for an output artifact.
 if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|NameError|AttributeError: module|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|undefined: [A-Za-z_]|cannot find function|cannot find value|cannot find type|error CS[0-9]+|error\[E0[0-9]+\]|command not found' "$WT/.exloom-out" 2>/dev/null; then
   _receipt NOT_PROVED
   echo

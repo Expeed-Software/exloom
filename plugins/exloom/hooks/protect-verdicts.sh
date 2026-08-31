@@ -1,28 +1,12 @@
 #!/usr/bin/env bash
-# exloom — PreToolUse hook (verdict receipt protection).
+# exloom — PreToolUse hook. Denies hand-writing a verdict receipt, which is what
+# makes a receipt evidence rather than another author-written artifact.
 #
-# OPT-IN: does nothing unless the repo created `.claude/exloom-gate.enabled`.
+# OPT-IN: no-op unless `.claude/exloom-gate.enabled` exists.
+# Exit 0 = allow (including any parse failure), 2 = deny. Bypass: EXLOOM_REVIEW_SKIP=1.
 #
-# Verdict receipts under `.claude/reviews/<branch>.verdicts/` are the only review
-# evidence exloom does not let the authoring session author. They are written by
-# record-reviewer-verdict.sh when a reviewer subagent actually completes. This
-# hook denies direct writes to that directory, so the difference between "a
-# reviewer ran" and "a reviewer did not run" cannot be closed by writing a file.
-#
-# Without this, receipts are just another author-written artifact and buy nothing
-# over the checkbox they replace.
-#
-# Exit codes:
-#   0  — allow (gate off, path not a receipt, or any infrastructure parse failure)
-#   2  — deny with stderr message
-#
-# Bypass (when enabled): EXLOOM_REVIEW_SKIP=1
-#
-# Known limit, stated plainly: this matches the direct file-writing tools and the
-# obvious shell write forms. A deliberately obfuscated shell command can still
-# reach the directory, exactly as with the push gate. exloom is a cooperating-team
-# gate, not an adversarial security boundary — the goal is that forging a receipt
-# has to be a deliberate act, not the path of least resistance.
+# Matches the obvious write forms only; an obfuscated command can still get
+# through. Cooperating-team gate, not a security boundary.
 
 set -u
 
@@ -43,27 +27,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 
-# Pull a nested tool_input string field. The shared sed fallback truncates at the
-# first quote, which is fine for a path but not for a shell command — the command
-# path falls back to the raw hook input instead (same approach as the push gate).
-# Delegates to the shared ladder in lib.sh. This copy had jq and python3 tiers
-# and NO sed fallback, so on a Git Bash with neither — the environment every
-# other extractor in this codebase carries a fallback for — TARGET came back
-# empty for Write/Edit and the hook exited 0. Receipt protection was silently
-# off in exactly the environment it was written for.
 _tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 
-# `.verdicts/` is distinctive enough to match on its own; requiring the full
-# `.claude/reviews/` prefix would miss an absolute path on Windows, where the
-# separator is a backslash.
-# Matches the verdicts dir, the review STATE file, and the reviews directory
-# itself. The state file was writable with the Edit tool, which lifted a review
-# freeze without a record and reset the round counter — the one number the
-# feature exists to surface. And `rm -rf .claude/reviews` / `git clean -fdx`
-# contain no `.verdicts` substring, so both destroyed every receipt unopposed.
-# `exloom-gate.enabled` is included deliberately: it is the switch that decides
-# whether any hook runs at all. A session that can delete it can disable the gate
-# silently, which makes every other protection here decorative.
+# Bare `.verdicts/` rather than the full `.claude/reviews/` prefix: an absolute
+# Windows path uses backslashes. `exloom-gate.enabled` is included because
+# deleting it disables every other hook.
 VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)|\.claude[/\\]exloom-gate\.enabled'
 
 TARGET=""
@@ -80,45 +48,16 @@ case "$TOOL" in
     # on line 78 does not, and a lone CR leaves the last word of every line as
     # `word\r` — so command-position anchors and terminator matches never fire.
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\r'/ }"; CMD="${CMD//$'\t'/ }"
-    # Match TARGETS, not content. This guard matches on command text, so a command
-    # that merely MENTIONS the guarded directory was denied as an attempt to forge a
-    # receipt. It blocked a comment being written into this hook's own source, then
-    # blocked the commit message that documented the block. Any session working on
-    # exloom hits it, as does any repo whose documentation names the directory — and
-    # an over-block is exactly what makes people reach for EXLOOM_REVIEW_SKIP.
-    #
-    # Two forms carry CONTENT rather than a target, and both are stripped first:
-    #   - a heredoc body: everything from `<<` onward. Real targets appear BEFORE the
-    #     heredoc (`cat > path <<EOF`), so stripping the body keeps them.
-    #   - a commit message: `-m "..."` or `--message=...`.
-    # A quoted target still matches: only these two forms are removed.
-    # `${CMD%%<<*}` discarded everything from the first `<<` ONWARD, so any
-    # command containing a here-string or heredoc before the write was scanned as
-    # an empty prefix and allowed:
-    #   rc=2  printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
-    #   rc=0  cat <<< '' ; printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
-    # That is not obfuscation — it is this hook's own documented stripping rule,
-    # and it made every receipt, proof.json, the .state file and the gate marker
-    # hand-writable in one command. The whole branch rests on receipts being
-    # unwritable by hand, so this was the single worst line in it.
-    #
-    # Strip the BODY and keep everything else: the `<<TAG` token goes (so the tag
-    # is not read as a target), the rest of that line stays (real targets appear
-    # before it, as in `cat > path <<EOF`), body lines are dropped to the
-    # terminator, and commands AFTER the terminator are scanned normally.
+    # Match TARGETS, not content: heredoc bodies and `-m` messages are stripped so
+    # a command that merely NAMES the directory is allowed. Over-blocking is what
+    # teaches people to reach for EXLOOM_REVIEW_SKIP.
     SCAN_CMD="$(exloom_strip_heredocs "$CMD")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E "s/(-m|--message=?)[[:space:]]*'[^']*'//g")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E 's/(-m|--message=?)[[:space:]]*"[^"]*"//g')"
-    # Destruction of the reviews tree names neither the verdicts dir nor the state
-    # file, so it passed both checks below. Reproduced as ALLOWED: `rm -rf
-    # .claude/reviews`, `mv .claude/reviews /tmp`, `git checkout -- .claude/reviews`.
-    # All three destroy every receipt, the round counter and the findings ledger.
-    #
-    # The verb must be in COMMAND position: `grep -rn rm .claude/reviews` merely
-    # mentions `rm` as an argument and is read-only.
-    # Requires the path to be NAMED, deliberately. An earlier version matched a bare
-    # `rm` plus a loose flag heuristic and blocked `rm -f build.log && tar -xzf x.tgz`
-    # — over-blocking is what teaches people to reach for the bypass.
+    # Destroying the whole reviews tree names neither the verdicts dir nor the
+    # state file, so it needs its own arm. The verb must be in COMMAND position
+    # and the path must be named: `grep -rn rm .claude/reviews` is read-only, and
+    # a bare-verb heuristic blocked `rm -f build.log && tar -xzf x.tgz`.
     if printf '%s' "$SCAN_CMD" | grep -Eq '[.]claude/reviews' \
        && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
       TARGET="$CMD"

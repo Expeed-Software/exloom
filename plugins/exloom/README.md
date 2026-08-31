@@ -114,11 +114,9 @@ Two more worth trying, because they are what stops a checklist from being self-w
 - **3 opt-in hooks** — record a receipt on real reviewer dispatch, deny writing receipts by hand, block the push without evidence.
 - **CLAUDE.md templates** — starting points for common stacks.
 
-### What was removed, and why
+### Upgrading from v3
 
-Version 4 cut the plugin roughly in half. Gone: the `Stop` hook that matched natural-language completion claims, the review freeze and its state machine, the plan-approval gate on the first source edit, the dispatch-token protocol, the `SessionStart` context injection, and fourteen skills that told the model how to think — TDD, systematic debugging, proving-done, plan-fidelity auditing, and the rest.
-
-They were built for a model that would skip work if permitted. Current models verify their own work unprompted, and Anthropic's guidance is explicit that carrying over verification scaffolding causes over-verification rather than better results. Enforcement that duplicates what the model already does is not free: it costs on every iteration, and the machinery generates its own defects. What survives is the part prompting cannot reproduce — an artifact the model did not author.
+v4 removes the `Stop` hook, the review freeze, the plan-approval gate, the dispatch-token protocol, the `SessionStart` injection, and fourteen technique skills. Only `git push` is gated now. Checklists and receipts from v3 still work.
 
 ## Honest scope
 

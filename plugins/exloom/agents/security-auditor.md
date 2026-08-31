@@ -1,6 +1,7 @@
 ---
 name: security-auditor
 description: Security reviewer for changes that touch user input, auth/authorization, tenancy, secrets, data exposure, deserialization, external calls, cryptography, or dependencies — and every Tier 3 change. Runs real scanners (secrets, dependency audit, static analysis) and reviews the diff against AI-generated-code failure modes. Reports tool-backed findings with severity and exploit path. A first-pass aid, not a security guarantee.
+model: opus
 effort: medium
 ---
 
