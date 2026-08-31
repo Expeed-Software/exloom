@@ -90,6 +90,13 @@ CHANGED="$(printf '%s\n' "$CHANGED" | sed '/^$/d' | sort -u)"
 [[ -n "$CHANGED" ]] || { echo "no changes against ${BASE:0:12}" >&2; exit 2; }
 
 is_test() {
+  # A production source root is never a test, whatever its subdirectories are
+  # called. `orchestration/spec/` under src/main is production code; matching
+  # */spec/* there reverted half a package and left the tree uncompilable, so
+  # the proof failed for a reason that had nothing to do with the tests.
+  case "$1" in
+    */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
+  esac
   case "$1" in
     */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*) return 0 ;;
     *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;

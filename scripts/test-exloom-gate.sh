@@ -1003,6 +1003,28 @@ ok "ordinary source -> NOT a security surface (no over-block)" \
 
 cd "$WORK" || exit 1
 
+echo "== test-vs-source classification: a production package named spec/ =="
+
+# Found in a real repo running v4.0.0. `*/spec/*` matched
+# src/main/java/.../orchestration/spec/SpeakerSelectionSpec.java, so the proof
+# reverted part of a production package and kept the rest — the tree would not
+# compile, and the run failed for a reason unrelated to the tests.
+PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+istest() {   # istest <path> -> test|source, using the script's own function
+  bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
+    is_test "$1" && echo test || echo source' _ "$1"
+}
+ok "src/main spec package -> source" \
+   "$(istest 'apptor-agents/src/main/java/ai/apptor/agents/orchestration/spec/TopicSpec.java')" "source"
+ok "src/main anything -> source" \
+   "$(istest 'mod/src/main/java/com/x/test/Helper.java')" "source"
+ok "src/test -> test" \
+   "$(istest 'apptor-agents/src/test/java/ai/apptor/agents/RootKeyShapeTest.java')" "test"
+ok "ruby spec/ dir -> test" "$(istest 'spec/models/order_spec.rb')" "test"
+ok "js .spec.ts -> test"     "$(istest 'src/order.spec.ts')" "test"
+ok "go _test.go -> test"     "$(istest 'internal/order/order_test.go')" "test"
+ok "plain source -> source"  "$(istest 'internal/order/order.go')" "source"
+
 echo "== the shipped template must not block a branch that filled it honestly =="
 
 # Found by an end-to-end run, not by this suite: the template carried
