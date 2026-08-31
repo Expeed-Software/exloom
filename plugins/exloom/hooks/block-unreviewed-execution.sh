@@ -54,10 +54,11 @@ fi
 TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 
 # Nested tool_input fields; exloom_json_field only reads top-level keys.
-_tool_input() {
-  printf '%s' "$HOOK_INPUT" \
-    | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1
-}
+# Delegates to the shared ladder in lib.sh. The sed-only version this replaces
+# truncated at the first quote byte and matched the LAST key, so `echo "hi" >
+# src/Main.java` was allowed under a review freeze while the quote-free
+# `sed -i s/a/b/ src/Main.java` was blocked.
+_tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 
 TARGET=""
 IS_SHELL=0
@@ -77,7 +78,7 @@ case "$TOOL" in
     # reads, greps, builds and git inspection stay free.
     CMD="$(_tool_input command)"
     [[ -n "$CMD" ]] || exit 0
-    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
+    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\r'/ }"; CMD="${CMD//$'\t'/ }"
     # Redirections to /dev/null, &1 and &2 are NOT writes. `>>?` matched
     # `2>/dev/null` and `2>&1`, so `grep -rn foo src/ 2>/dev/null`, `./gradlew test`,
     # `npm run test` and `go build ./...` were all gated — and under a review freeze

@@ -34,8 +34,104 @@ except Exception:
     pass' 2>/dev/null || true)"
   fi
   if [[ -z "$out" ]]; then
-    out="$(printf '%s' "$json" | sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
+    out="$(printf '%s' "$json" | _exloom_sed_str "$field")"
   fi
+  out="${out//$'\r'$'\n'/$'\n'}"   # see exloom_tool_input: jq on Windows emits CRLF
+  printf '%s' "$out"
+}
+
+# Read a JSON string value with sed, when neither jq nor python3 is available.
+#
+# Two defects that shipped in the naive version, both of which made a gate fail
+# OPEN on the modal shell command:
+#
+#   s/.*"key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/
+#
+#   - The value class `[^"]*` stops at the first quote BYTE, so it cannot see
+#     past an escaped quote. `echo "hi" > src/Main.java` arrives as
+#     "echo \"hi\" > src/Main.java" and was truncated to `echo `, whose shape is
+#     not a write, so the review freeze allowed it. `sed -i s/a/b/ src/Main.java`
+#     — quote-free — was blocked. The freeze held only for commands without
+#     quotes, which is not a property anyone would design.
+#   - The leading `.*` is greedy, so it matches the LAST occurrence of the key.
+#     A command whose own text contains `"command": "ls"` shadowed the real one.
+#
+# `\\.` consumes an escaped pair before `[^"\\]` can stop on it, and `head -1`
+# takes the first occurrence. The value is returned still JSON-escaped, which is
+# correct for shape-matching: `\"` is not a quote character in the command.
+_exloom_sed_str() {
+  grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"\(\\\\.\|[^\"\\\\]\)*\"" 2>/dev/null \
+    | head -1 | sed -e "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
+}
+
+# Remove heredoc BODIES and here-string operands from a command, keeping
+# everything else — so a scanner looking for write targets sees the real targets
+# and not the prose.
+#
+# The version this replaces was `${CMD%%<<*}`: discard from the first `<<`
+# onward. Any command with a here-string before the write was scanned as an
+# empty prefix and allowed, which made every verdict receipt, proof.json, the
+# .state file and the gate marker hand-writable in one command:
+#
+#   rc=2  printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
+#   rc=0  cat <<< '' ; printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
+#
+# Bash string ops rather than awk on purpose: the caller has already flattened
+# newlines to spaces, so the body sits on one line with its opener and
+# terminator, and an awk program nested inside `"$( ... | awk '...' )"` inside a
+# case arm was three quoting layers deep and behaved differently in situ than
+# it did standalone. This is testable on its own.
+exloom_strip_heredocs() {
+  local s="$1" pre rest tag
+  # A here-string carries a word, not a body.
+  s="$(printf '%s' "$s" | sed -E "s/<<<[[:space:]]*(\"[^\"]*\"|'[^']*'|[^[:space:];&|]*)/ /g")"
+  while [[ "$s" == *"<<"* ]]; do
+    pre="${s%%<<*}"
+    rest="${s#*<<}"
+    rest="${rest#-}"                       # <<- strips leading tabs in the body
+    rest="${rest#"${rest%%[![:space:]]*}"}" # skip space between << and the tag
+    tag="${rest%%[[:space:]]*}"
+    tag="${tag//\'/}"; tag="${tag//\"/}"
+    if [[ -z "$tag" ]]; then s="$pre"; break; fi
+    rest="${rest#*"$tag"}"
+    # Keep whatever follows the terminator: commands after a heredoc are
+    # ordinary commands and must still be scanned.
+    if [[ "$rest" == *" $tag "* ]]; then
+      s="$pre ${rest#*" $tag "}"
+    else
+      s="$pre"   # unterminated body: nothing after it can be a target
+    fi
+  done
+  printf '%s' "$s"
+}
+
+# Read a key from the NESTED tool_input object. Same ladder, same reasons.
+# Every hook that gates a tool call must use this rather than scanning the raw
+# payload: a hook that cannot parse its input must not conclude "allow".
+exloom_tool_input() {
+  local json="$1" key="$2" out=""
+  if command -v jq >/dev/null 2>&1; then
+    out="$(printf '%s' "$json" | jq -r --arg k "$key" '.tool_input[$k] // empty' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
+    out="$(printf '%s' "$json" | KEY="$key" python3 -c 'import json,os,sys
+try:
+    v = (json.load(sys.stdin).get("tool_input") or {}).get(os.environ["KEY"], "")
+    print(v if isinstance(v, str) else "")
+except Exception:
+    pass' 2>/dev/null || true)"
+  fi
+  if [[ -z "$out" ]]; then
+    out="$(printf '%s' "$json" | _exloom_sed_str "$key")"
+  fi
+  # jq built for Windows writes CRLF, so a multi-line command comes back as
+  # `cmd\r\nnext` and every downstream word/line match sees `next\r` instead of
+  # `next`. This silently defeated the heredoc-terminator match in
+  # exloom_strip_heredocs — the guard fell through to "unterminated" and dropped
+  # the real write target. On Git Bash, which is the whole environment here, a
+  # scanner that does not normalise line endings is a scanner that fails open.
+  # Normalise CRLF only; a lone CR is left alone.
+  out="${out//$'\r'$'\n'/$'\n'}"
   printf '%s' "$out"
 }
 

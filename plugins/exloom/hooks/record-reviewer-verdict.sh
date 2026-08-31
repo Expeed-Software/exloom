@@ -271,6 +271,17 @@ while IFS= read -r fline; do
     *critical*|*blocking*|*severity:\ high*|*\[high\]*|*" high "*) line_sev="HIGH" ;;
     *important*|*severity:\ medium*|*\[medium\]*|*" medium "*)     line_sev="MED" ;;
     *minor*|*severity:\ low*|*\[low\]*|*" low "*|*orphan*)         line_sev="LOW" ;;
+    # cross-layer-auditor reports one line per checked item and marks the actual
+    # orphan with `read at: NONE` / `called at: NONE` / `handled at: NONE`. Its
+    # five headings (`## Grep 1 — Orphan fields` …) carry no severity word and
+    # neither do its lines, so `sev` stayed empty and EVERY finding from the one
+    # reviewer whose entire job is orphan detection was dropped — permanently,
+    # and with it re-find detection for that reviewer. The `*orphan*` arm above
+    # looked for the word on the finding line; the shipped format never puts it
+    # there. Keying on NONE records the orphans and leaves the clean rows alone.
+    # A cite is required before this point, so l1's `- Critical: none` (no cite)
+    # cannot reach here.
+    *": none"*|*":none"*)                                          line_sev="MED" ;;
   esac
   # A non-blocking line is LOW whatever else it says.
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac

@@ -70,6 +70,23 @@ if [[ -z "$BASE" ]]; then
 fi
 [[ -n "$BASE" ]] || { echo "cannot determine a base commit; pass --base" >&2; exit 2; }
 
+# Resolve to a commit id before ANY use. `--base` was interpolated raw into the
+# proof receipt while every other value on that line was sanitised, so
+#
+#   --base '","result":"PROVED","x":"'
+#
+# minted a receipt carrying both the real NOT_PROVED and an injected PROVED —
+# and exloom_check_proof tests for PROVED first, so the forgery won. The early
+# receipt path is reachable with an unresolvable ref because `CHANGED` is also
+# fed by `git ls-files --others`, so the failed `git diff` does not abort.
+#
+# Sanitising the string would leave the next caller to remember. Resolving it
+# means a value that is not a commit cannot exist past this line, so neither
+# receipt writer can emit one — and an unresolvable base now fails loudly
+# instead of proceeding with a ref git never accepted.
+BASE="$(git rev-parse --verify --quiet "${BASE}^{commit}" 2>/dev/null || true)"
+[[ -n "$BASE" ]] || { echo "--base does not resolve to a commit in this repo" >&2; exit 2; }
+
 # ---------- test command ----------
 # A repo may pin its own, which is always better than detection.
 if [[ -z "$TESTCMD" && -f ".claude/exloom-test-command" ]]; then

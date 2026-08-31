@@ -111,7 +111,26 @@ invariant is the *most* likely place to find a defect, not the least.
 
 # Output format
 
+Open with one `REVIEWED:` line per plan or spec file you actually read, before
+anything else. This is not bookkeeping — it is what your approval covers.
+
+exloom binds plan approval to these lines, intersected with the paths the
+dispatch named. Approval used to be bound to the dispatch prompt instead, which
+meant the party being gated chose what its own approval covered: a prompt
+reading "Per docs/plans/a.md and docs/plans/b.md, check the heading style"
+approved BOTH plans off one cosmetic review. So:
+
+- A file you did not open does not go on this list, however confident you are
+  about it. Omitting it blocks execution of that plan, which is the correct
+  outcome — the alternative is an unread plan carrying your approval.
+- Listing a file nobody asked you to review gains nothing; the intersection
+  drops it.
+- A report with **no** `REVIEWED:` line covers nothing and cannot unlock
+  execution, whatever its verdict says.
+
 ```
+REVIEWED: docs/plans/2026-06-30-example-plan.md
+
 VERDICT: APPROVED
 VERDICT: REJECTED (n items)
 

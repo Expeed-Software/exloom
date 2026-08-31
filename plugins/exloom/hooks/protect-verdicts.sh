@@ -46,22 +46,12 @@ TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 # Pull a nested tool_input string field. The shared sed fallback truncates at the
 # first quote, which is fine for a path but not for a shell command — the command
 # path falls back to the raw hook input instead (same approach as the push gate).
-_tool_input() {
-  local key="$1" out=""
-  if command -v jq >/dev/null 2>&1; then
-    out="$(printf '%s' "$HOOK_INPUT" | jq -r --arg k "$key" '.tool_input[$k] // empty' 2>/dev/null || true)"
-  fi
-  if [[ -z "$out" ]] && command -v python3 >/dev/null 2>&1; then
-    out="$(printf '%s' "$HOOK_INPUT" | KEY="$key" python3 -c '
-import json, os, sys
-try:
-    v = (json.load(sys.stdin).get("tool_input") or {}).get(os.environ["KEY"], "")
-    print(v if isinstance(v, str) else "")
-except Exception:
-    pass' 2>/dev/null || true)"
-  fi
-  printf '%s' "$out"
-}
+# Delegates to the shared ladder in lib.sh. This copy had jq and python3 tiers
+# and NO sed fallback, so on a Git Bash with neither — the environment every
+# other extractor in this codebase carries a fallback for — TARGET came back
+# empty for Write/Edit and the hook exited 0. Receipt protection was silently
+# off in exactly the environment it was written for.
+_tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 
 # `.verdicts/` is distinctive enough to match on its own; requiring the full
 # `.claude/reviews/` prefix would miss an absolute path on Windows, where the
@@ -86,7 +76,10 @@ case "$TOOL" in
   Bash)
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
-    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
+    # \r as well: exloom_tool_input normalises CRLF, but the raw-payload fallback
+    # on line 78 does not, and a lone CR leaves the last word of every line as
+    # `word\r` — so command-position anchors and terminator matches never fire.
+    CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\r'/ }"; CMD="${CMD//$'\t'/ }"
     # Match TARGETS, not content. This guard matches on command text, so a command
     # that merely MENTIONS the guarded directory was denied as an attempt to forge a
     # receipt. It blocked a comment being written into this hook's own source, then
@@ -99,7 +92,21 @@ case "$TOOL" in
     #     heredoc (`cat > path <<EOF`), so stripping the body keeps them.
     #   - a commit message: `-m "..."` or `--message=...`.
     # A quoted target still matches: only these two forms are removed.
-    SCAN_CMD="${CMD%%<<*}"
+    # `${CMD%%<<*}` discarded everything from the first `<<` ONWARD, so any
+    # command containing a here-string or heredoc before the write was scanned as
+    # an empty prefix and allowed:
+    #   rc=2  printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
+    #   rc=0  cat <<< '' ; printf '{}' >> .claude/reviews/f.verdicts/l1-reviewer.json
+    # That is not obfuscation — it is this hook's own documented stripping rule,
+    # and it made every receipt, proof.json, the .state file and the gate marker
+    # hand-writable in one command. The whole branch rests on receipts being
+    # unwritable by hand, so this was the single worst line in it.
+    #
+    # Strip the BODY and keep everything else: the `<<TAG` token goes (so the tag
+    # is not read as a target), the rest of that line stays (real targets appear
+    # before it, as in `cat > path <<EOF`), body lines are dropped to the
+    # terminator, and commands AFTER the terminator are scanned normally.
+    SCAN_CMD="$(exloom_strip_heredocs "$CMD")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E "s/(-m|--message=?)[[:space:]]*'[^']*'//g")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E 's/(-m|--message=?)[[:space:]]*"[^"]*"//g')"
     # Destruction of the reviews tree names neither the verdicts dir nor the state
