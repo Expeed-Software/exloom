@@ -999,6 +999,117 @@ ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
 
 cd "$WORK" || exit 1
 
+echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
+
+# The class, not the instances. Four rounds of findings were all one shape: the
+# producer and the consumer were edited separately and nothing checked they agree.
+# This drives EVERY agent's documented Output-format block through the real hook and
+# asserts what comes out. It is generated FROM agents/*.md, so an agent whose format
+# changes without the parser changing fails here rather than in round 5.
+
+AGENTS_DIR="$(cd "$(dirname "$LIB_ABS")/../agents" && pwd)"
+subrepo contract
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+CVD=".claude/reviews/feat/plan.verdicts"
+
+# Extract the first fenced block under "# Output format" in an agent file, then
+# instantiate its placeholders into something a parser can actually read.
+agent_block() {
+  awk '/^# Output format/{f=1} f&&/^```/{c++; if(c==1){inb=1; next} if(c==2){exit}} inb' \
+    "$AGENTS_DIR/$1.md" \
+  | sed -e 's|<path>:<line>|src/one.go:42|g' \
+        -e 's|<file:line[^>]*>|src/one.go:42|g' \
+        -e 's|<[^>]*>|src/one.go:42|g'
+}
+
+feed() {  # feed <agent-name> <report-text>
+  rm -rf .claude/reviews
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:'+sys.argv[1],'prompt':'review'},
+ 'tool_output':sys.argv[2]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
+fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
+
+for a in l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor plan-reviewer; do
+  blk="$(agent_block "$a")"
+  ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
+
+  # Its own APPROVED form must parse as APPROVED. An agent that copies its own
+  # documented verdict line and gets UNKNOWN is a gate that can never open —
+  # which is exactly what plan-reviewer.md did.
+  feed "$a" "$(printf '%s\n\nVERDICT: APPROVED\n' "$blk")"
+  ok "$a: own block + APPROVED -> APPROVED" "$(vrd "$a")" "APPROVED"
+
+  # And with a cited finding present, at least one finding must be RECORDED.
+  # cross-layer-auditor and security-auditor recorded zero because their headings
+  # carry no severity word — a blocking re-find gate, structurally inert.
+  feed "$a" "$(printf '%s\n\nVERDICT: REJECTED (1 items)\n' "$blk")"
+  ok "$a: own block + a cite -> at least one finding recorded" \
+     "$([[ "$(fnd "$a")" -ge 1 ]] && echo yes || echo no)" "yes"
+done
+
+# The verdict line each agent literally documents must not be self-defeating.
+for a in l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor plan-reviewer; do
+  vline="$(grep -m1 '^VERDICT: APPROVED' "$AGENTS_DIR/$a.md" || true)"
+  ok "$a: documented verdict line is unambiguous (no '|')" \
+     "$(printf '%s' "$vline" | grep -c '|')" "0"
+done
+
+# Non-blocking must never count as blocking: it is the number that tells an author
+# the loop can terminate.
+feed adversarial-reviewer '## Blocking (cannot ship until fixed)
+- src/one.go:42 — real problem
+
+## Non-blocking (document in checklist, fix or defer)
+- src/two.go:17 — cosmetic
+
+VERDICT: REJECTED (1 items)'
+ok "adversarial: '## Non-blocking' is not recorded as blocking severity" \
+   "$(grep -c '"severity":"HIGH"' "$CVD/adversarial-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
+
+echo "== CONTRACT: every template placeholder is enforced, every alternation is written =="
+
+TPL="$(cd "$(dirname "$LIB_ABS")/../templates" && pwd)/review-checklist.md"
+PRE="$(sed -n "s/^  placeholder_re='\(.*\)'$/\1/p" "$LIB_ABS")"
+ok "placeholder_re extracted from lib.sh" "$([[ -n "$PRE" ]] && echo yes || echo no)" "yes"
+
+# Every <...> token the template ships must be matched, or the section it guards is
+# unenforced — the Tier 3 security Findings field and the all-tiers L1 Resolution
+# field were both silently optional.
+unmatched=0
+while IFS= read -r tok; do
+  [[ -n "$tok" ]] || continue
+  # Intentional orphans, each for a stated reason:
+  #   <branch-name>, <one sentence>, <N>  — substituted by /review-init, cosmetic
+  #   <who-attests>                        — filled by /review-complete
+  #   <file:line>                          — Re-finds LEGEND, which lives in an HTML
+  #     comment above the heading precisely so it is outside the scanned section;
+  #     enforcing it would block every branch that legitimately has no re-finds.
+  case "$tok" in '<branch-name>'|'<one sentence>'|'<N>'|'<who-attests>'|'<file:line>') continue ;; esac
+  printf '%s\n' "$tok" | grep -Eq "$PRE" || { unmatched=$((unmatched+1)); echo "    UNENFORCED: $tok" >&2; }
+done < <(grep -oE '<[^>]+>' "$TPL" | sort -u)
+ok "every template placeholder is enforced by placeholder_re" "$unmatched" "0"
+
+# And the reverse: an alternation with no writer blocks on text nobody produces.
+noWriter=0
+for alt in 'expected-result' 'exact steps' 'reviewed-sha' 'ai-assisted' 'model-id' 'directed-by' 'base-sha' 'attested-date'; do
+  grep -qF -- "$alt" "$TPL" || { noWriter=$((noWriter+1)); echo "    NO WRITER: $alt" >&2; }
+done
+ok "every checked alternation has a writer in the template" "$noWriter" "0"
+
+# Paths named in block messages must exist where they are named.
+BAD=0
+while IFS= read -r ref; do
+  [[ -n "$ref" ]] || continue
+  [[ -f "$(dirname "$LIB_ABS")/../$ref" ]] || { BAD=$((BAD+1)); echo "    MISSING: $ref" >&2; }
+done < <(grep -rhoE 'scripts/[a-z-]+\.sh' "$HOOKS_ABS"/*.sh | sort -u)
+ok "every scripts/*.sh named in a hook exists in the plugin" "$BAD" "0"
+
+cd "$WORK" || exit 1
+
 echo "== prove-change-is-tested (author-side, before review) =="
 
 # Modelled directly on real review transcripts: rounds 2..7 were spent on defects

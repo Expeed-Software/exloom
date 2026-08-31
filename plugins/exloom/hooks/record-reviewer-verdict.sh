@@ -217,6 +217,7 @@ ROUND="$(sed -n 's/.*"round":\([0-9]*\).*/\1/p' ".claude/reviews/${BRANCH}.state
 FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
 n_found=0
 cur_sev=""
+item_sev=""
 cur_scope="IN-SCOPE"
 
 while IFS= read -r fline; do
@@ -225,14 +226,16 @@ while IFS= read -r fline; do
     '#'*)
       head_txt="$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')"
       cur_sev=""
+      item_sev=""
       cur_scope="IN-SCOPE"
       # Normalised across agents: l1 says Critical/Important/Minor, adversarial
       # says Blocking, security says High/Medium/Low. Unnormalised, the same
       # defect reported by two reviewers never matched as a re-find.
       case "$head_txt" in
+        *non-blocking*|*advisory*)                 cur_sev="LOW" ;;
         *critical*|*blocking*|*" high"*|*"(high"*) cur_sev="HIGH" ;;
         *important*|*medium*)                      cur_sev="MED" ;;
-        *minor*|*" low"*|*"(low"*|*advisory*)      cur_sev="LOW" ;;
+        *minor*|*" low"*|*"(low"*)                 cur_sev="LOW" ;;
       esac
       # A pre-existing section carries no severity word ("## Pre-existing
       # (backlog, not this branch)"), so without this its findings were dropped
@@ -244,10 +247,35 @@ while IFS= read -r fline; do
       case "$head_txt" in *nothing\ to\ flag*) cur_sev="" ;; esac
       continue ;;
   esac
-  [[ -n "$cur_sev" ]] || continue
-
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
-  [[ -n "$cite" ]] || continue
+  if [[ -z "$cite" ]]; then
+    # No cite: if the line names a severity, remember it for the lines that follow.
+    # security-auditor emits `- [severity: High] [category]` and puts the cite on
+    # the NEXT line, so a per-line-only rule recorded nothing from it.
+    case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in
+      *severity:*critical*|*severity:*high*|*'[critical]'*|*'[high]'*) item_sev="HIGH" ;;
+      *severity:*medium*|*'[medium]'*|*important*)                     item_sev="MED" ;;
+      *severity:*low*|*'[low]'*)                                       item_sev="LOW" ;;
+      '') item_sev="" ;;
+    esac
+    continue
+  fi
+
+  # Severity from the heading, else from the LINE. Requiring a severity-bearing
+  # heading meant cross-layer-auditor (`## Grep 1 — Orphan fields`),
+  # security-auditor (`## Findings`, severity per line) and plan-reviewer
+  # (`REJECTED items:`) recorded zero findings each — three of five reviewers,
+  # with a blocking re-find gate reading nothing.
+  line_sev=""
+  case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in
+    *critical*|*blocking*|*severity:\ high*|*\[high\]*|*" high "*) line_sev="HIGH" ;;
+    *important*|*severity:\ medium*|*\[medium\]*|*" medium "*)     line_sev="MED" ;;
+    *minor*|*severity:\ low*|*\[low\]*|*" low "*|*orphan*)         line_sev="LOW" ;;
+  esac
+  # A non-blocking line is LOW whatever else it says.
+  case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac
+  sev="${cur_sev:-${line_sev:-$item_sev}}"
+  [[ -n "$sev" ]] || continue
 
   scope="$cur_scope"
   printf '%s' "$fline" | grep -qiE 'PRE-EXISTING' && scope="PRE-EXISTING"
@@ -260,10 +288,10 @@ while IFS= read -r fline; do
   # matched itself.
   text="$(printf '%s' "$fline" | sed "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||g" \
           | tr -cd 'A-Za-z' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
-  fp="$(printf '%s|%s|%s' "$cur_sev" "$(basename "$file")" "$text" | tr -cd 'A-Za-z0-9|._-')"
+  fp="$(printf '%s|%s|%s' "$sev" "$(basename "$file")" "$text" | tr -cd 'A-Za-z0-9|._-')"
 
   printf '{"round":%s,"agent":"%s","severity":"%s","scope":"%s","cite":"%s","fingerprint":"%s","head":"%s","at":"%s"}\n' \
-    "$ROUND" "$AGENT" "$cur_sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
+    "$ROUND" "$AGENT" "$sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
     >> "$FINDINGS_FILE" 2>/dev/null || break
   n_found=$((n_found + 1))
 done <<< "$SCAN"

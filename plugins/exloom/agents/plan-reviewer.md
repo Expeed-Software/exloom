@@ -112,19 +112,23 @@ invariant is the *most* likely place to find a defect, not the least.
 # Output format
 
 ```
-VERDICT: APPROVED | REJECTED (n items)
+VERDICT: APPROVED
+VERDICT: REJECTED (n items)
 
-REJECTED items:
-  Item <n> (<name>) — "<quoted text from the plan>"
-    Problem: <what is wrong, one or two sentences>
-    Fixed:   <the passing version, written concretely>
+## Blocking (the plan cannot be executed until these are fixed)
+- <plan-file>:<line> — Item <n> (<name>): <what is wrong, one sentence>
+  Fixed: <the passing version, written concretely>
 
-Defect-class findings:
-  <class> — <plan location> — <finding> — <what to do>
+## Blocking (defect classes)
+- <plan-file>:<line> — <class>: <finding> — <what to do>
 
-Notes (non-blocking):
-  <anything worth the author knowing that does not block>
+## Non-blocking (worth knowing, does not block execution)
+- <plan-file>:<line> — <anything worth the author knowing>
 ```
+
+Cite `<plan-file>:<line>` on every finding line. exloom records a finding only when
+a line carries a cite, and the re-find detector — which is what catches "the fix
+addressed the instance, not the rule" across rounds — reads nothing without one.
 
 Quote the plan's own text in every finding. Give the fixed version concretely — "make this testable" is not feedback, "`GET /x?page=2` returns items 21-40" is.
 
