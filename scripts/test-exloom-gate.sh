@@ -180,6 +180,28 @@ git add -A; git commit -qm whitespace
 ok "whitespace/blank-line churn -> not behavioural" \
    "$(exloom_diff_is_behavioural "$CB2" HEAD && echo yes || echo no)" "no"
 
+# ...but only where indentation is not syntax. The blank-line fixture above was
+# the ONLY case exercising the -w rule, so it pinned "any change `git diff -w`
+# cannot see" as the spec. In Python a de-indent moves a statement out of an `if`
+# branch; in YAML it re-parents a key. Both are behavioural, both are invisible
+# to -w, and both would have left a stale receipt valid over changed behaviour.
+CB3="$(git rev-parse HEAD)"
+printf 'def pay(o):\n    if o.ok:\n        charge(o)\n        refund(o)\n' > src/p.py
+git add -A; git commit -qm pybase
+CB3="$(git rev-parse HEAD)"
+printf 'def pay(o):\n    if o.ok:\n        charge(o)\n    refund(o)\n' > src/p.py
+git add -A; git commit -qm dedent
+ok "python de-indent moves a call out of a branch -> behavioural" \
+   "$(exloom_diff_is_behavioural "$CB3" HEAD && echo yes || echo no)" "yes"
+
+printf 'security:\n  auth:\n    required: true\n' > src/cfg.yaml
+git add -A; git commit -qm ybase
+CB4="$(git rev-parse HEAD)"
+printf 'security:\n  auth:\nrequired: true\n' > src/cfg.yaml
+git add -A; git commit -qm renest
+ok "yaml re-nest lifts a key out of its parent -> behavioural" \
+   "$(exloom_diff_is_behavioural "$CB4" HEAD && echo yes || echo no)" "yes"
+
 # A comment change that ALSO touches a code line is behavioural — the classifier
 # is conservative, and being wrong here costs one review rather than shipping
 # unreviewed code.
@@ -220,22 +242,47 @@ CV=".claude/reviews/feat/verd.md"; mkdir -p "$(dirname "$CV")"
 CVD="$(exloom_verdict_dir "$CV")"; mkdir -p "$CVD"
 printf 'a\n' > src/v.go; git add -A; git commit -qm v
 RV="$(git rev-parse HEAD)"
-put() { printf '%s\n' "$1" > "$CVD/l1-reviewer.json"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1; }
+# Receipts reach the consumer the way they reach it in production: minted by the
+# PRODUCER from a reviewer report. Hand-writing them here meant
+# exloom_check_verdicts was only ever shown receipts record-reviewer-verdict.sh
+# does not write, so receipt-shape drift between the two was invisible — and the
+# suite performed the exact forgery this branch exists to prevent.
+mint() {   # mint <report-text>
+  rm -f "$CVD/l1-reviewer.json"
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review the diff'},
+  'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$1" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+}
+# Only for receipts the CURRENT producer cannot write: the 2.0.0 shape, which is
+# the whole point of the grandfather clause. Anything the producer can emit must
+# go through mint().
+put_legacy() { printf '%s\n' "$1" > "$CVD/l1-reviewer.json"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1; }
 chk() { exloom_check_verdicts "$CV" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; echo $?; }
 
-put "{\"agent\":\"l1-reviewer\",\"head\":\"$RV\",\"verdict\":\"APPROVED\"}"
+mint 'No findings.
+
+VERDICT: APPROVED'
 ok "APPROVED code review -> allowed" "$(chk)" "0"
 
-put "{\"agent\":\"l1-reviewer\",\"head\":\"$RV\",\"verdict\":\"REJECTED\"}"
+mint '## Critical
+- src/v.go:1 — real defect
+
+VERDICT: REJECTED (1 items)'
 ok "REJECTED code review -> blocked" "$(chk)" "2"
 
-put "{\"agent\":\"l1-reviewer\",\"head\":\"$RV\",\"verdict\":\"UNKNOWN\"}"
+# No verdict line at all: the parser records UNKNOWN rather than guessing, and a
+# gate may not guess in the permissive direction.
+mint 'I looked at the diff and it seems fine to me.'
 ok "UNKNOWN code review -> blocked" "$(chk)" "2"
 
 # Byte-for-byte the shape exloom 2.0.0 actually wrote — every key, in order,
 # copied from a live receipt in apptor-cms. A simplified stand-in would pass
 # while the real thing failed on a key the parser did not expect.
-put "{\"agent\":\"l1-reviewer\",\"subagent_type\":\"exloom:l1-reviewer\",\"head\":\"$RV\",\"at\":\"2026-08-28T18:24:11Z\",\"session\":\"7bc2e35f-7c0f-4f69-b7f2-bbea28ffe7a5\"}"
+put_legacy "{\"agent\":\"l1-reviewer\",\"subagent_type\":\"exloom:l1-reviewer\",\"head\":\"$RV\",\"at\":\"2026-08-28T18:24:11Z\",\"session\":\"7bc2e35f-7c0f-4f69-b7f2-bbea28ffe7a5\"}"
 ok "legacy 2.0.0 receipt (real shape, no verdict key) -> still allowed" "$(chk)" "0"
 
 # An APPROVED receipt from an EARLIER commit must not vouch for a REJECTED
@@ -447,7 +494,7 @@ ok "dispatch naming no artifact -> receipt written" \
 ok "...but it covers nothing -> still blocked" "$(x "$edit_src")" "2"
 
 # A dispatch naming the plan records artifact + content hash, and unlocks it.
-record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $PLAN for handoff-readiness\"},\"tool_output\":\"REVIEWED: $PLAN\nVERDICT: APPROVED\"}"
+record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $PLAN for handoff-readiness\"},\"tool_response\":[{\"type\":\"text\",\"text\":\"REVIEWED: $PLAN\\nVERDICT: APPROVED\"}]}"
 ok "dispatch naming the plan -> receipt records the artifact" \
    "$(grep -c "\"artifact\":\"$PLAN\"" "$PVD/plan-reviewer.json")" "1"
 ok "dispatch naming the plan -> receipt records its content hash" \
@@ -536,12 +583,12 @@ subrepo paths; printf '# plan\n' > docs/plans/p.md; mkdir -p docs/specs; printf 
 RF=".claude/reviews/feat/plan.verdicts/plan-reviewer.json"
 for form in "./docs/plans/p.md" "$(pwd)/docs/plans/p.md"; do
   rm -rf .claude/reviews
-  record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $form\"},\"tool_output\":\"REVIEWED: $form\\nVERDICT: APPROVED\"}"
+  record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $form\"},\"tool_response\":[{\"type\":\"text\",\"text\":\"REVIEWED: $form\\nVERDICT: APPROVED\"}]}"
   ok "prompt path form records an artifact: $(basename "$(dirname "$form")")/$(basename "$form")" \
      "$(grep -c '"artifact"' "$RF" 2>/dev/null | head -1)" "1"
 done
 rm -rf .claude/reviews
-record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:plan-reviewer","prompt":"Per docs/specs/s.md, review docs/plans/p.md for handoff"},"tool_output":"REVIEWED: docs/specs/s.md\nREVIEWED: docs/plans/p.md\nVERDICT: APPROVED"}'
+record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:plan-reviewer","prompt":"Per docs/specs/s.md, review docs/plans/p.md for handoff"},"tool_response":[{"type":"text","text":"REVIEWED: docs/specs/s.md\nREVIEWED: docs/plans/p.md\nVERDICT: APPROVED"}]}'
 ok "every named artifact is recorded, not just the first" \
    "$(grep -c '"artifact"' "$RF" 2>/dev/null | head -1)" "2"
 ok "the reviewed plan is among them" \
@@ -695,7 +742,7 @@ report() {   # report <round-entering> <text>
 import json,sys
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
- 'tool_output':sys.argv[1]}))" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ 'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
 }
 LEDGER="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/findings-ledger.sh"
 
@@ -816,7 +863,7 @@ rpt() { rm -rf .claude/reviews
 import json,sys
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review. Format: VERDICT: APPROVED'},
- 'tool_output':sys.argv[1]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
+ 'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
 vof() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$RVD/l1-reviewer.json" 2>/dev/null | tail -1; }
 nf()  { grep -c . "$RVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1; }
 
@@ -899,7 +946,7 @@ vsay() { rm -rf .claude/reviews
 import json,sys
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
- 'tool_output':sys.argv[1]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ 'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
   sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$VVD/l1-reviewer.json" 2>/dev/null | tail -1; }
 
 ok "VERDICT: **APPROVED**"         "$(vsay 'VERDICT: **APPROVED**')" "APPROVED"
@@ -914,7 +961,7 @@ python3 -c "
 import json
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
- 'tool_output':'## Critical (cleanup of stale handlers)\n- src/one.go:4 — real defect\n\nVERDICT: REJECTED (1 items)'}))" \
+ 'tool_response':[{'type':'text','text':'## Critical (cleanup of stale handlers)\n- src/one.go:4 — real defect\n\nVERDICT: REJECTED (1 items)'}]}))" \
  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
 ok "'Critical (cleanup...)' still records findings" \
    "$(grep -c . "$VVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
@@ -1041,7 +1088,7 @@ pfeed() { rm -rf .claude/reviews
 import json,sys
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:plan-reviewer','prompt':sys.argv[1]},
- 'tool_output':sys.argv[2]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
+ 'tool_response':[{'type':'text','text':sys.argv[2]}]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
 cov() { grep -c "\"artifact\":\"$1\"" "$BVD/plan-reviewer.json" 2>/dev/null | head -1; }
 
 pfeed 'Per docs/plans/a.md and docs/plans/b.md, check the heading style' 'REVIEWED: docs/plans/a.md
@@ -1171,6 +1218,28 @@ ok "EXLOOM_REVIEW_SKIP=1 -> allowed" \
 
 cd "$WORK" || exit 1
 
+echo "== payload shape: the field the harness actually sends =="
+
+# The harness delivers a Task result as `tool_response`, a content-block array.
+# Every fixture in this suite used to feed `tool_output` as a bare string — a
+# shape nothing emits — so the parser was verified against a payload it never
+# receives. The fixtures now use the real shape; these two assert the parser
+# still accepts both, because the fallback chain is what makes it robust across
+# harness versions, and silently losing it would be invisible otherwise.
+subrepo shape; printf '# plan\n- src/one.go\n' > docs/plans/p.md
+SVD=".claude/reviews/feat/plan.verdicts"   # subrepo() always checks out feat/plan
+shape_verdict() {   # shape_verdict <json-payload>
+  rm -rf .claude/reviews
+  printf '%s' "$1" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$SVD/l1-reviewer.json" 2>/dev/null | tail -1
+}
+ok "tool_response block array (what the harness sends) -> verdict read" \
+   "$(shape_verdict '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_response":[{"type":"text","text":"VERDICT: APPROVED"}]}')" \
+   "APPROVED"
+ok "tool_output bare string (older shape) -> still read" \
+   "$(shape_verdict '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_output":"VERDICT: APPROVED"}')" \
+   "APPROVED"
+
 echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
 
 # The class, not the instances. Four rounds of findings were all one shape: the
@@ -1200,7 +1269,7 @@ feed() {  # feed <agent-name> <report-text>
 import json,sys
 print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:'+sys.argv[1],'prompt':'review'},
- 'tool_output':sys.argv[2]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ 'tool_response':[{'type':'text','text':sys.argv[2]}]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
 }
 vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
 fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
@@ -1293,22 +1362,36 @@ proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
   local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
   git init -q -b main . 2>/dev/null
   git config user.email t@e.com; git config user.name t
+  # The gate marker and a feature branch are REQUIRED, not decoration:
+  # prove-change-is-tested.sh returns before writing a receipt when either is
+  # missing. Without them these fixtures asserted exit codes on a path where the
+  # receipt-minting branch was dead code — including the forged-PROVED defect
+  # that lives precisely there. A fixture that does not reach the code it names
+  # is worse than no fixture, because it reports green.
+  : > .claude/exloom-gate.enabled
   printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
   printf '%s\n' "$3" > src/calc.sh
   printf '%s\n' "$2" > tests/calc_test.sh
   git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+  git checkout -q -b feat/proof 2>/dev/null
   # Sets a global rather than echoing: `$(proofrepo ...)` would run the whole
   # function in a subshell and its `cd` would not survive, so the fixture files
   # would land in the wrong directory.
   BASESHA="$(git rev-parse HEAD)"
 }
 prove() { bash "$PROVE" --base "$1" >/dev/null 2>&1; echo $?; }
+# The exit code is the smaller half of the contract. What the gate actually reads
+# is the receipt, so assert on that too — an exit code alone cannot distinguish
+# "proved" from "wrote nothing and happened to return 0".
+proofres() { sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' \
+               ".claude/reviews/feat/proof.verdicts/proof.json" 2>/dev/null | tail -1; }
 
 # A. A test that genuinely notices the change -> PROVED.
 proofrepo good 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
 printf 'echo 5\n' > src/calc.sh
 printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
 ok "a test that notices the change -> PROVED" "$(prove "$B")" "0"
+ok "...and the PROVED receipt is actually written" "$(proofres)" "PROVED"
 
 # B. The transcript's own failure: an assertion too weak to notice anything.
 #    (`hasMessageContaining("a")` on an object named `a`, in miniature.)
@@ -1316,6 +1399,7 @@ proofrepo weak 'v=$(bash src/calc.sh); [ -n "$v" ]' 'echo 4'; B="$BASESHA"
 printf 'echo 5\n' > src/calc.sh
 printf 'v=$(bash src/calc.sh); [ -n "$v" ]  # still only checks non-empty\n' > tests/calc_test.sh
 ok "a decorative assertion -> NOT PROVED" "$(prove "$B")" "1"
+ok "...and the receipt says NOT_PROVED, not nothing" "$(proofres)" "NOT_PROVED"
 
 # C. Source changed, no test touched at all.
 proofrepo notest 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
@@ -1333,6 +1417,92 @@ BEFORE="$(git status --porcelain | sort)"
 bash "$PROVE" --base "$(git rev-parse HEAD)" >/dev/null 2>&1
 ok "working tree unchanged by the proof run" "$(git status --porcelain | sort)" "$BEFORE"
 ok "no worktree left behind" "$(git worktree list | grep -c exloom-proof || true)" "0"
+
+cd "$WORK" || exit 1
+
+echo "== the loop-termination signal is recorded, not just emitted =="
+
+# All five agents emit `ROUND NEEDED AFTER FIX:` as a mandatory closing line and
+# nothing read it. The presenting complaint is review loops that do not stop;
+# this is the signal that stops them, and it was write-only.
+subrepo roundsig
+RSV=".claude/reviews/feat/plan.verdicts"
+rn() {   # rn <report-text> -> the recorded round_needed
+  rm -rf .claude/reviews
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
+  'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$1" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  sed -n 's/.*"round_needed":"\([A-Z]*\)".*/\1/p' "$RSV/l1-reviewer.json" 2>/dev/null | tail -1
+}
+ok "reviewer says NO -> recorded NO (the loop may stop)" \
+   "$(rn 'VERDICT: APPROVED
+
+ROUND NEEDED AFTER FIX: NO')" "NO"
+ok "reviewer says YES -> recorded YES" \
+   "$(rn 'VERDICT: REJECTED (1 items)
+
+ROUND NEEDED AFTER FIX: YES')" "YES"
+ok "decorated form still read" \
+   "$(rn 'VERDICT: APPROVED
+
+**ROUND NEEDED AFTER FIX:** No')" "NO"
+ok "no line at all -> UNKNOWN, never silently NO" \
+   "$(rn 'VERDICT: APPROVED')" "UNKNOWN"
+
+echo "== the proof binds the COMMAND it proved, not just its own presence =="
+
+# cmd_hash was written by prove-change-is-tested.sh and read by nothing. The only
+# assertion on it was `grep -c cmd_hash == 1` — the key exists. So a repo could
+# prove with a real suite and then point .claude/exloom-test-command at `true`,
+# and the receipt stayed valid. Presence is text; binding is behaviour.
+proofrepo bindcmd 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+printf 'echo 5\n' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
+git add -A >/dev/null 2>&1; git commit -qm change >/dev/null 2>&1
+bash "$PROVE" --base "$B" >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+BC=".claude/reviews/feat/proof.md"
+prf() { exloom_check_proof "$BC" HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1; echo $?; }
+ok "proof covering the pinned command -> allowed" "$(prf)" "0"
+
+printf 'true\n' > .claude/exloom-test-command
+git add -A >/dev/null 2>&1; git commit -qm swap >/dev/null 2>&1
+ok "test command swapped after the proof -> blocked" "$(prf)" "2"
+
+echo "== security review is triggered by SURFACE, not only by tier =="
+
+# The review-gate skill promised security review for dependency and
+# deserialization changes; lib.sh required security-auditor only at Tier 3, so
+# both derived to Tier 1/2 and got none. The doc promised a review the code did
+# not require.
+subrepo secsurf
+git update-ref refs/remotes/origin/main "$(git rev-parse main)" 2>/dev/null
+SB="$(git rev-parse main)"
+printf '{"dependencies":{"lodash":"4.17.20"}}\n' > package.json
+git add -A >/dev/null 2>&1; git commit -qm dep >/dev/null 2>&1
+ok "a bumped dependency -> security surface" \
+   "$(exloom_security_surface "$SB" HEAD && echo yes || echo no)" "yes"
+ok "...and security-auditor joins a Tier 1 reviewer list" \
+   "$(exloom_required_reviewers 1 security)" "l1-reviewer security-auditor"
+
+subrepo deser
+git update-ref refs/remotes/origin/main "$(git rev-parse main)" 2>/dev/null
+SB="$(git rev-parse main)"
+printf 'import java.io.*;\nObjectInputStream in = new ObjectInputStream(s);\n' > src/D.java
+git add -A >/dev/null 2>&1; git commit -qm deser >/dev/null 2>&1
+ok "a deserialization entry point -> security surface" \
+   "$(exloom_security_surface "$SB" HEAD && echo yes || echo no)" "yes"
+
+subrepo plainsrc
+git update-ref refs/remotes/origin/main "$(git rev-parse main)" 2>/dev/null
+SB="$(git rev-parse main)"
+printf 'package m\nfunc Add(a, b int) int { return a + b }\n' > src/add.go
+git add -A >/dev/null 2>&1; git commit -qm plain >/dev/null 2>&1
+ok "ordinary source -> NOT a security surface (no over-block)" \
+   "$(exloom_security_surface "$SB" HEAD && echo yes || echo no)" "no"
 
 cd "$WORK" || exit 1
 

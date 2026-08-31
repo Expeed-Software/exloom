@@ -311,15 +311,51 @@ exloom_derive_tier() {
 # committed with the checklist — the same rule the checklist itself lives under.
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
-# Reviewers required at a given tier. Security review is surface-triggered as
-# well as tier-triggered, but the surface that triggers it (auth / tenancy /
-# secrets / crypto) also derives to Tier 3 above, so the tier list covers it.
+# Does this diff touch a security surface that does NOT derive to Tier 3?
+#
+# The comment this replaces asserted that "the surface that triggers security
+# review also derives to Tier 3, so the tier list covers it." That was false for
+# two surfaces the review-gate skill explicitly promises: a dependency change and
+# a deserialization change both derive to Tier 1 or 2 and never required the
+# security auditor. The skill promised a review the code did not require.
+#
+# Deliberately narrow: dependency manifests and lockfiles by filename, and
+# deserialization entry points by diff content. Outbound-request / SSRF shapes
+# are NOT matched — every formulation tried was noisy enough to force security
+# review on ordinary HTTP client code, and an over-broad gate is how a team
+# learns to set EXLOOM_REVIEW_SKIP.
+exloom_security_surface() {   # exloom_security_surface <base> <tip>
+  local base="$1" tip="$2" files
+  files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+
+  # Dependency manifests and lockfiles: a bumped or added dependency is the
+  # single most common way an unreviewed vulnerability enters a codebase, and a
+  # one-line manifest change otherwise derives to Tier 1.
+  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*\.csproj|packages\.lock\.json)$'; then
+    return 0
+  fi
+
+  # Deserialization of untrusted input, by the API actually called.
+  if git diff -U0 "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null \
+     | grep -Eq '^\+.*(ObjectInputStream|readObject\(|XMLDecoder|yaml\.load\(|pickle\.loads?\(|cPickle\.loads?\(|Marshal\.load|unserialize\(|JsonConvert\.DeserializeObject|BinaryFormatter|TypeNameHandling|SnakeYAML|readValue\(.*Object\.class)'; then
+    return 0
+  fi
+  return 1
+}
+
+# Reviewers required at a given tier, plus any the surface demands regardless.
 exloom_required_reviewers() {
-  case "$1" in
-    0|1) printf 'l1-reviewer' ;;
-    2)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer' ;;
-    3)   printf 'l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor' ;;
+  local tier="$1" extra="${2:-}" list=""
+  case "$tier" in
+    0|1) list='l1-reviewer' ;;
+    2)   list='l1-reviewer cross-layer-auditor adversarial-reviewer' ;;
+    3)   list='l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor' ;;
   esac
+  if [[ "$extra" == "security" && "$list" != *security-auditor* ]]; then
+    list="$list security-auditor"
+  fi
+  printf '%s' "$list"
 }
 
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
@@ -331,7 +367,19 @@ exloom_check_verdicts() {
   local -a missing=() stale=() unapproved=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
-  for agent in $(exloom_required_reviewers "$tier"); do
+  # Security review is triggered by SURFACE as well as by tier — see
+  # exloom_security_surface. Computed once here rather than in the tier lookup,
+  # because only this function knows which commits are being compared.
+  local sec_base sec_extra=""
+  sec_base="$(git merge-base "$reviewed" origin/main 2>/dev/null \
+           || git merge-base "$reviewed" origin/master 2>/dev/null \
+           || git merge-base "$reviewed" origin/dev 2>/dev/null \
+           || git merge-base "$reviewed" origin/develop 2>/dev/null || true)"
+  if [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$reviewed"; then
+    sec_extra="security"
+  fi
+
+  for agent in $(exloom_required_reviewers "$tier" "$sec_extra"); do
     file="${vdir}/${agent}.json"
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
@@ -375,7 +423,10 @@ exloom_check_verdicts() {
 
   if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
 
-  local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier")."
+  local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
+  [[ -n "$sec_extra" ]] && detail="${detail}
+security-auditor is required by the SURFACE this diff touches (a dependency
+manifest or a deserialization entry point), not by the tier."
   [[ ${#missing[@]} -gt 0 ]] && detail="${detail}
 
 Never dispatched (no receipt in ${vdir}/):
@@ -470,7 +521,22 @@ exloom_diff_is_behavioural() {
       *)                   marker='' ;;   # unknown language: nothing is a comment
     esac
 
-    body="$(git diff -w --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    # `-w` ignores whitespace-only changes, which is right for a brace language
+    # (reindenting a Java block changes nothing) and WRONG where indentation is
+    # syntax. In Python, de-indenting a line moves it out of an `if` branch; in
+    # YAML it re-parents a key. Both are behavioural and both are invisible to
+    # `-w`, so such a change scored "not behavioural", a stale receipt stayed
+    # valid, and the code shipped unreviewed. The suite pinned this as the spec:
+    # its only fixture was blank-line churn, the one case where `-w` is correct.
+    local wsflag='-w'
+    case "$ext" in
+      py|pyi|pyx|yaml|yml|sass|styl|pug|jade|haml|slim|coffee|nim|cr) wsflag='' ;;
+    esac
+    if [[ -n "$wsflag" ]]; then
+      body="$(git diff -w --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    else
+      body="$(git diff --no-color "$from" "$to" -- "$f" 2>/dev/null)" || return 0
+    fi
     while IFS= read -r line; do
       # Real diff headers have a space then a path; `+++i;` and `---force` do not.
       case "$line" in
@@ -597,7 +663,7 @@ Run: bash \"$EXLOOM_LIB_DIR/../scripts/findings-ledger.sh\""
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4"
-  local vdir file content sha ok=0 seen_notproved=0
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0
 
   vdir="$(exloom_verdict_dir "$checklist")"
   file="${vdir}/proof.json"
@@ -614,6 +680,22 @@ exloom_check_proof() {
       if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
         exloom_diff_is_behavioural "$sha" "$reviewed" && continue
       fi
+      # The receipt records the hash of the pinned test command. Comparing it
+      # here is what makes the proof bind to the command that was actually
+      # proved: without this, a repo could prove with a real suite, then change
+      # .claude/exloom-test-command to `true`, and the receipt stayed valid
+      # because nothing compared the recorded hash to the current one. The field
+      # was written and never read, and the suite asserted only that the key
+      # existed — text, not behaviour.
+      local rec_hash cur_hash="none"
+      rec_hash="$(printf '%s' "$line" | sed -n 's/.*"cmd_hash"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [[ -n "$rec_hash" && "$rec_hash" != "none" ]]; then
+        cur_hash="$(MSYS_NO_PATHCONV=1 git rev-parse "${reviewed}:.claude/exloom-test-command" 2>/dev/null || echo none)"
+        if [[ "$cur_hash" != "$rec_hash" ]]; then
+          seen_cmdswap=1
+          continue
+        fi
+      fi
       case "$line" in
         *'"result":"PROVED"'*)     ok=1; break ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
@@ -624,7 +706,13 @@ exloom_check_proof() {
   [[ $ok -eq 1 ]] && return 0
 
   local detail
-  if [[ $seen_notproved -eq 1 ]]; then
+  if [[ $seen_cmdswap -eq 1 ]]; then
+    detail="A proof receipt covers this commit, but .claude/exloom-test-command has changed
+since it was written, so the receipt proves a command that is no longer the one
+this repo runs. Re-run the proof against the current command:
+
+    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\""
+  elif [[ $seen_notproved -eq 1 ]]; then
     detail="The proof ran on this code and came back NOT_PROVED: with your source change
 removed and your tests kept, the tests still PASS. They do not notice the change.
 

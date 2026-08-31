@@ -27,6 +27,18 @@ ls .claude/reviews/<branch>.verdicts/
 
 A receipt only counts if it names a commit with no code changes between it and the reviewed tip — if you fixed findings after a review, that reviewer must run again. Receipts must be committed alongside the checklist.
 
+### When to stop reviewing
+
+Each receipt carries `"round_needed"`, read from the `ROUND NEEDED AFTER FIX:` line every reviewer emits. **The loop is over when every required reviewer's current receipt reads `"verdict":"APPROVED"` and `"round_needed":"NO"`.** Check it:
+
+```bash
+grep -h '"round_needed"' .claude/reviews/<branch>.verdicts/*.json
+```
+
+If that holds, ship. Do not run another round to be thorough — an extra round on an approved commit produces thinner findings that then get treated as work, which is the specific way a two-round change becomes a nine-round one.
+
+`"round_needed":"UNKNOWN"` means the reviewer gave no such line, and counts as `YES`: a reviewer that did not answer has not told you the loop can stop. Re-dispatch that one reviewer rather than the whole set.
+
 ### Tier 0 required
 - L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test / cross-layer / adversarial / runbook sections marked `N/A - Tier 0` (or left with their defaults) are acceptable — Tier 0 only requires L1.

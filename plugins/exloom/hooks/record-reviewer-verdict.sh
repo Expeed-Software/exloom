@@ -200,6 +200,27 @@ case "$VLINE" in
   REJECTED) VERDICT="REJECTED" ;;
 esac
 
+# ---------- the loop-termination signal ----------
+# All five agents emit `ROUND NEEDED AFTER FIX: YES | NO` as a mandatory closing
+# line, and nothing read it — the one signal designed to END the review loop was
+# written and never consumed. That is the whole presenting problem: rounds do not
+# stop because nobody is told they have reached the exit, so another round runs
+# and surfaces thinner findings that then get treated as work.
+#
+# Recorded on the receipt so /review-complete and the ledger can act on it.
+# Default UNKNOWN, and UNKNOWN is treated as YES by any consumer: a reviewer that
+# did not answer has not told you the loop can stop.
+ROUND_NEEDED="UNKNOWN"
+RLINE="$(printf '%s\n' "$SCAN" \
+  | tr -d '*_`#>' \
+  | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:].]*$//' \
+  | sed -n 's/^ROUND NEEDED AFTER FIX:[[:space:]]*\([A-Za-z]*\).*/\1/p' \
+  | tr '[:lower:]' '[:upper:]' | grep -E '^(YES|NO)$' | tail -1 || true)"
+case "$RLINE" in
+  YES) ROUND_NEEDED="YES" ;;
+  NO)  ROUND_NEEDED="NO" ;;
+esac
+
 # ---------- findings become data, not chat ----------
 # Parsed against the shipped output format, which is:
 #
@@ -377,8 +398,8 @@ if [[ -n "$ARTIFACTS" ]]; then
     [[ -n "$art" && -f "$art" ]] || continue
     ahash="$(git hash-object "$art" 2>/dev/null || true)"
     [[ -n "$ahash" ]] || continue
-    printf '{"agent":"%s","subagent_type":"%s","head":"%s","artifact":"%s","artifact_hash":"%s","verdict":"%s","at":"%s","session":"%s"}\n' \
-      "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$art" "$ahash" "$VERDICT" "$STAMP" "$SESSION" \
+    printf '{"agent":"%s","subagent_type":"%s","head":"%s","artifact":"%s","artifact_hash":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
+      "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$art" "$ahash" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" \
       >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
     echo "exloom: recorded ${AGENT} receipt for ${art} @ ${ahash:0:12} — verdict ${VERDICT}" >&2
     [[ "$VERDICT" == "APPROVED" ]] || \
@@ -388,9 +409,17 @@ if [[ -n "$ARTIFACTS" ]]; then
   [[ $WROTE -eq 1 ]] && exit 0
 fi
 
-printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","at":"%s","session":"%s"}\n' \
-  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$STAMP" "$SESSION" \
+printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
+  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" \
   >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+
+# The exit condition, stated where the session will read it. APPROVED with every
+# reviewer saying NO is what "stop reviewing" looks like; nothing else is.
+if [[ "$VERDICT" == "APPROVED" && "$ROUND_NEEDED" == "NO" ]]; then
+  echo "exloom: ${AGENT} reports no further round is needed after fixes. If every required reviewer says the same at this commit, the loop is done — ship rather than running another round." >&2
+elif [[ "$ROUND_NEEDED" == "UNKNOWN" ]]; then
+  echo "exloom: ${AGENT} gave no 'ROUND NEEDED AFTER FIX:' line — treated as YES, because a reviewer that did not answer has not told you the loop can stop." >&2
+fi
 
 case "$AGENT" in
   plan-reviewer)
