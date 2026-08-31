@@ -447,7 +447,7 @@ ok "dispatch naming no artifact -> receipt written" \
 ok "...but it covers nothing -> still blocked" "$(x "$edit_src")" "2"
 
 # A dispatch naming the plan records artifact + content hash, and unlocks it.
-record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $PLAN for handoff-readiness\"},\"tool_output\":\"VERDICT: APPROVED\"}"
+record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $PLAN for handoff-readiness\"},\"tool_output\":\"REVIEWED: $PLAN\nVERDICT: APPROVED\"}"
 ok "dispatch naming the plan -> receipt records the artifact" \
    "$(grep -c "\"artifact\":\"$PLAN\"" "$PVD/plan-reviewer.json")" "1"
 ok "dispatch naming the plan -> receipt records its content hash" \
@@ -536,12 +536,12 @@ subrepo paths; printf '# plan\n' > docs/plans/p.md; mkdir -p docs/specs; printf 
 RF=".claude/reviews/feat/plan.verdicts/plan-reviewer.json"
 for form in "./docs/plans/p.md" "$(pwd)/docs/plans/p.md"; do
   rm -rf .claude/reviews
-  record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $form\"}}"
+  record "{\"tool_name\":\"Task\",\"session_id\":\"s\",\"tool_input\":{\"subagent_type\":\"exloom:plan-reviewer\",\"prompt\":\"Review $form\"},\"tool_output\":\"REVIEWED: $form\\nVERDICT: APPROVED\"}"
   ok "prompt path form records an artifact: $(basename "$(dirname "$form")")/$(basename "$form")" \
      "$(grep -c '"artifact"' "$RF" 2>/dev/null | head -1)" "1"
 done
 rm -rf .claude/reviews
-record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:plan-reviewer","prompt":"Per docs/specs/s.md, review docs/plans/p.md for handoff"}}'
+record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:plan-reviewer","prompt":"Per docs/specs/s.md, review docs/plans/p.md for handoff"},"tool_output":"REVIEWED: docs/specs/s.md\nREVIEWED: docs/plans/p.md\nVERDICT: APPROVED"}'
 ok "every named artifact is recorded, not just the first" \
    "$(grep -c '"artifact"' "$RF" 2>/dev/null | head -1)" "2"
 ok "the reviewed plan is among them" \
@@ -569,7 +569,8 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
   | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
 }
 
-disp 'VERDICT: APPROVED
+disp 'REVIEWED: docs/plans/p.md
+VERDICT: APPROVED
 
 Nothing further.'
 ok "APPROVED verdict recorded" "$(grep -c '"verdict":"APPROVED"' "$VF" 2>/dev/null | head -1)" "1"
@@ -1002,6 +1003,95 @@ ok "keyword on the NEXT line disposes it" "$?" "0"
 printf '# legacy checklist\n\n## L1 code review\n- src/a.go:10 — fixed\n' > "$DCHK"
 CHECKLIST_CONTENT="$(cat "$DCHK")" exloom_check_refinds "$DCHK" HEAD "test" 2>/dev/null
 ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
+
+cd "$WORK" || exit 1
+
+echo "== round-3 blockers: forgery, binding, writing ABOUT the guarded path =="
+
+# 1. protect-verdicts matched command TEXT, so a command merely MENTIONING the
+#    guarded path was denied. It blocked a comment being written into the hook's own
+#    source, then blocked the commit message documenting that block, then blocked
+#    this very test three times. Content is now distinguished from targets.
+GVP=".claude/reviews/feat/x"
+GV="${GVP}.verdicts/l1-reviewer.json"
+jbash() { python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Bash','tool_input':{'command':sys.argv[1]}}))" "$1"; }
+
+ok "a commit message naming the path -> allowed" \
+   "$(deny "$(jbash "git commit -m 'fix the ${GV} guard'")")" "0"
+ok "a heredoc body naming the path -> allowed" \
+   "$(deny "$(jbash "cat > notes.md <<EOF
+see ${GV}
+EOF")")" "0"
+ok "a redirect INTO the path -> still denied" \
+   "$(deny "$(jbash "echo {} > ${GV}")")" "2"
+ok "a quoted target -> still denied" \
+   "$(deny "$(jbash "echo x | tee \"${GV}\"")")" "2"
+
+# 2. Plan approval was bound to the DISPATCH PROMPT — text written by the party being
+#    gated — so "Per <a> and <b>, check the heading style" approved BOTH plans off one
+#    cosmetic review. The reviewer's own REVIEWED: line is now authoritative.
+subrepo bind
+printf '# plan a\n- src/one.go\n' > docs/plans/a.md
+printf '# plan b\n- src/two.go\n' > docs/plans/b.md
+BVD=".claude/reviews/feat/plan.verdicts"
+pfeed() { rm -rf .claude/reviews
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:plan-reviewer','prompt':sys.argv[1]},
+ 'tool_output':sys.argv[2]}))" "$1" "$2" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1; }
+cov() { grep -c "\"artifact\":\"$1\"" "$BVD/plan-reviewer.json" 2>/dev/null | head -1; }
+
+pfeed 'Per docs/plans/a.md and docs/plans/b.md, check the heading style' 'REVIEWED: docs/plans/a.md
+
+VERDICT: APPROVED'
+ok "reviewer read a.md -> a.md covered" "$(cov docs/plans/a.md)" "1"
+ok "reviewer never read b.md -> b.md NOT covered" "$(cov docs/plans/b.md)" "0"
+
+pfeed 'Review docs/plans/a.md' 'VERDICT: APPROVED'
+ok "no REVIEWED: line -> covers nothing" "$(cov docs/plans/a.md)" "0"
+
+pfeed 'Review docs/plans/a.md' 'REVIEWED: docs/plans/a.md
+REVIEWED: docs/plans/b.md
+
+VERDICT: APPROVED'
+ok "reviewer overreach -> only the dispatched artifact counts" "$(cov docs/plans/b.md)" "0"
+
+# 3. The proof was forgeable by a command that inverts on the test file's existence:
+#    exit 0 at base (file absent, control passes), exit 1 in run 2 (file copied in),
+#    matching no build signature and printing nothing. PROVED with zero testing.
+PRV2="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+fdir="$REG/forge"; rm -rf "$fdir"; mkdir -p "$fdir/src" "$fdir/tests" "$fdir/.claude"; cd "$fdir" || exit 1
+git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+: > .claude/exloom-gate.enabled
+printf '[ ! -e tests/t.sh ]\n' > .claude/exloom-test-command
+printf 'f(){ return 0; }\n' > src/l.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1; FB="$(git rev-parse HEAD)"
+printf 'f(){ return 1; }\n' > src/l.sh
+printf 'true\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRV2" --base "$FB" >/dev/null 2>&1
+ok "a silently-failing command cannot mint PROVED" "$?" "1"
+
+# A genuine failing test still proves, and the receipt binds the command's content.
+gdir="$REG/genuine"; rm -rf "$gdir"; mkdir -p "$gdir/src" "$gdir/tests" "$gdir/.claude"; cd "$gdir" || exit 1
+git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+: > .claude/exloom-gate.enabled
+printf 'bash tests/t.sh\n' > .claude/exloom-test-command
+printf 'calc(){ echo 4; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "4" ] || { echo "FAIL calc"; exit 1; }\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1
+git checkout -q -b feat/g
+GB="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "5" ] || { echo "FAIL calc"; exit 1; }\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRV2" --base "$GB" >/dev/null 2>&1
+ok "a genuine failing test still proves" "$?" "0"
+ok "...and the receipt binds the command's content hash" \
+   "$(grep -c cmd_hash .claude/reviews/feat/g.*/proof.json 2>/dev/null | head -1)" "1"
 
 cd "$WORK" || exit 1
 

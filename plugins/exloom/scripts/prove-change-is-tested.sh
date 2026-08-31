@@ -20,10 +20,19 @@
 #     silently did not run for precisely the change class it existed to catch.
 # All three fail this check. None of them needed a reviewer.
 #
-# SAFE BY CONSTRUCTION. Everything runs in a throwaway `git worktree`. The working
-# tree is never modified, so there is nothing to restore and no way to leave the
-# repo dirty if this is interrupted. No reviewer-written command is executed —
-# only the test command this repo already runs.
+# WHAT THE WORKTREE PROTECTS, AND WHAT IT DOES NOT. Everything runs in a throwaway
+# `git worktree`, so your working tree is never modified and there is nothing to
+# restore if this is interrupted. That is ALL it protects.
+#
+# It is NOT a sandbox. A worktree isolates git state, not the process: `eval
+# "$TESTCMD"` runs with your full filesystem, network and credential access, and
+# $TESTCMD may come from `.claude/exloom-test-command` — a file the branch under
+# review authors. Only run this on a branch you would already be willing to run
+# `npm test` on.
+#
+# The previous version of this comment asserted "no reviewer-written command is
+# executed", directly above the eval. Security review flagged that confident, wrong
+# claim as the reason the risk was easy to wave through in review.
 #
 # Usage:
 #   bash prove-change-is-tested.sh [--base <ref>] [--cmd "<test command>"]
@@ -150,9 +159,12 @@ _receipt() {
   head="$(git rev-parse HEAD 2>/dev/null)" || return 0
   vdir=".claude/reviews/${branch}.verdicts"
   mkdir -p "$vdir" 2>/dev/null || return 0
-  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"%s","at":"%s"}\n' \
+  local cmdhash="none"
+  [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
+  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","at":"%s"}\n' \
     "$result" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
+    "$cmdhash" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}) at ${vdir}/proof.json — commit it with the checklist" >&2
@@ -208,6 +220,45 @@ if [[ $rc -eq 126 || $rc -eq 127 ]]; then
   echo; echo "NOT PROVED — the test command could not run (exit $rc)."
   tail -10 "$WT/.exloom-out" 2>/dev/null
   exit 1
+fi
+
+# RUN 3: your change + your tests. MUST PASS.
+#
+# This replaces an output heuristic that asked whether the failure "looked like" a
+# test failing. It rejected the forgery and also rejected `[ "$(calc)" = "5" ]` —
+# a perfectly good shell assertion that fails silently. Guessing from output was
+# the wrong instrument; behaviour is the right one.
+#
+# The forgery security review demonstrated is `[ ! -e tests/t.sh ]`: exit 0 at base
+# because the test file is absent, exit 1 in run 2 because it has been copied in.
+# It survives runs 1 and 2. It cannot survive this one — with the change AND the
+# tests both present, it still exits 1, so the branch fails its own tests.
+#
+# This also catches something worth catching on its own: tests that do not actually
+# pass on the change they were written for.
+if [[ $rc -ne 0 ]]; then
+  while IFS= read -r sf; do
+    [[ -n "$sf" && -f "$sf" ]] || continue
+    mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
+    cp "$sf" "$WT/$sf" 2>/dev/null
+  done <<< "$SRC"
+  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.now-out" 2>&1
+  now_rc=$?
+  if [[ $now_rc -ne 0 ]]; then
+    _receipt NOT_PROVED
+    echo
+    echo "NOT PROVED — your tests do not pass on your own change (exit $now_rc)."
+    echo
+    echo "The suite passed at the base commit and failed with your tests added, but"
+    echo "it also fails with the change itself applied. So the failure is not your"
+    echo "tests noticing the change — either the change is broken, or the command"
+    echo "does not run tests at all (a command that inverts on a file's existence"
+    echo "produces exactly this shape)."
+    echo
+    echo "command: $TESTCMD"
+    echo "--- last 25 lines ---"; tail -25 "$WT/.now-out" 2>/dev/null
+    exit 1
+  fi
 fi
 
 # Signatures cover the modal "symbol does not exist at base" form in each language

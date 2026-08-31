@@ -87,6 +87,21 @@ case "$TOOL" in
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\t'/ }"
+    # Match TARGETS, not content. This guard matches on command text, so a command
+    # that merely MENTIONS the guarded directory was denied as an attempt to forge a
+    # receipt. It blocked a comment being written into this hook's own source, then
+    # blocked the commit message that documented the block. Any session working on
+    # exloom hits it, as does any repo whose documentation names the directory — and
+    # an over-block is exactly what makes people reach for EXLOOM_REVIEW_SKIP.
+    #
+    # Two forms carry CONTENT rather than a target, and both are stripped first:
+    #   - a heredoc body: everything from `<<` onward. Real targets appear BEFORE the
+    #     heredoc (`cat > path <<EOF`), so stripping the body keeps them.
+    #   - a commit message: `-m "..."` or `--message=...`.
+    # A quoted target still matches: only these two forms are removed.
+    SCAN_CMD="${CMD%%<<*}"
+    SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E "s/(-m|--message=?)[[:space:]]*'[^']*'//g")"
+    SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E 's/(-m|--message=?)[[:space:]]*"[^"]*"//g')"
     # Destruction of the reviews tree names neither the verdicts dir nor the state
     # file, so it passed both checks below. Reproduced as ALLOWED: `rm -rf
     # .claude/reviews`, `mv .claude/reviews /tmp`, `git checkout -- .claude/reviews`.
@@ -97,20 +112,20 @@ case "$TOOL" in
     # Requires the path to be NAMED, deliberately. An earlier version matched a bare
     # `rm` plus a loose flag heuristic and blocked `rm -f build.log && tar -xzf x.tgz`
     # — over-blocking is what teaches people to reach for the bypass.
-    if printf '%s' "$CMD" | grep -Eq '[.]claude/reviews' \
-       && printf '%s' "$CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
+    if printf '%s' "$SCAN_CMD" | grep -Eq '[.]claude/reviews' \
+       && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
       TARGET="$CMD"
-    elif printf '%s' "$CMD" | grep -Eq '(^|[;&|(][[:space:]]*)git[[:space:]]+clean([[:space:]]|$)' \
-         && printf '%s' "$CMD" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*[dx]'; then
+    elif printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)git[[:space:]]+clean([[:space:]]|$)' \
+         && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*[dx]'; then
       # `git clean -fdx` removes untracked files repo-wide, which includes an
       # uncommitted checklist, state file and receipts, without naming them.
       TARGET="$CMD"
-    elif ! printf '%s' "$CMD" | grep -Eq "$VERDICT_RE"; then
+    elif ! printf '%s' "$SCAN_CMD" | grep -Eq "$VERDICT_RE"; then
       exit 0
     else
       # Reading, staging and committing receipts must keep working — only deny
       # the forms that create or change one.
-      printf '%s' "$CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
+      printf '%s' "$SCAN_CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
       TARGET="$CMD"
     fi
     ;;

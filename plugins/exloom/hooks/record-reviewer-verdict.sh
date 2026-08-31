@@ -321,12 +321,42 @@ case "$AGENT" in
     PROMPT="${PROMPT//\\//}"
     PROMPT="${PROMPT//"$REPO_ROOT"\//}"
     PROMPT="${PROMPT// .\// }"
+    # No SPACE in the charset. Allowing one so filenames could contain spaces made
+    # the match greedy across a sentence: "Per docs/plans/a.md and docs/plans/b.md"
+    # matched as a SINGLE bogus path, so a prompt naming two plans produced neither.
     # Record EVERY plan/spec path named, not `head -1`. "Per docs/specs/s.md,
     # review docs/plans/p.md" recorded the spec and left the plan uncovered —
     # a real review that reads as no review.
-    ARTIFACTS="$(printf '%s' "$PROMPT" \
-      | grep -oE '(docs/(exloom/)?(plans|specs)|\.claude/plans)/[A-Za-z0-9 ._()/-]+\.md' \
-      | sed 's/[[:space:]]*$//' | sort -u)"
+    # The artifact must be named by the REVIEWER, not by the prompt. Taking it from
+    # the prompt meant the party being gated chose what its own approval covered:
+    # "Per docs/plans/a.md and docs/plans/b.md, check the heading style" minted
+    # approval for BOTH plans off one cosmetic review. Recording every named path
+    # made it strictly worse — one author-controlled false positive became N.
+    #
+    # The reviewer's REVIEWED: lines are authoritative. The prompt is used only to
+    # intersect, so a reviewer also cannot approve something nobody asked it to read.
+    # Both sides go through the SAME extractor, or they cannot intersect: the
+    # prompt side is anchored at `docs/`, so `./docs/plans/p.md` and an absolute
+    # `E:/repo/docs/plans/p.md` both normalise to `docs/plans/p.md`. Taking the
+    # reviewer's side with `awk '{print $1}'` kept the `./`, and an honest review
+    # that echoed the path back exactly as dispatched covered nothing.
+    _artifact_paths() {
+      grep -oE '(docs/(exloom/)?(plans|specs)|\.claude/plans)/[A-Za-z0-9._()/-]+\.md' \
+        | sed 's/[[:space:]]*$//' | sort -u
+    }
+    REVIEWED_LINES="$(printf '%s\n' "$SCAN" \
+      | sed -n 's/^[[:space:]*_-]*REVIEWED:[[:space:]]*//p' \
+      | tr -d '`' | _artifact_paths)"
+    ARTIFACTS="$(printf '%s' "$PROMPT" | _artifact_paths)"
+    if [[ -n "$REVIEWED_LINES" ]]; then
+      ARTIFACTS="$(printf '%s\n' "$ARTIFACTS" | grep -Fxf <(printf '%s\n' "$REVIEWED_LINES") 2>/dev/null || true)"
+      [[ -n "$ARTIFACTS" ]] || echo "exloom: plan-reviewer named no artifact that was also in the dispatch — receipt covers nothing" >&2
+    else
+      # No REVIEWED: line means the reviewer did not state what it read. Cover
+      # nothing rather than trusting the author's prompt; the gate stays shut.
+      ARTIFACTS=""
+      echo "exloom: plan-reviewer report carried no 'REVIEWED: <path>' line — receipt covers no artifact and will not unlock execution" >&2
+    fi
     ;;
 esac
 
