@@ -3,6 +3,9 @@
 **Tier:** 2
 **Tier rationale:** 66 files across multiple modules of the plugin (hooks, agents, scripts, skills, templates, test suite); security review added by SURFACE trigger, not tier — the diff evals a repo-tracked file and a subagent_type injection vector was found and fixed in it.
 **Blast radius:** 66 files changed, 6 modules touched (hooks, agents, scripts, skills, templates, test suite), user-facing: no — but it changes the enforcement mechanism 17 gate-enabled repos depend on, so a defect here silently disables review rather than breaking visibly.
+**Plan:** none — built without one. The scope gate this branch implements would
+have refused its first edit had the gate been enabled when it started. Recorded
+rather than omitted: the absent plan is itself the finding.
 **Started:** 2026-08-31
 
 > Reviewer dispatch is NOT self-attested. exloom records a verdict receipt under

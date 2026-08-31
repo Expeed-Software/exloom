@@ -71,7 +71,10 @@ except Exception:
 # freeze without a record and reset the round counter — the one number the
 # feature exists to surface. And `rm -rf .claude/reviews` / `git clean -fdx`
 # contain no `.verdicts` substring, so both destroyed every receipt unopposed.
-VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)'
+# `exloom-gate.enabled` is included deliberately: it is the switch that decides
+# whether any hook runs at all. A session that can delete it can disable the gate
+# silently, which makes every other protection here decorative.
+VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)|\.claude[/\\]exloom-gate\.enabled'
 
 TARGET=""
 case "$TOOL" in

@@ -221,6 +221,50 @@ EOF
 fi
 [[ ${#PLAN_DIRS[@]} -gt 0 ]] || exit 0
 
+# A branch may NAME its plan in the checklist, which ends the guessing entirely:
+#
+#     **Plan:** docs/plans/2026-08-30-my-feature-plan.md
+#
+# Turning the gate on in this repo listed ELEVEN plans as this branch's unreviewed
+# work — untracked historical planning documents from April and June that the branch
+# never touched. "Not present at the fork point" is not the same as "this branch
+# wrote it", and for an untracked file git cannot tell the difference. A named plan
+# is unambiguous; the directory scan stays as the fallback for branches that do not
+# name one.
+CHECKLIST=".claude/reviews/${BRANCH}.md"
+NAMED_PLAN=""
+if [[ -f "$CHECKLIST" ]]; then
+  # First line only, first whitespace-delimited token only. Taking the whole value
+  # swallowed a multi-line justification and tried to open it as a path.
+  NAMED_PLAN="$(sed -n 's/^\*\*Plan:\*\*[[:space:]]*//p' "$CHECKLIST" | head -1                 | tr -d '`' | awk '{print $1}')"
+fi
+# "none" is a first-class answer, recorded where a reviewer reads it rather than in
+# an untracked marker file. A branch that genuinely has no plan says so in the
+# checklist, and that statement ships with the PR.
+case "$(printf '%s' "$NAMED_PLAN" | tr '[:upper:]' '[:lower:]')" in
+  none|n/a|-) 
+    echo "exloom: checklist declares no plan for '$BRANCH' — plan and scope gates do not apply (audit)" >&2
+    NAMED_PLAN="__NONE__" ;;
+esac
+
+if [[ "$NAMED_PLAN" == "__NONE__" ]]; then
+  exit 0
+elif [[ -n "$NAMED_PLAN" ]]; then
+  if [[ -f "$NAMED_PLAN" ]]; then
+    PLANS="$NAMED_PLAN"
+  else
+    cat >&2 <<EOF
+exloom review gate: BLOCKED — the checklist names a plan that does not exist.
+
+  named: ${NAMED_PLAN}
+
+Fix the **Plan:** line in ${CHECKLIST}, or remove it to fall back to scanning the
+plan directories.
+EOF
+    exit 2
+  fi
+else
+
 ALL_PLANS="$(find "${PLAN_DIRS[@]}" -type f -name '*.md' 2>/dev/null | sed 's|^\./||' | sort -u)"
 # An EMPTY plan directory must take the same branch as no plan directory. Otherwise
 # `mkdir -p docs/plans` is a one-command, permanent, silent disarm of both the plan
@@ -261,9 +305,15 @@ BASE="$(git merge-base HEAD origin/main 2>/dev/null \
 PLANS=""
 while IFS= read -r p; do
   [[ -z "$p" ]] && continue
-  if [[ -n "$BASE" ]] && git cat-file -e "${BASE}:${p}" 2>/dev/null; then
+  # MSYS_NO_PATHCONV: Git Bash on Windows mangles a `ref:path` argument (colon -> ';',
+  # '/' -> '\'), so BOTH lookups failed and EVERY plan on disk was treated as in play
+  # on every branch, forever. Turning the gate on in this repo listed eleven plans from
+  # April and June as unreviewed work for a branch that never touched them — which is a
+  # block a session cannot satisfy, and therefore a straight path to EXLOOM_REVIEW_SKIP.
+  # Every other `ref:path` call in lib.sh already carries this guard.
+  if [[ -n "$BASE" ]] && MSYS_NO_PATHCONV=1 git cat-file -e "${BASE}:${p}" 2>/dev/null; then
     # Present at the fork point — in play only if its content has changed since.
-    if [[ "$(git rev-parse "${BASE}:${p}" 2>/dev/null)" == "$(git hash-object "$p" 2>/dev/null)" ]]; then
+    if [[ "$(MSYS_NO_PATHCONV=1 git rev-parse "${BASE}:${p}" 2>/dev/null)" == "$(git hash-object "$p" 2>/dev/null)" ]]; then
       continue
     fi
   fi
@@ -271,6 +321,9 @@ while IFS= read -r p; do
 done <<< "$ALL_PLANS"
 
 PLANS="$(printf '%s' "$PLANS" | sed '/^$/d' | sort -u)"
+
+fi
+
 [[ -n "$PLANS" ]] || exit 0
 
 # ---------- does a receipt cover each plan's CURRENT content? ----------
