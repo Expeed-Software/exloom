@@ -73,10 +73,15 @@ none
 
 ## Escape hatches used
 - [ ] None (default)
-- Skipped steps with written justification:
-  - <step name> — <one sentence why>
 
-<!-- At the round cap the gate stops and asks a person to decide. To ship with
+<!-- Add a line per skipped step, in this form — the example lives in this comment
+     because `<step name>` is a placeholder the gate rejects, so leaving it in the
+     document blocks every branch that correctly skipped nothing:
+
+       - Skipped steps with written justification:
+         - smoke test — headless CI box, verified on staging instead
+
+     At the round cap the gate stops and asks a person to decide. To ship with
      findings outstanding, add a line in exactly this form, then list each
      outstanding finding with fixed / deferred + ticket / accepted + reason:
 

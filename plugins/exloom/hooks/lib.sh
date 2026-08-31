@@ -848,7 +848,12 @@ Run /review-complete — it names each tier-required section still missing."
   elif [[ "$tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
   fi
-  scan="$(printf '%s\n' "$content" | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
+  # HTML comments are guidance, not evidence, and the template uses them to show
+  # what a filled-in line looks like — which necessarily quotes the placeholder
+  # tokens. Scanning them made the template's own instructions block the push.
+  scan="$(printf '%s\n' "$content" \
+    | awk '/<!--/{inc=1} !inc{print} /-->/{inc=0}' \
+    | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
   if printf '%s' "$scan" | grep -Eq "$placeholder_re" || printf '%s' "$scan" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
     _exloom_block "$action" "A required section of $checklist still contains template placeholder text.
 Fill in the real evidence for the declared tier, or revert the final-verdict ticks."

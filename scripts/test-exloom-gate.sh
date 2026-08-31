@@ -1003,6 +1003,29 @@ ok "ordinary source -> NOT a security surface (no over-block)" \
 
 cd "$WORK" || exit 1
 
+echo "== the shipped template must not block a branch that filled it honestly =="
+
+# Found by an end-to-end run, not by this suite: the template carried
+# `- <step name> — <one sentence why>` under Escape hatches, and both phrases are
+# in placeholder_re. A developer who correctly used NO escape hatch left the line
+# alone and the gate blocked, pointing at a section they were right not to fill.
+# Every branch would have hit it. The placeholder-coverage test above passes
+# either way, because it only asks whether each token is RECOGNISED — not whether
+# an honestly-completed checklist survives the scan.
+TPL="$HOOKS_ABS/../templates/review-checklist.md"
+for tier in 0 1 2 3; do
+  filled="$(sed -e 's/<[^>]*>/filled/g' \
+                -e 's/- \[ \]/- [x]/g' "$TPL")"
+  # Sections a tier drops are irrelevant; what matters is that NOTHING a tier
+  # scans still reads as a placeholder once a person has filled it in.
+  printf '%s\n' "$filled" | grep -qE '<(paste output|exact command|exact steps|expected-result|step name|one sentence why)' \
+    && ok "tier $tier: filled template has no surviving placeholder" "dirty" "clean" \
+    || ok "tier $tier: filled template has no surviving placeholder" "clean" "clean"
+done
+# The specific regression: the example must not sit in the document body.
+ok "no placeholder example outside a comment in Escape hatches" \
+   "$(awk '/^## Escape hatches used/,/^## Provenance/' "$TPL" | grep -v '^ *<!--' | grep -vE '^ ' | grep -c '<step name>' | head -1)" "0"
+
 echo "== reviewers are decoupled: only L1 must cover the shipped commit =="
 
 # Requiring every reviewer to approve the SAME commit is what produced the loop:
