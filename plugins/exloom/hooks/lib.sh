@@ -379,7 +379,7 @@ exloom_cap_override() {   # exloom_cap_override <checklist> <tip>
 # that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
-  local vdir agent file content sha ok
+  local vdir agent file content sha ok approved_at behind
   local -a missing=() stale=() unapproved=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
@@ -400,7 +400,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0
+    ok=0; rejected=0; approved_at=""
     # Read whole receipt LINES, so the commit and the verdict on one line are
     # evaluated together. Reading them separately would let an APPROVED verdict
     # from an old commit vouch for a REJECTED review of the current one.
@@ -426,13 +426,24 @@ exloom_check_verdicts() {
       # in-flight branch the moment this version is installed, and a migration
       # that breaks running work does not get adopted, it gets uninstalled.
       case "$rline" in
-        *'"verdict":"APPROVED"'*) ok=1; break ;;
+        *'"verdict":"APPROVED"'*) ok=1; approved_at="$sha"; break ;;
         *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) rejected=1 ;;
-        *) ok=1; break ;;   # legacy receipt, no verdict recorded
+        *) ok=1; approved_at="$sha"; break ;;   # legacy receipt, no verdict recorded
       esac
     done < <(printf '%s\n' "$content")
     if [[ $ok -ne 1 ]]; then
       if [[ $rejected -eq 1 ]]; then unapproved+=( "$agent" ); else stale+=( "$agent" ); fi
+    elif [[ "$agent" != "l1-reviewer" && -n "$approved_at" ]]; then
+      # Decoupling means these reviewers approve code, then more code lands. That
+      # gap is a real exposure — this branch's own round-1 fixes introduced six
+      # round-2 defects, one of them at exactly the integration level only a
+      # hostile pass catches. It cannot be closed without either re-running them
+      # every commit (the loop) or delta review (unsound), so it is DISCLOSED
+      # instead: a fact for whoever reads the PR, never a block.
+      behind="$(git rev-list --count "${approved_at}..${reviewed}" 2>/dev/null || echo 0)"
+      if [[ "${behind:-0}" -gt 0 ]]; then
+        echo "exloom: ${agent} approved ${approved_at:0:12} — ${behind} commit(s) have landed since; it did not see them." >&2
+      fi
     fi
   done
 

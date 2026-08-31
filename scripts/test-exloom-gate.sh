@@ -1029,6 +1029,15 @@ ok "re-running ONLY L1 unblocks it" "$(dchk)" "0"
 ok "...and the adversarial receipt never had to be refreshed" \
    "$(grep -c "$A" "$DCV/adversarial-reviewer.json" | head -1)" "1"
 
+# The gap decoupling creates is disclosed, never blocked on: a fact for whoever
+# reads the PR. Silence would let a reviewer's week-old approval look current.
+ok "a behind reviewer is reported, not blocked" \
+   "$(exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | grep -c 'commit(s) have landed since' | head -1)" "1"
+ok "...and it names the agent that is behind" \
+   "$(exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | grep -c 'adversarial-reviewer approved' | head -1)" "1"
+ok "...while L1, which covers the tip, is NOT reported behind" \
+   "$(exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | grep -c 'l1-reviewer approved' | head -1)" "0"
+
 echo "== the round cap: three rounds, then a person decides =="
 
 subrepo roundcap

@@ -98,6 +98,15 @@ For each missing section:
 
 Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
 
+**Dispatch order matters. Do not run them all at once.**
+
+1. **`l1-reviewer` alone, first.** Fix what it finds, re-run it, until it approves. This is the loop, and it is one cheap reviewer.
+2. **Then `adversarial-reviewer` and `security-auditor`** — those two in parallel with each other, once, after L1 has settled. Pass them the L1 findings so they do not re-report them.
+
+Two reasons. Anything the expensive reviewers say about a commit you are about to change is stale before you read it — dispatching all of them up front means paying for reviews of code that no longer exists. And because their approval no longer expires when you fix something, running them last is what makes their approval cover very nearly the code you ship: the only lines they miss are fixes made in response to their own findings.
+
+The gate prints how far behind they are (`approved 9e1d992 — 3 commit(s) have landed since`). That is a fact for whoever reads the PR, not a block. If the number is large, you dispatched them too early.
+
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
 **Cost discipline.** `l1-reviewer` runs at low effort and is cheap enough to re-run per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push — not after every fix. Re-running the full panel on each fix commit is what turns a two-round change into a nine-round one.
