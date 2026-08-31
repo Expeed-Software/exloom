@@ -31,6 +31,9 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 - **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction. Before this, a reviewer that returned nine blocking findings satisfied the gate exactly as well as one that approved: the mechanism enforced attendance, not review.
   Receipts written before exloom recorded verdicts carry no verdict key and are **grandfathered** — they still count, so installing this version does not block work already in flight.
 
+- **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
+  Two rules make the receipt worth having: the pinned `.claude/exloom-test-command` must be **committed**, because its contents are `eval`d; and an unresolvable `--base` is refused rather than recorded.
+
 - **Plan and spec review, before execution.** The `block-unreviewed-execution` hook blocks the first source edit (including shell writes) on a branch carrying a plan or spec that no `plan-reviewer` receipt approves. The receipt binds to the document's **content hash**, so editing it after review invalidates the approval and it must be reviewed again — the freeze rule as a mechanism rather than a paragraph.
   This exists because `reviewing-plans` opens with *"Plan author and executor are different people. No exceptions."* and shipped no agent and no receipt, so it degraded to self-review by default. A defect in a plan is reproduced by every regeneration of the code from it, which is exactly what breaks the premise that the spec is durable and the code is throwaway.
 
@@ -41,7 +44,7 @@ What this does **not** buy: it proves a reviewer ran, never that the review was 
 | Blast radius | Tier | Required gates |
 |---|---|---|
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
-| <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + checklist |
+| <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + proof-is-tested + checklist |
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + cross-layer contract check + adversarial review |
 | Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + exact rollback command + a reversal test in CI |
 

@@ -34,6 +34,15 @@ A receipt only counts if it names a commit with no code changes between it and t
 ### Tier 1 required
 - L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test: boot command filled, user action filled, expected result filled, actual observed result filled with real evidence (not `<paste output>` placeholder, not empty). "Test passed" ticked.
+- **Proof that the change is tested: `proof.json` receipt present, `"result":"PROVED"`, covering the reviewed commit.** Written only by:
+
+  ```bash
+  bash "${CLAUDE_PLUGIN_ROOT}/scripts/prove-change-is-tested.sh"
+  ```
+
+  It runs the suite three times — at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass). A `NOT_PROVED` receipt does not satisfy the gate; fix the tests rather than re-running.
+
+  This applies to **every tier from 1 up**, including Tiers 2 and 3. It was enforced by the hooks and named in none of the tier lists, so a session could fill this file correctly, tick every box, commit, and then be blocked at Stop and at push by a check nothing had mentioned.
 
 ### Tier 2 required (Tier 1 +)
 - Cross-layer contract check: `cross-layer-auditor.json` receipt present, grep output pasted for fields / endpoints / events / columns / config keys, orphan list resolved (fixed or annotated intentional).
@@ -70,13 +79,30 @@ Cannot mark complete. Missing or placeholder sections:
 
 For each missing section:
 - Smoke test missing → run `/smoke-test`.
+- Proof receipt missing, stale, or `NOT_PROVED` → run `prove-change-is-tested.sh` (above). If it reports NOT PROVED, the fix is a test that fails without your change — not another run.
 - L1 receipt missing or stale → dispatch the `exloom:l1-reviewer` agent now against the current diff.
 - Cross-layer receipt missing or stale → dispatch the `exloom:cross-layer-auditor` agent now.
 - Adversarial receipt missing or stale → dispatch the `exloom:adversarial-reviewer` agent now.
 - Security receipt missing or stale → dispatch the `exloom:security-auditor` agent now.
 - Runbook missing → ask the user for the path or tell them to write it.
 
-Dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
+**Authorise the round before dispatching anything.** `require-command-dispatch.sh` denies every reviewer `Task` unless a dispatch token covers the current HEAD, and the only thing that writes that token is:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/begin-review-round.sh"
+```
+
+Run it once, before the first dispatch. It runs the author-side checks first and authorises dispatch only if they pass — so a round never starts on a tree that does not build. If this round is pointed at something specific, pass it and hand the same text to every reviewer verbatim:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/begin-review-round.sh" --focus "concentrate on X"
+```
+
+Skipping this is not a shortcut; it is a deadlock. The command used to instruct a dispatch that the hook then denied, naming a script that appeared in no command or skill — a session following this file to the letter could not get past it.
+
+Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
+
+**Re-authorise after fixing findings.** The token covers one commit. Once you commit fixes, HEAD moves, the token no longer covers it, and dispatch is denied again — correctly, because the receipts are now stale too. Run `begin-review-round.sh` again for the next round.
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
 Wait for the user. Do NOT mark complete while anything is missing.

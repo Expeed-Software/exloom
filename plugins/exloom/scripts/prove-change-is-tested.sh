@@ -89,8 +89,25 @@ BASE="$(git rev-parse --verify --quiet "${BASE}^{commit}" 2>/dev/null || true)"
 
 # ---------- test command ----------
 # A repo may pin its own, which is always better than detection.
+# The file must be TRACKED, the same rule .claude/exloom-protected-branches and
+# .claude/exloom-skip-branches already carry (lib.sh:149,170). This value is
+# `eval`d three times with full filesystem, network and credential access, so an
+# UNTRACKED file was arbitrary command execution that appears in no diff and no
+# PR — on a fork PR, that is RCE on the reviewer's machine at the moment they run
+# the command the gate's own block message tells them to run. `-f` alone checked
+# that the file existed, not that anyone could see it.
+#
+# Requiring it tracked means widening this boundary is a committed, reviewable
+# change, which is the same reason the other two config files require it.
 if [[ -z "$TESTCMD" && -f ".claude/exloom-test-command" ]]; then
-  TESTCMD="$(head -1 .claude/exloom-test-command)"
+  if git ls-files --error-unmatch ".claude/exloom-test-command" >/dev/null 2>&1; then
+    TESTCMD="$(head -1 .claude/exloom-test-command)"
+  else
+    echo "exloom: ignoring UNTRACKED .claude/exloom-test-command — this value is eval'd," >&2
+    echo "        so it must be committed to be honoured. Run:" >&2
+    echo "          git add .claude/exloom-test-command && git commit -m 'chore: pin exloom test command'" >&2
+    echo "        or pass the command explicitly with --cmd." >&2
+  fi
 fi
 if [[ -z "$TESTCMD" ]]; then
   # `--rerun-tasks` / `--force` are deliberate: a cached "BUILD SUCCESSFUL" is the

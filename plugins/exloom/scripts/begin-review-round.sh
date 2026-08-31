@@ -48,8 +48,18 @@ HEAD_SHA="$(git rev-parse HEAD 2>/dev/null)" || exit 1
 # ---------- author-side checks ----------
 # Discovered, not hardcoded: a repo declares its own in .claude/exloom-checks,
 # one command per line. Absent, the well-known ones this repo ships are used.
+# Same rule as .claude/exloom-test-command: every line here is `eval`d, so the
+# file must be TRACKED. An untracked one is arbitrary command execution that
+# shows in no diff and no PR. This site shipped with no warning at all while the
+# sibling eval got a three-paragraph one — the previous round fixed the instance
+# it was shown rather than the rule, which is why this one was still open.
 CHECKS=()
-if [[ -f ".claude/exloom-checks" ]]; then
+if [[ -f ".claude/exloom-checks" ]] && ! git ls-files --error-unmatch ".claude/exloom-checks" >/dev/null 2>&1; then
+  echo "exloom: ignoring UNTRACKED .claude/exloom-checks — its lines are eval'd, so it" >&2
+  echo "        must be committed to be honoured:" >&2
+  echo "          git add .claude/exloom-checks && git commit -m 'chore: pin exloom author-side checks'" >&2
+  echo "        Falling back to the well-known checks for this repo." >&2
+elif [[ -f ".claude/exloom-checks" ]]; then
   while IFS= read -r c; do
     c="${c%%#*}"; c="${c#"${c%%[![:space:]]*}"}"; c="${c%"${c##*[![:space:]]}"}"
     [[ -n "$c" ]] && CHECKS+=( "$c" )

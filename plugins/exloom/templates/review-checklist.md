@@ -27,6 +27,12 @@
 - Actual observed result: `<paste output / screenshot link>`
 - [ ] Test passed
 
+## Proof the change is tested (Tier 1+)
+- Proof receipt: `proof.json` (written only by `scripts/prove-change-is-tested.sh` — not by hand)
+- Test command used: `<exact command, or "detected">`
+- Result: `<PROVED / NOT_PROVED>`
+- If NOT_PROVED: `<what is missing — a test that fails without this change>`
+
 ## Cross-layer contract check (Tier 2+)
 - Verdict receipt: `cross-layer-auditor.json` (written by exloom on dispatch)
 - Grep 1 — Orphan fields (UI writes → backend reads):
