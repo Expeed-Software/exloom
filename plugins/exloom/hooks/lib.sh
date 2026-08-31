@@ -183,6 +183,14 @@ exloom_push_target_branches() {
     t="${toks[$i]}"
     case "$t" in ';'|'&&'|'||'|'|'|'&') break ;; esac
     if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
+    # A shell redirection is not a refspec. `git push origin 2>&1` was read as a
+    # push of a branch named `2>&1`, and the block message then told the author
+    # to run /review-init for a branch that does not exist — an argument-parsing
+    # slip that reads as a review failure. Only bites when no branch is named;
+    # `git push origin HEAD 2>&1` was always correct.
+    case "$t" in
+      [0-9]*'>&'[0-9]*|'&>'*|'>'*|'>>'*|[0-9]*'>'*|'<'*) continue ;;
+    esac
     case "$t" in
       --all|--mirror) allrefs=1; continue ;;
       --delete|-d) deletion=1; continue ;;

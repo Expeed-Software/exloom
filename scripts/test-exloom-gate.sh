@@ -715,6 +715,24 @@ subrepo bind
 printf '# plan a\n- src/one.go\n' > docs/plans/a.md
 printf '# plan b\n- src/two.go\n' > docs/plans/b.md
 BVD=".claude/reviews/feat/plan.verdicts"
+echo "== a shell redirection is not a refspec =="
+
+# Reported from a real session, hit twice: `git push origin 2>&1` was read as a
+# push of a branch named `2>&1`, and the block message told the author to run
+# /review-init for a branch that does not exist — an argument-parsing slip that
+# reads as a review failure.
+pt() { exloom_push_target_branches "$1" | tr '\n' ' ' | sed 's/ $//'; }
+ok "git push origin 2>&1 -> no refspec"          "$(pt 'git push origin 2>&1')" ""
+ok "git push -u origin 2>&1 -> no refspec"       "$(pt 'git push -u origin 2>&1')" ""
+ok "git push origin 1>&2 -> no refspec"          "$(pt 'git push origin 1>&2')" ""
+ok "git push origin &>out.txt -> no refspec"     "$(pt 'git push origin &>out.txt')" ""
+ok "git push origin >out 2>&1 -> no refspec"     "$(pt 'git push origin >out 2>&1')" ""
+ok "git push origin main:feat/z 2>&1 -> main"    "$(pt 'git push origin main:feat/z 2>&1')" "main"
+# And the forms that were already right must stay right.
+ok "git push origin feat/z 2>&1 -> feat/z"       "$(pt 'git push origin feat/z 2>&1')" "feat/z"
+ok "git push origin HEAD -> HEAD"                "$(pt 'git push origin HEAD')" "HEAD"
+ok "git push origin other-branch -> other-branch" "$(pt 'git push origin other-branch')" "other-branch"
+
 echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
 
 # Captured from a real dispatch, verbatim. On an async launch the payload carries
