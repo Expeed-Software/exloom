@@ -1005,6 +1005,82 @@ ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
 
 cd "$WORK" || exit 1
 
+echo "== dispatch gate: a reviewer round must be earned, not hand-written =="
+
+# Nothing distinguished a hand-written Agent(...) dispatch from one issued by
+# /review-complete — both produced identical receipts, so exloom recorded
+# hand-rolling as compliance. Measured: 7 of 676 checklists carry any receipt.
+# The author of this hook hand-dispatched six times in one day with the rule
+# against it loaded in context throughout.
+
+BEGIN="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/begin-review-round.sh"
+REQ="$HOOKS_ABS/require-command-dispatch.sh"
+dsp() { printf '%s' "$1" | bash "$REQ" >/dev/null 2>&1; echo $?; }
+L1D='{"tool_name":"Agent","tool_input":{"subagent_type":"exloom:l1-reviewer","prompt":"brief"}}'
+
+subrepo dispatch
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+printf 'true\n' > .claude/exloom-checks
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+
+ok "hand-dispatch with no token -> blocked" "$(dsp "$L1D")" "2"
+ok "a non-exloom agent is not this hook's business" \
+   "$(dsp '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","prompt":"x"}}')" "0"
+ok "a non-Task tool is ignored" \
+   "$(dsp '{"tool_name":"Read","tool_input":{"file_path":"x"}}')" "0"
+
+bash "$BEGIN" >/dev/null 2>&1
+ok "begin-review-round writes a token" \
+   "$([[ -f .claude/reviews/feat/plan.verdicts/dispatch.json ]] && echo yes || echo no)" "yes"
+ok "with a token covering HEAD -> dispatch allowed" "$(dsp "$L1D")" "0"
+
+# The token binds to a commit, like every other receipt: new code needs a new round.
+printf 'changed\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm moved >/dev/null 2>&1
+ok "token goes stale on a code commit -> blocked again" "$(dsp "$L1D")" "2"
+
+# Author-side checks gate the token. A reviewer spending round one on what a script
+# finds is a round you pay for and learn nothing from.
+subrepo dispatch2
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+printf 'false\n' > .claude/exloom-checks
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+bash "$BEGIN" >/dev/null 2>&1
+ok "a failing author-side check -> exit 1" "$?" "1"
+ok "...and NO token is written" \
+   "$([[ -f .claude/reviews/feat/plan.verdicts/dispatch.json ]] && echo yes || echo no)" "no"
+ok "...so dispatch stays blocked" "$(dsp "$L1D")" "2"
+
+# The documented escape must work and must record why.
+bash "$BEGIN" --skip-checks >/dev/null 2>&1
+ok "--skip-checks without --focus is refused" "$?" "1"
+bash "$BEGIN" --skip-checks --focus "the failing check is unrelated to this branch" >/dev/null 2>&1
+ok "--skip-checks with a reason -> authorised" "$?" "0"
+ok "...and the reason is recorded in the token" \
+   "$(grep -c 'unrelated to this branch' .claude/reviews/feat/plan.verdicts/dispatch.json 2>/dev/null | head -1)" "1"
+ok "...and the skip is flagged for a reviewer to see" \
+   "$(grep -c '"skipped":true' .claude/reviews/feat/plan.verdicts/dispatch.json 2>/dev/null | head -1)" "1"
+
+# --focus exists because "my brief was better than the agent's" is the reason every
+# session gave for hand-rolling. Removing the reason matters as much as blocking.
+subrepo dispatch3
+printf '# plan\n- src/one.go\n' > docs/plans/p.md
+printf 'true\n' > .claude/exloom-checks
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+bash "$BEGIN" --focus "concentrate on the parser seam" >/dev/null 2>&1
+ok "focus is carried in the token" \
+   "$(grep -c 'concentrate on the parser seam' .claude/reviews/feat/plan.verdicts/dispatch.json 2>/dev/null | head -1)" "1"
+ok "focus is surfaced to the session at dispatch time" \
+   "$(printf '%s' "$L1D" | bash "$REQ" 2>&1 | grep -c 'concentrate on the parser seam')" "1"
+
+# Opt-in and the documented bypass behave like every other exloom hook.
+mv .claude/exloom-gate.enabled .claude/gate-off
+ok "gate off -> dispatch not gated" "$(dsp "$L1D")" "0"
+mv .claude/gate-off .claude/exloom-gate.enabled
+ok "EXLOOM_REVIEW_SKIP=1 -> allowed" \
+   "$(EXLOOM_REVIEW_SKIP=1 bash -c 'printf "%s" "$0" | bash "$1" >/dev/null 2>&1; echo $?' "$L1D" "$REQ")" "0"
+
+cd "$WORK" || exit 1
+
 echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
 
 # The class, not the instances. Four rounds of findings were all one shape: the
