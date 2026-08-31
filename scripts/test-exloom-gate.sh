@@ -715,6 +715,45 @@ subrepo bind
 printf '# plan a\n- src/one.go\n' > docs/plans/a.md
 printf '# plan b\n- src/two.go\n' > docs/plans/b.md
 BVD=".claude/reviews/feat/plan.verdicts"
+echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
+
+# Captured from a real dispatch, verbatim. On an async launch the payload carries
+# no report at all — the reviewer has not run. v4.0.0/v4.0.1 recorded UNKNOWN
+# here, which the gate treats as "not approved", so every real dispatch in every
+# gate-enabled repo blocked with no path forward.
+#
+# UNKNOWN must mean "the reviewer stated no verdict" (their omission, blocking).
+# It must NOT mean "exloom could not observe one at this event" (our blindness).
+# The receipt records what WAS observed: a dispatch. The gate grandfathers that.
+subrepo asyncdisp
+ADV=".claude/reviews/feat/plan.verdicts"
+rm -rf .claude/reviews
+printf '%s' '{"session_id":"s","cwd":"/x","hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"description":"review","prompt":"review the diff","subagent_type":"exloom:l1-reviewer"},"tool_response":{"isAsync":true,"status":"async_launched","agentId":"a1","description":"review","resolvedModel":"claude-opus-5","outputFile":"/tmp/a1.output","canReadOutputFile":true},"tool_use_id":"t1","duration_ms":4}' \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "async launch -> a receipt is still written" \
+   "$([[ -f "$ADV/l1-reviewer.json" ]] && echo yes || echo no)" "yes"
+ok "async launch -> NO verdict key (not UNKNOWN)" \
+   "$(grep -c '"verdict"' "$ADV/l1-reviewer.json" 2>/dev/null | head -1)" "0"
+ok "async launch -> the dispatch commit is recorded" \
+   "$(grep -c "$(git rev-parse HEAD)" "$ADV/l1-reviewer.json" 2>/dev/null | head -1)" "1"
+
+# And the consequence that matters: it must not block.
+ACL=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$ACL")"
+printf '# c\n' > "$ACL"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
+ok "...and a dispatch-only receipt does NOT block the gate" "$?" "0"
+
+# A report that IS present but states no verdict is still UNKNOWN, still blocks.
+rm -rf .claude/reviews
+python3 -c "
+import json
+print(json.dumps({'tool_name':'Task','session_id':'s',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
+ 'tool_response':[{'type':'text','text':'I looked at it and it seems fine.'}]}))" \
+ | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "a real report with no VERDICT line -> still UNKNOWN" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$ADV/l1-reviewer.json" 2>/dev/null | tail -1)" "UNKNOWN"
+
 echo "== payload shape: the field the harness actually sends =="
 
 # The harness delivers a Task result as `tool_response`, a content-block array.

@@ -151,6 +151,23 @@ SCAN="$(_response_text)"
 # JSON-escaped newlines become real ones so line-anchored matching works.
 SCAN="$(printf '%s' "$SCAN" | sed 's/\\n/\n/g')"
 
+# ---------- is the report even available at this event? ----------
+# On an ASYNC dispatch, PostToolUse fires when the agent is LAUNCHED, not when it
+# finishes. The payload then carries
+#   "tool_response":{"isAsync":true,"status":"async_launched","outputFile":"..."}
+# and no report at all — the reviewer has not run yet.
+#
+# That must NOT be recorded as UNKNOWN. UNKNOWN means "the reviewer stated no
+# verdict", which correctly blocks. This is "exloom could not observe a verdict
+# at this event", which is our blindness, not the reviewer's omission. Recording
+# UNKNOWN here made every real dispatch block with no path forward.
+#
+# So when there is no report text, omit the verdict keys entirely and record what
+# WAS observed: a reviewer was dispatched at this commit. That is the receipt
+# shape exloom wrote before it recorded verdicts, and the gate grandfathers it.
+REPORT_SEEN=1
+[[ -n "$(printf '%s' "$SCAN" | tr -d '[:space:]')" ]] || REPORT_SEEN=0
+
 # ---------- what did the reviewer CONCLUDE? ----------
 # Parsed against what the SHIPPED agents actually print. Their output block is a
 # bare `VERDICT: APPROVED` or `VERDICT: REJECTED (n items)`.
@@ -293,6 +310,14 @@ done <<< "$SCAN"
 
 if [[ $n_found -gt 0 ]]; then
   echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
+fi
+
+if [[ $REPORT_SEEN -eq 0 ]]; then
+  printf '{"agent":"%s","subagent_type":"%s","head":"%s","at":"%s","session":"%s"}\n' \
+    "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
+    >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+  echo "exloom: recorded ${AGENT} DISPATCH receipt at ${HEAD_SHA:0:12} — the reviewer's report is not available at this event (async dispatch), so no verdict was recorded. Read the findings yourself before marking the checklist complete." >&2
+  exit 0
 fi
 
 printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
