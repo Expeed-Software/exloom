@@ -1,11 +1,15 @@
 ---
 name: review-gate
-description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, cross-layer contract check, adversarial review, runbook/rollback for Tier 3) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
+description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, runbook/rollback for Tier 3) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
 ---
 
 # Review Gate
 
-**This is exloom's one enforced mechanism — the rest of exloom is discipline a model can skip.** Every other skill is guidance the model reads and *chooses* to follow, and sometimes it won't. This gate is different: when it is turned on, the `Stop` and `PreToolUse` hooks are run by the Claude Code harness — not by the model. The `PreToolUse` hook *physically blocks* a `git push` / PR (shell **and** GitHub MCP), and the `Stop` hook blocks a completion claim it recognizes, until the tier's evidence is in `.claude/reviews/<branch>.md`. That is the difference between *hoping* review happened and *guaranteeing* it did, and it is the part of exloom you cannot reproduce by prompting. (Enforcement is text-based command/tool matching plus the checklist's git checks: it catches the common `git push` / `gh pr create` forms and the listed GitHub MCP tools; a deliberately obfuscated shell command or a raw API call can still evade it, and — because matching is textual and fail-closed — a benign command that literally contains the words `git push` / `gh pr create` (a commit message or echo about pushing) can occasionally be over-blocked during the review window (bypass with `EXLOOM_REVIEW_SKIP=1`, or rephrase). It's a cooperating-team gate with a documented `EXLOOM_REVIEW_SKIP` bypass, not an adversarial security boundary.)
+**This is exloom's one enforced mechanism — the rest of exloom is guidance.** When the gate is turned on, a `PreToolUse` hook run by the Claude Code harness — not by the model — *physically blocks* a `git push` or PR (shell **and** GitHub MCP) until the tier's evidence is in `.claude/reviews/<branch>.md`. That is the difference between *hoping* review happened and *knowing* it did, and it is the part of exloom you cannot reproduce by prompting.
+
+**One gate, at push.** Earlier versions also blocked completion claims with a `Stop` hook, froze the working tree during review, and gated the first source edit on an approved plan. All of that is gone. The `Stop` hook matched natural-language phrases, which drifts with every model release; the freeze and plan gates interrupted work far more often than they caught anything. Blocking the push is the one point where stopping is worth more than it costs.
+
+Enforcement is text-based command/tool matching plus the checklist's git checks: it catches the common `git push` / `gh pr create` forms and the listed GitHub MCP tools. A deliberately obfuscated shell command or a raw API call can still evade it, and a benign command that literally contains the words `git push` can occasionally be over-blocked (bypass with `EXLOOM_REVIEW_SKIP=1`, or rephrase). It is a cooperating-team gate, not an adversarial security boundary.
 
 ## Why this exists
 
@@ -34,8 +38,7 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 - **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
   Two rules make the receipt worth having: the pinned `.claude/exloom-test-command` must be **committed**, because its contents are `eval`d; and an unresolvable `--base` is refused rather than recorded.
 
-- **Plan and spec review, before execution.** The `block-unreviewed-execution` hook blocks the first source edit (including shell writes) on a branch carrying a plan or spec that no `plan-reviewer` receipt approves. The receipt binds to the document's **content hash**, so editing it after review invalidates the approval and it must be reviewed again — the freeze rule as a mechanism rather than a paragraph.
-  This exists because `reviewing-plans` opens with *"Plan author and executor are different people. No exceptions."* and shipped no agent and no receipt, so it degraded to self-review by default. A defect in a plan is reproduced by every regeneration of the code from it, which is exactly what breaks the premise that the spec is durable and the code is throwaway.
+**Where the cost goes, and why it is shaped this way.** Review accuracy holds at low effort, so the passes are split rather than repeated: `l1-reviewer` runs at **low** effort and is cheap enough for every commit; `adversarial-reviewer` and `security-auditor` run at **medium**, once, before push. An earlier version ran the whole panel at full effort and re-ran all of it on every fix commit, because receipts bind to the tip. That turned each fix into three more full reviews, and the extra rounds surfaced progressively thinner findings that were then treated as work. If you take one thing from this file: run the cheap pass often and the expensive pass once.
 
 What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
 
@@ -45,7 +48,7 @@ What this does **not** buy: it proves a reviewer ran, never that the review was 
 |---|---|---|
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
 | <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + proof-is-tested + checklist |
-| User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + cross-layer contract check + adversarial review |
+| User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + adversarial review |
 | Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + exact rollback command + a reversal test in CI |
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight — the gate derives the minimum from the diff and blocks a downgrade, so this is enforced, not advised. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
@@ -81,9 +84,11 @@ If the change is not user-facing (e.g. a background service refactor), the smoke
 
 `/smoke-test` walks through this interactively and fills the section with real commands and output.
 
-### Step 3 — Cross-layer contract check (Tier 2+)
+### Step 3 — Adversarial review (Tier 2+)
 
-Dispatch the `cross-layer-auditor` agent. Its grep discipline is:
+Dispatch the `adversarial-reviewer` agent, once, before push. This carries the highest signal of any review type. The prompt is hostile by design and lives in the agent file; in short: assume every previous review missed things, try to break the change, look specifically for the integration gaps a per-file review cannot see.
+
+Include the cross-layer contract check in that same dispatch — it used to be a separate agent, and splitting it bought nothing but a second full pass:
 
 1. For every field the frontend persists in this change: grep the backend for reads of that field name. Report fields with zero backend readers as orphans.
 2. For every new API endpoint added: grep the frontend for the URL path or the generated client call. Report endpoints with zero frontend callers as orphans.
@@ -93,9 +98,7 @@ Dispatch the `cross-layer-auditor` agent. Its grep discipline is:
 
 Orphans are not automatically bugs — some are intentional (fields persisted for audit-only, endpoints for future clients). Each orphan must be either fixed or annotated in the checklist with the intentional-orphan reason.
 
-### Step 4 — Adversarial review (Tier 2+)
-
-Dispatch the `adversarial-reviewer` agent. This tends to carry the highest signal of any review type. The prompt is hostile by design and lives in the agent file; in short: assume every previous review missed things, try to break the change, look specifically for the integration gaps that per-layer reviewers couldn't see.
+This is the highest-yield check in the protocol, because the dominant defect shape is a producer changed without its consumer: one side of a seam was edited and the other was not.
 
 Implementer addresses every Blocking finding. Non-blocking findings go to the checklist with disposition (fixed / deferred with reason / won't fix with reason).
 
@@ -103,7 +106,7 @@ Implementer addresses every Blocking finding. Non-blocking findings go to the ch
 
 Dispatch the `security-auditor` agent. It runs the repo's security scanners — secrets detection, a dependency-vulnerability audit, and static analysis — and reviews the diff for the AI-generated-code failure modes: injection, missing authorization, secrets/PII exposure, insecure deserialization, SSRF, weak crypto, unsafe defaults, and hallucinated or vulnerable dependencies. Every finding carries a severity, a source→sink, and a confidence (CONFIRMED vs SUSPECTED), and the tool output is pasted as evidence.
 
-This is a **first pass, not a guarantee** — it never certifies code "secure," only "no issues found by the checks that ran." A Critical or High finding blocks the change until it is fixed or risk-accepted in writing. Full method: `exloom:security-review`.
+This is a **first pass, not a guarantee** — it never certifies code "secure," only "no issues found by the checks that ran." A Critical or High finding blocks the change until it is fixed or risk-accepted in writing. The full method lives in the `security-auditor` agent.
 
 ### Step 6 — Runbook + rollback (Tier 3 only)
 

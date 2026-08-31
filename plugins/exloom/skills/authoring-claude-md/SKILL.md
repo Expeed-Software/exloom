@@ -92,7 +92,7 @@ Bad pattern: writing aspirational conventions. If the tests use JUnit 4, documen
 
 Add the Baselines section. Standard baselines to include:
 - Planning: use `exloom:planning-for-handoff` for non-trivial changes (3+ steps or architectural decisions)
-- Review: run `exloom:auditing-plan-fidelity` before `exloom:reviewing-code`
+- Review: run `/review-complete` before opening a PR
 - New code follows your org's naming standards; existing code is not refactored to match
 - Test coverage: 80% line coverage for new code (not retroactive)
 - Secrets: environment variables only, never committed to source control
@@ -220,8 +220,8 @@ See [failure-modes.md](failure-modes.md).
 See [worked-example.md](worked-example.md).
 ## Integration
 
-- **You arrive here from:** starting work on a new-to-you repo, or `exloom:exploring-codebase` discovers no CLAUDE.md exists and recommends creating one.
+- **You arrive here from:** starting work on a new-to-you repo that has no CLAUDE.md exists and recommends creating one.
 - **You leave here toward:** the CLAUDE.md is committed and becomes the project's working constitution. Future skills read it for project context — every other skill benefits from a well-authored CLAUDE.md.
 - **If the CLAUDE.md reveals a baseline conflict worth standardizing:** route to `exloom:capturing-learnings` so the conflict, its context, and its resolution are preserved for future projects facing the same situation.
-- **Related skill:** `exloom:switching-projects` reads CLAUDE.md as its primary input. A thorough CLAUDE.md directly improves how fast a developer can switch into a project with full Claude assistance.
+- **Why it matters:** CLAUDE.md is the first thing read when anyone — person or model — picks the repo up cold. A thorough one directly improves how fast someone switches into the project with full Claude assistance.
 - **Templates reference:** `../../assets/claude-md-templates/`

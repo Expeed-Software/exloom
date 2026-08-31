@@ -155,7 +155,7 @@ review evidence the authoring session does not author, which is the entire reaso
 the gate trusts them.
 
 To produce one, dispatch the reviewer for real:
-  exloom:l1-reviewer | exloom:cross-layer-auditor
+  exloom:l1-reviewer
   exloom:adversarial-reviewer | exloom:security-auditor
 
 Then commit the receipt alongside the checklist (git add/commit are not blocked).

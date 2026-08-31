@@ -15,11 +15,12 @@ It sits in the same family as other spec-driven / structured-agentic development
 
 ## Why exloom
 
-Claude Code is fast. On a team, fast-without-discipline produces plans nobody else can follow, "done" that wasn't, and reviews that rubber-stamp. exloom adds the discipline that makes AI-assisted work **provable and handoff-safe**:
+Claude Code is fast, and the model already plans, tests, and reviews its own work without being told. What it cannot do is produce evidence about itself that anyone else should trust. exloom produces that evidence:
 
-- **The plan is a contract.** `planning-for-handoff` produces a plan a different person can execute without guessing; `reviewing-plans` approves it; `executing-handoff-plans` logs every deviation instead of improvising; `auditing-plan-fidelity` checks that what shipped matches what was planned.
-- **Review is a panel, not a rubber stamp.** Correctness (`l1-reviewer`), cross-layer integration (`cross-layer-auditor`), hostile adversarial (`adversarial-reviewer`), and **security** (`security-auditor` — scanners + a review for the security flaws AI code tends to introduce) review agents, plus a **boot-and-prove smoke test** — you have to actually run the change and show the output, not assert it works.
-- **"Done" needs evidence.** `proving-done` is an eight-item checklist that wants real command output, not a feeling.
+- **The plan is a contract.** `planning-for-handoff` produces a plan a different person can execute without guessing, committed so the next session can find it.
+- **Tests are proved, not claimed.** `prove-change-is-tested.sh` runs your suite with your change removed and your tests kept. If they still pass, they do not test your change. This is an experiment, not a judgement, and it costs zero model tokens — the highest-value thing in the plugin.
+- **Review leaves a receipt.** A reviewer dispatch writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. The model cannot write that file. "Was this reviewed?" is answered by an event, not a checkbox.
+- **One gate, at push.** Not at "done", not at the first edit, not during review. Blocking the push is the one interruption worth its cost.
 - **Brownfield-first.** Your existing conventions win — exloom defers to the repo's `CLAUDE.md`; its defaults only fill gaps.
 
 ## How it works: skills nudge, one gate enforces
@@ -43,11 +44,10 @@ That's the difference between *hoping* review happened and *guaranteeing* it did
 ## The loop
 
 ```
-brainstorming → planning-for-handoff → [reviewing-plans] → isolating-execution → executing-handoff-plans (TDD)
-   → proving-done → [auditing-plan-fidelity] → reviewing-code / review-gate → requesting-review
+brainstorming → planning-for-handoff → [execute] → review-gate → push
 ```
 
-The bracketed steps apply when work crosses from one person to another. Solo? The same loop, lighter — but every plan is still written handoff-ready, because future-you is a different person.
+Four artifacts, one gate. The plan is written handoff-ready even solo, because future-you is a different person. exloom does not tell you how to debug, how to write tests, or how to be careful — the model does that already. It produces the evidence that the next person needs and the model cannot self-certify.
 
 ## Install
 
@@ -84,7 +84,7 @@ New-Item -ItemType Directory -Force .claude | Out-Null
 New-Item -ItemType File -Force .claude/exloom-gate.enabled | Out-Null
 ```
 
-Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone declare done or push until the checklist is complete, committed, and bound to the reviewed code commit. The gate applies on feature branches only — work committed directly to `main`/`master`/`dev`/`develop` is deliberately not gated, so isolate onto a feature branch first (`exloom:isolating-execution`). A repo can extend that protected set with its own integration branches, or exempt throwaway branches, using two optional **committed** glob files: `.claude/exloom-protected-branches` (e.g. add `pre-dev`) and `.claude/exloom-skip-branches` (e.g. `spike/*`, `tmp/*`). Both are honored only when committed, and every skip is logged; keep integration/merge branches gated (a botched merge is new, unreviewed code). The gate covers `git push` (including pushes of a different branch than the one checked out) / `gh pr create` **and** the common GitHub MCP push/PR tools (`push_files`, `create_pull_request`, …), so switching to the MCP integration doesn't dodge it; a push through some other MCP server, a raw API call, or a deliberately obfuscated shell command could still slip by. Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.
+Commit that marker and the whole team gets the gate. Then `/review-init` starts a branch's checklist, `/smoke-test` captures real evidence, and `/review-complete` runs the final gate. Those commands intentionally create checklist-only commits so the evidence lands in the PR. The hooks refuse to let anyone push until the checklist is complete, committed, and bound to the reviewed code commit. The gate applies on feature branches only — work committed directly to `main`/`master`/`dev`/`develop` is deliberately not gated, so start on a feature branch. A repo can extend that protected set with its own integration branches, or exempt throwaway branches, using two optional **committed** glob files: `.claude/exloom-protected-branches` (e.g. add `pre-dev`) and `.claude/exloom-skip-branches` (e.g. `spike/*`, `tmp/*`). Both are honored only when committed, and every skip is logged; keep integration/merge branches gated (a botched merge is new, unreviewed code). The gate covers `git push` (including pushes of a different branch than the one checked out) / `gh pr create` **and** the common GitHub MCP push/PR tools (`push_files`, `create_pull_request`, …), so switching to the MCP integration doesn't dodge it; a push through some other MCP server, a raw API call, or a deliberately obfuscated shell command could still slip by. Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env.
 
 ## Try the gate in 2 minutes
 
@@ -107,12 +107,18 @@ Two more worth trying, because they are what stops a checklist from being self-w
 
 ## What's inside
 
-- **20 skills** — the discipline loop (`brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `orchestrating-execution` for multi-agent execution, `proving-done`, `reviewing-code`, `security-review`), handoff (`reviewing-plans`, `auditing-plan-fidelity`, `review-gate`), and support (`systematic-debugging`, `test-driven-development`, `exploring-codebase`, `authoring-claude-md`, `capturing-learnings`, `switching-projects`, `designing-ui`, `requesting-review`, `using-exloom`).
-- **Isolated execution** — `isolating-execution` puts work on a gated feature branch (or a dedicated worktree); in the multi-agent mode, each parallel implementer gets its own worktree, gated then integrated back.
-- **4 review agents** — `l1-reviewer`, `cross-layer-auditor`, `adversarial-reviewer`, `security-auditor`.
-- **4 commands** — `/review-init`, `/smoke-test`, `/review-complete`, and `/review-cleanup` (archive orphaned checklists whose branch is gone).
-- **Opt-in hooks** — the enforcement gate.
+- **6 skills** — `brainstorming` (spec), `planning-for-handoff` (plan), `review-gate` (the gate), `capturing-learnings`, `authoring-claude-md`, and `using-exloom` (the index).
+- **3 review agents** — `l1-reviewer` at low effort for the per-commit pass, `adversarial-reviewer` and `security-auditor` at medium effort for the single pre-push pass. The adversarial dispatch carries the cross-layer contract check.
+- **1 proof script** — `prove-change-is-tested.sh`. Runs your suite at the base commit, at the base with your tests added, and with the change and tests together. If your tests pass without your change, they do not test it. Costs zero model tokens.
+- **4 commands** — `/review-init`, `/smoke-test`, `/review-complete`, `/review-cleanup`.
+- **3 opt-in hooks** — record a receipt on real reviewer dispatch, deny writing receipts by hand, block the push without evidence.
 - **CLAUDE.md templates** — starting points for common stacks.
+
+### What was removed, and why
+
+Version 4 cut the plugin roughly in half. Gone: the `Stop` hook that matched natural-language completion claims, the review freeze and its state machine, the plan-approval gate on the first source edit, the dispatch-token protocol, the `SessionStart` context injection, and fourteen skills that told the model how to think — TDD, systematic debugging, proving-done, plan-fidelity auditing, and the rest.
+
+They were built for a model that would skip work if permitted. Current models verify their own work unprompted, and Anthropic's guidance is explicit that carrying over verification scaffolding causes over-verification rather than better results. Enforcement that duplicates what the model already does is not free: it costs on every iteration, and the machinery generates its own defects. What survives is the part prompting cannot reproduce — an artifact the model did not author.
 
 ## Honest scope
 

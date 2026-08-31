@@ -72,13 +72,8 @@ SUBAGENT="$(_field tool_input.subagent_type)"
 AGENT=""
 case "$SUBAGENT" in
   *l1-reviewer)          AGENT="l1-reviewer" ;;
-  *cross-layer-auditor)  AGENT="cross-layer-auditor" ;;
   *adversarial-reviewer) AGENT="adversarial-reviewer" ;;
   *security-auditor)     AGENT="security-auditor" ;;
-  # plan-reviewer covers plans AND specs — see agents/plan-reviewer.md. There is
-  # deliberately no `spec-reviewer`: accepting a name no agent answers to would
-  # record receipts for a dispatch that cannot resolve.
-  *plan-reviewer)        AGENT="plan-reviewer" ;;
   *) exit 0 ;;
 esac
 
@@ -329,84 +324,7 @@ while IFS= read -r fline; do
 done <<< "$SCAN"
 
 if [[ $n_found -gt 0 ]]; then
-  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) — run scripts/findings-ledger.sh from the repo root" >&2
-fi
-# ---------- artifact reviewers bind to CONTENT, not to a commit ----------
-# A plan or spec is reviewed and then executed, usually before anything is
-# committed — so a commit SHA cannot express "this review covers this document".
-# The blob hash can, and it invalidates itself the moment the document is edited.
-# That is the FREEZE rule as a mechanism rather than a paragraph.
-#
-# The artifact is named in the dispatch prompt. If the prompt does not name one,
-# NO artifact is recorded — the receipt then covers nothing and the execution
-# gate stays shut. That is deliberate: a reviewer dispatched without naming what
-# it reviewed has not produced reviewable evidence.
-ARTIFACTS=""
-case "$AGENT" in
-  plan-reviewer)
-    PROMPT="$(_field tool_input.prompt)"
-    # Normalise before matching. Reproduced in a scratch repo: the previous
-    # boundary class excluded `/` and `.`, so `./docs/plans/p.md` and an ABSOLUTE
-    # path both matched nothing — and this harness's own guidance tells agents to
-    # use absolute paths, which made the correct-looking dispatch the failing one.
-    PROMPT="${PROMPT//\\\\//}"
-    PROMPT="${PROMPT//\\//}"
-    PROMPT="${PROMPT//"$REPO_ROOT"\//}"
-    PROMPT="${PROMPT// .\// }"
-    # No SPACE in the charset. Allowing one so filenames could contain spaces made
-    # the match greedy across a sentence: "Per docs/plans/a.md and docs/plans/b.md"
-    # matched as a SINGLE bogus path, so a prompt naming two plans produced neither.
-    # Record EVERY plan/spec path named, not `head -1`. "Per docs/specs/s.md,
-    # review docs/plans/p.md" recorded the spec and left the plan uncovered —
-    # a real review that reads as no review.
-    # The artifact must be named by the REVIEWER, not by the prompt. Taking it from
-    # the prompt meant the party being gated chose what its own approval covered:
-    # "Per docs/plans/a.md and docs/plans/b.md, check the heading style" minted
-    # approval for BOTH plans off one cosmetic review. Recording every named path
-    # made it strictly worse — one author-controlled false positive became N.
-    #
-    # The reviewer's REVIEWED: lines are authoritative. The prompt is used only to
-    # intersect, so a reviewer also cannot approve something nobody asked it to read.
-    # Both sides go through the SAME extractor, or they cannot intersect: the
-    # prompt side is anchored at `docs/`, so `./docs/plans/p.md` and an absolute
-    # `E:/repo/docs/plans/p.md` both normalise to `docs/plans/p.md`. Taking the
-    # reviewer's side with `awk '{print $1}'` kept the `./`, and an honest review
-    # that echoed the path back exactly as dispatched covered nothing.
-    _artifact_paths() {
-      grep -oE '(docs/(exloom/)?(plans|specs)|\.claude/plans)/[A-Za-z0-9._()/-]+\.md' \
-        | sed 's/[[:space:]]*$//' | sort -u
-    }
-    REVIEWED_LINES="$(printf '%s\n' "$SCAN" \
-      | sed -n 's/^[[:space:]*_-]*REVIEWED:[[:space:]]*//p' \
-      | tr -d '`' | _artifact_paths)"
-    ARTIFACTS="$(printf '%s' "$PROMPT" | _artifact_paths)"
-    if [[ -n "$REVIEWED_LINES" ]]; then
-      ARTIFACTS="$(printf '%s\n' "$ARTIFACTS" | grep -Fxf <(printf '%s\n' "$REVIEWED_LINES") 2>/dev/null || true)"
-      [[ -n "$ARTIFACTS" ]] || echo "exloom: plan-reviewer named no artifact that was also in the dispatch — receipt covers nothing" >&2
-    else
-      # No REVIEWED: line means the reviewer did not state what it read. Cover
-      # nothing rather than trusting the author's prompt; the gate stays shut.
-      ARTIFACTS=""
-      echo "exloom: plan-reviewer report carried no 'REVIEWED: <path>' line — receipt covers no artifact and will not unlock execution" >&2
-    fi
-    ;;
-esac
-
-if [[ -n "$ARTIFACTS" ]]; then
-  WROTE=0
-  while IFS= read -r art; do
-    [[ -n "$art" && -f "$art" ]] || continue
-    ahash="$(git hash-object "$art" 2>/dev/null || true)"
-    [[ -n "$ahash" ]] || continue
-    printf '{"agent":"%s","subagent_type":"%s","head":"%s","artifact":"%s","artifact_hash":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
-      "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$art" "$ahash" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" \
-      >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
-    echo "exloom: recorded ${AGENT} receipt for ${art} @ ${ahash:0:12} — verdict ${VERDICT}" >&2
-    [[ "$VERDICT" == "APPROVED" ]] || \
-      echo "exloom: verdict is ${VERDICT}, so this does NOT unlock execution. Address the findings and re-dispatch (UNKNOWN means no 'VERDICT: APPROVED' line was found in the reviewer's report)." >&2
-    WROTE=1
-  done <<< "$ARTIFACTS"
-  [[ $WROTE -eq 1 ]] && exit 0
+  echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
 fi
 
 printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
@@ -421,11 +339,6 @@ elif [[ "$ROUND_NEEDED" == "UNKNOWN" ]]; then
   echo "exloom: ${AGENT} gave no 'ROUND NEEDED AFTER FIX:' line — treated as YES, because a reviewer that did not answer has not told you the loop can stop." >&2
 fi
 
-case "$AGENT" in
-  plan-reviewer)
-    echo "exloom: recorded ${AGENT} receipt but the dispatch prompt named no plan/spec file — this receipt covers NO artifact and will not unlock execution. Re-dispatch naming the exact path." >&2
-    exit 0 ;;
-esac
 
 echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${AGENT}.json) — commit it with the checklist" >&2
 exit 0

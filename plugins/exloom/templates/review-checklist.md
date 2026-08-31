@@ -33,8 +33,7 @@
 - Result: `<PROVED / NOT_PROVED>`
 - If NOT_PROVED: `<what is missing — a test that fails without this change>`
 
-## Cross-layer contract check (Tier 2+)
-- Verdict receipt: `cross-layer-auditor.json` (written by exloom on dispatch)
+## Cross-layer contract check (Tier 2+) — part of the adversarial dispatch
 - Grep 1 — Orphan fields (UI writes → backend reads):
 - Grep 2 — Orphan endpoints (backend declares → frontend calls):
 - Grep 3 — Unhandled events (emitted → handled):

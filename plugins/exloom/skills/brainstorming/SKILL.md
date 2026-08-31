@@ -42,7 +42,7 @@ what exists before proposing what should exist.
 **How to do it well:** Read CLAUDE.md and README for conventions. Scan recent
 git history (20-30 commits) for team patterns. Identify tech stack and
 architecture. Search for features similar to the request — by name, concept,
-and problem. If the codebase is unfamiliar, invoke `exloom:exploring-codebase`.
+and problem. If the codebase is unfamiliar, read it before proposing anything.
 Check the test suite for testing patterns and coverage expectations.
 
 **What bad looks like:** Asking "what framework are you using?" when the answer
@@ -238,13 +238,13 @@ See [worked-example.md](worked-example.md).
 ## Integration
 
 - **You arrive here from:** a user request, a ticket, an idea, a product
-  requirement, or during `exloom:executing-handoff-plans` when a task needs design
+  requirement, or mid-execution when a task turns out to need design
   work not anticipated in the original plan.
 - **You leave here toward:** `exloom:planning-for-handoff` — always. Never directly
   to implementation. The spec is an input to a plan, not an execution artifact.
   Skipping plans breaks the handoff chain and makes execution unauditable.
 - **During Step 1:** If the project is unfamiliar, invoke
-  `exloom:exploring-codebase` to build a mental model before brainstorming.
+  read the surrounding code to build a mental model before brainstorming.
 - **During any step:** If brainstorming reveals a learning about the codebase or
   team conventions, route through `exloom:capturing-learnings` so knowledge
   persists beyond this session.

@@ -131,4 +131,4 @@ Since `payments-service` is a repo the team owns, no PR is needed for the CLAUDE
 ## Related Skills
 
 - `exloom:authoring-claude-md` — the primary destination for repo-specific learnings
-- `exloom:systematic-debugging` — debugging sessions often produce learnings worth capturing
+- Debugging sessions often produce learnings worth capturing — reach for this skill when one resolves

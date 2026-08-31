@@ -3,7 +3,7 @@
 Extracted from SKILL.md so the skill loads lean. This is a full worked example.
 
 
-**Scenario:** Brownfield mode on an existing Node.js Express API with TypeScript. The developer just joined this project and ran `exloom:exploring-codebase`, which flagged the absence of a CLAUDE.md.
+**Scenario:** Brownfield mode on an existing Node.js Express API with TypeScript. The developer just joined this project and found it has no CLAUDE.md.
 
 **Step 1 — Detect stack.**
 

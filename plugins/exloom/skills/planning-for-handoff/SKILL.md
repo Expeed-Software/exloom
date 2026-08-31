@@ -17,7 +17,7 @@ Even if you are executing your own plan — solo path, no handoff — the same r
 
 Follow these 9 steps in order. Do not skip steps — each one exists because skipping it causes specific, predictable failures described in the Failure Modes section below.
 
-**Where the plan lives.** Save the plan where this repo keeps plans: if the repo's CLAUDE.md (or the user) specifies a location — e.g. `.claude/plans/current.md` — use that; otherwise default to `docs/exloom/plans/YYYY-MM-DD-<topic>-plan.md`. Commit it so it is reviewable and so `exloom:reviewing-plans`, `exloom:executing-handoff-plans`, and `exloom:auditing-plan-fidelity` can find it.
+**Where the plan lives.** Save the plan where this repo keeps plans: if the repo's CLAUDE.md (or the user) specifies a location — e.g. `.claude/plans/current.md` — use that; otherwise default to `docs/exloom/plans/YYYY-MM-DD-<topic>-plan.md`. Commit it so it is reviewable and so the person who executes it — including a future session — can find it.
 
 ### Step 1: Start from a spec
 
@@ -159,10 +159,10 @@ See [worked-example.md](worked-example.md).
 ## Integration
 
 - **You arrive here from:** `exloom:brainstorming` (with an approved spec) or from a requirements document / ticket with clear scope
-- **You leave here toward:** `exloom:reviewing-plans` (if the plan will be handed off to a different executor) or `exloom:executing-handoff-plans` (if you are executing your own plan)
-- **Plan structure:** a handoff plan has 11 sections, in this order — Metadata, Goal, Acceptance Criteria, Files to Touch, Existing Patterns to Follow, Edge Cases, Non-Goals, Executor FAQ, Tasks, Review Checklist, and an initially-empty Deviation Log. The Process steps above produce the core — Acceptance Criteria, Non-Goals, Files to Touch, Existing Patterns to Follow, Edge Cases, Executor FAQ, and Tasks; add Metadata and a one-paragraph Goal at the top, a Review Checklist agreed with the reviewer, and the empty Deviation Log at the end. `exloom:reviewing-plans` checks all 11.
+- **You leave here toward:** execution, then `exloom:review-gate` when closing. If the plan will be handed to a different executor, have a human read it first.
+- **Plan structure:** a handoff plan has 11 sections, in this order — Metadata, Goal, Acceptance Criteria, Files to Touch, Existing Patterns to Follow, Edge Cases, Non-Goals, Executor FAQ, Tasks, Review Checklist, and an initially-empty Deviation Log. The Process steps above produce the core — Acceptance Criteria, Non-Goals, Files to Touch, Existing Patterns to Follow, Edge Cases, Executor FAQ, and Tasks; add Metadata and a one-paragraph Goal at the top, a Review Checklist agreed with the reviewer, and the empty Deviation Log at the end. A plan missing any of the 11 is not handoff-ready.
 - **Commit messages:** follow this repo's existing commit convention
-- **Related skills:** `exloom:auditing-plan-fidelity` (checks execution against plan), `exloom:reviewing-code` (reviews the output)
+- **Related skills:** `exloom:review-gate` (the evidence gate at completion), `exloom:brainstorming` (reviews the output)
 
 The handoff path matters. If you are handing the plan to someone else, `reviewing-plans` catches structural problems before the executor starts — missing file paths, vague tasks, uncovered spec requirements. If you are executing your own plan, you still benefit from the self-review in Step 9, but you can proceed directly to execution.
 

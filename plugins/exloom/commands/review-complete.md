@@ -54,11 +54,10 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 
   It runs the suite three times — at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass). A `NOT_PROVED` receipt does not satisfy the gate; fix the tests rather than re-running.
 
-  This applies to **every tier from 1 up**, including Tiers 2 and 3. It was enforced by the hooks and named in none of the tier lists, so a session could fill this file correctly, tick every box, commit, and then be blocked at Stop and at push by a check nothing had mentioned.
+  This applies to **every tier from 1 up**, including Tiers 2 and 3. It was enforced by the hooks and named in none of the tier lists, so a session could fill this file correctly, tick every box, commit, and then be blocked at push by a check nothing had mentioned.
 
 ### Tier 2 required (Tier 1 +)
-- Cross-layer contract check: `cross-layer-auditor.json` receipt present, grep output pasted for fields / endpoints / events / columns / config keys, orphan list resolved (fixed or annotated intentional).
-- Adversarial review: `adversarial-reviewer.json` receipt present, findings listed with category, resolution per finding.
+- Adversarial review: `adversarial-reviewer.json` receipt present, findings listed with category, resolution per finding. This dispatch also carries the cross-layer contract check (fields / endpoints / events / columns / config keys); paste the grep output and resolve the orphan list.
 
 ### Tier 3 required (Tier 2 +)
 - Security review: `security-auditor.json` receipt present, tool output pasted, findings dispositioned.
@@ -93,29 +92,15 @@ For each missing section:
 - Smoke test missing → run `/smoke-test`.
 - Proof receipt missing, stale, or `NOT_PROVED` → run `prove-change-is-tested.sh` (above). If it reports NOT PROVED, the fix is a test that fails without your change — not another run.
 - L1 receipt missing or stale → dispatch the `exloom:l1-reviewer` agent now against the current diff.
-- Cross-layer receipt missing or stale → dispatch the `exloom:cross-layer-auditor` agent now.
 - Adversarial receipt missing or stale → dispatch the `exloom:adversarial-reviewer` agent now.
 - Security receipt missing or stale → dispatch the `exloom:security-auditor` agent now.
 - Runbook missing → ask the user for the path or tell them to write it.
 
-**Authorise the round before dispatching anything.** `require-command-dispatch.sh` denies every reviewer `Task` unless a dispatch token covers the current HEAD, and the only thing that writes that token is:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/begin-review-round.sh"
-```
-
-Run it once, before the first dispatch. It runs the author-side checks first and authorises dispatch only if they pass — so a round never starts on a tree that does not build. If this round is pointed at something specific, pass it and hand the same text to every reviewer verbatim:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/begin-review-round.sh" --focus "concentrate on X"
-```
-
-Skipping this is not a shortcut; it is a deadlock. The command used to instruct a dispatch that the hook then denied, naming a script that appeared in no command or skill — a session following this file to the letter could not get past it.
-
 Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
 
-**Re-authorise after fixing findings.** The token covers one commit. Once you commit fixes, HEAD moves, the token no longer covers it, and dispatch is denied again — correctly, because the receipts are now stale too. Run `begin-review-round.sh` again for the next round.
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
+
+**Cost discipline.** `l1-reviewer` runs at low effort and is cheap enough to re-run per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push — not after every fix. Re-running the full panel on each fix commit is what turns a two-round change into a nine-round one.
 
 Wait for the user. Do NOT mark complete while anything is missing.
 

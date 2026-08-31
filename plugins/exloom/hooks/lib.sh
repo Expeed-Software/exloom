@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# exloom — shared hook library. SOURCED by verify-review.sh and
-# block-unverified-push.sh; never executed directly. Keeping the checklist
+# exloom — shared hook library. SOURCED by block-unverified-push.sh and
+# protect-verdicts.sh; never executed directly. Keeping the checklist
 # validation, branch classification, and JSON extraction in one place means the
 # Stop hook and the push gate can never silently disagree about what "complete"
 # means (they used to duplicate ~150 lines).
@@ -349,8 +349,8 @@ exloom_required_reviewers() {
   local tier="$1" extra="${2:-}" list=""
   case "$tier" in
     0|1) list='l1-reviewer' ;;
-    2)   list='l1-reviewer cross-layer-auditor adversarial-reviewer' ;;
-    3)   list='l1-reviewer cross-layer-auditor adversarial-reviewer security-auditor' ;;
+    2)   list='l1-reviewer adversarial-reviewer' ;;
+    3)   list='l1-reviewer adversarial-reviewer security-auditor' ;;
   esac
   if [[ "$extra" == "security" && "$list" != *security-auditor* ]]; then
     list="$list security-auditor"
@@ -651,7 +651,8 @@ pick one:
   2. GENUINELY SEPARATE — say why this defect is unrelated to the earlier one
      despite matching it.
 
-Run: bash \"$EXLOOM_LIB_DIR/../scripts/findings-ledger.sh\""
+The findings are recorded per reviewer under the verdicts directory, one JSON
+line each, in <agent>.findings.jsonl."
   return 2
 }
 
