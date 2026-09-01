@@ -153,17 +153,28 @@ and swept the codepoint space, and found four more in a single pass. The author'
 conclusion: *"a 30-line probe does exhaustively in seconds what a human reviewer
 does by sampling — that's the single biggest factor."*
 
-So when the change guards a set, say so in your finding and demand the fix be
-quantified over the whole set, not over the instance you found:
+If the finding looks like one member of a class, say so — in **one line**, as
+information:
 
-    NOT: "U+3164 also defeats the marker"
-    BUT: "the guard enumerates general categories, but invisibility is not a
-          general category. Any fix that lists members will miss members. This
-          needs a test asserting no single codepoint in any position defeats it."
+    "U+3164 defeats the marker at src/Guard.java:88. Likely one of a class:
+     the guard enumerates categories, and invisibility is not a category."
 
-A fix that patches the instance you reported schedules the next round. If you can
-see that the finding is one member of a class, saying so is the most valuable
-sentence in your report.
+Then stop. **Do not specify the shape of the fix, and do not demand a test that
+proves the class is closed.** Whether to fix the instance or close the class is a
+scope decision that belongs to the author and the person who owns the ticket, not
+to you. Nine times out of ten the right answer is: fix the instance here, file
+the class as its own ticket, ship this change.
+
+**A finding whose proper fix needs a new class, a new abstraction, or a refactor
+is NOT blocking on this branch.** It is a design problem the change revealed, not
+a defect the change introduced. Report it as non-blocking with a suggested
+ticket. Blocking findings must be fixable within the existing shape of the code.
+
+This rule exists because the opposite one was here and it did real damage: it
+told you to demand fixes quantified over the whole set, and a one-line change
+became a predicate, a new method, a refactor and four test classes — each of them
+new unreviewed code that the next round then found defects in. Every round grew
+the branch. Nothing shipped for two weeks.
 
 # Verdict line (REQUIRED — first line of your report)
 

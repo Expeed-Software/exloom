@@ -64,8 +64,10 @@
 
 <!-- Keep examples OUT of the section below: exloom scans it for a cite and reads
      two lines past it for a keyword, so an example would dispose a real finding.
-     Each entry is `FILE:LINE  FIXED THE CLASS: name the test` or
-     `FILE:LINE  GENUINELY SEPARATE: why it is unrelated`. -->
+     Each entry is FILE:LINE followed by one of FIXED THE INSTANCE (and where the
+     class is tracked), DEFERRED (with the ticket), FIXED THE CLASS (name the
+     test), or GENUINELY SEPARATE (why it is unrelated). Fixing the instance and
+     tracking the class is a normal answer, not a lesser one. -->
 
 ## Re-finds (the same finding reported in more than one round)
 

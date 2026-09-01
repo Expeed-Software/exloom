@@ -111,6 +111,19 @@ The gate prints how far behind they are (`approved 9e1d992 — 3 commit(s) have 
 
 **Cost discipline.** `l1-reviewer` runs at low effort and is cheap enough to re-run per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push — not after every fix. Re-running the full panel on each fix commit is what turns a two-round change into a nine-round one.
 
+## How to respond to a finding
+
+Deliver what was asked, at the scope intended. Make routine judgment calls yourself, and check in only when different readings of the request would lead to materially different work. If the request seems mistaken or a better approach exists, say so in a sentence and continue with the task as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task, and stop short of actions that are clearly beyond what was asked.
+
+Applied to a review finding, that means:
+
+- **A finding is a defect report, not a design brief.** Fix what is cited, at the line that is cited.
+- **Before writing a new file, a new class, a new method, or a new test class in response to a finding — stop and ask.** Say what the finding is, what the minimal fix is, and what you would add beyond it. Let the user choose.
+- **The branch should be roughly the size it was when review started.** If it is growing each round, the fixes are exceeding the findings, and that is the failure — not a sign of thoroughness.
+- **A finding that needs architecture goes to a ticket**, not into this branch. Record it in the checklist as deferred with the ticket, and move on.
+
+A one-line change should end as a one-line change. Four test classes for one config key is not diligence; it is scope expansion wearing its clothes, and each addition is unreviewed code that generates the next round of findings.
+
 Wait for the user. Do NOT mark complete while anything is missing.
 
 ## Step 5 — If everything is present

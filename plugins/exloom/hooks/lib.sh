@@ -744,7 +744,7 @@ exloom_check_refinds() {
       if [[ -n "$refind_section" ]]; then
         if printf '%s\n' "$refind_section" \
            | grep -A2 -F -- "$cite" \
-           | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE'; then continue; fi
+           | grep -qE 'FIXED THE CLASS|GENUINELY SEPARATE|FIXED THE INSTANCE|DEFERRED'; then continue; fi
       else
         if printf '%s' "$CHECKLIST_CONTENT" | grep -qF -- "$cite"; then
           echo "exloom: '$cite' disposed by a checklist with no '## Re-finds' section (legacy format, audit)" >&2
@@ -761,19 +761,23 @@ exloom_check_refinds() {
 records no disposition for it:
 
 ${refinds}
-A re-find is not a new defect. It is evidence that the previous fix addressed the
-instance you were shown rather than the rule behind it — which is why the next
-round found the adjacent case. Patching this one schedules the third.
+A re-find often means the previous fix addressed the instance rather than the rule
+behind it. That is worth a decision — it is NOT an instruction to close the class
+here. Fixing the instance and tracking the class is a legitimate answer, and
+usually the right one.
 
 Record a disposition under '## Re-finds' in ${checklist}, naming the cite, and
-pick one:
+pick whichever is true:
 
-  1. FIXED THE CLASS — name the test that quantifies over the whole set (every
-     codepoint, every branch, every member), not the instance. \"One test that
-     asserts no single codepoint in any position defeats the marker would have
-     found all of this before round one, and would keep finding it.\"
-  2. GENUINELY SEPARATE — say why this defect is unrelated to the earlier one
-     despite matching it.
+  1. FIXED THE INSTANCE — and where the class is tracked.
+     \"src/Guard.java:88 FIXED THE INSTANCE — class tracked in PROJ-421\"
+  2. DEFERRED — not fixed here, with the ticket.
+  3. FIXED THE CLASS — you closed the whole set in this branch. Name the test.
+  4. GENUINELY SEPARATE — why this defect is unrelated to the earlier one.
+
+Option 1 used to be missing, so the only way past this gate was to close the class
+in the current branch. That turned one-line changes into refactors, and every
+addition became unreviewed code the next round found defects in.
 
 The findings are recorded per reviewer under the verdicts directory, one JSON
 line each, in <agent>.findings.jsonl."
