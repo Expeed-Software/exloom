@@ -153,6 +153,68 @@ echo "command: $TESTCMD"
 #
 # Without this the check is a script somebody has to remember to run — which is
 # the category of thing this whole mechanism exists because nobody remembers.
+# ---------- which acceptance criteria did the suite run? ----------
+# The ref goes in the test NAME, so one JUnit-XML parser covers every runner
+# instead of one annotation reader per framework. Both `F-012/R-3/AC-2` and
+# `F012_R3_AC2` are read, since a method name cannot contain `/` or `-`.
+# Only passing cases count.
+_criteria_from_reports() {   # _criteria_from_reports <worktree>
+  local wt="$1" glob="" reports=""
+  glob="$(head -1 .claude/exloom-test-report 2>/dev/null | tr -d '\r[:space:]')"
+  if [[ -n "$glob" ]]; then
+    reports="$(cd "$wt" 2>/dev/null && find . -path "./$glob" -name '*.xml' 2>/dev/null)"
+  fi
+  if [[ -z "$reports" ]]; then
+    # The conventional locations, in the order they are worth trying. Bounded so
+    # a huge tree does not turn a proof run into a filesystem walk.
+    reports="$(cd "$wt" 2>/dev/null && find . \
+      \( -path '*/test-results/*' -o -path '*/surefire-reports/*' -o -path '*/failsafe-reports/*' \
+         -o -path '*/junit*' -o -path '*/reports/*' \) \
+      -name '*.xml' -type f 2>/dev/null | head -400)"
+  fi
+  [[ -n "$reports" ]] || return 0
+
+  if command -v python3 >/dev/null 2>&1; then
+    ( cd "$wt" && printf '%s\n' "$reports" | python3 -c '
+import sys, re, xml.etree.ElementTree as ET
+REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
+# XXE and billion-laughs both need a DTD, and a JUnit report never has one — so
+# refusing any file that declares one closes both without needing defusedxml,
+# which cannot be assumed present on a developer machine or a CI image. These
+# files are written by the repos test runner, but a proof run parses whatever is
+# on disk and that is not the same trust boundary.
+DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.I)
+found = set()
+for line in sys.stdin:
+    path = line.strip()
+    if not path:
+        continue
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(8192)
+        if DTD.search(head):
+            continue
+        root = ET.parse(path).getroot()
+    except Exception:
+        continue
+    for tc in root.iter("testcase"):
+        # A case with a child failure/error/skipped did not pass, so it covers
+        # nothing. Absence of those children is what "passed" means in this format.
+        if any(c.tag in ("failure", "error", "skipped") for c in tc):
+            continue
+        for attr in ("name", "classname"):
+            for m in REF.finditer(tc.get(attr) or ""):
+                found.add("F-%s/R-%s/AC-%s" % (m.group(1), m.group(2), m.group(3)))
+print(" ".join(sorted(found)))
+' 2>/dev/null )
+  else
+    # No python3: name-only scan. Cannot tell a passing case from a failing one,
+    # so it reports nothing rather than reporting a criterion that failed as
+    # covered. Silence is the honest answer; a wrong coverage number is not.
+    return 0
+  fi
+}
+
 _receipt() {
   local result="$1" branch vdir head
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
@@ -163,10 +225,11 @@ _receipt() {
   mkdir -p "$vdir" 2>/dev/null || return 0
   local cmdhash="none"
   [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
-  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","at":"%s"}\n' \
+  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","at":"%s"}\n' \
     "$result" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
     "$cmdhash" \
+    "${CRITERIA_RAN:-}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}) at ${vdir}/proof.json — commit it with the checklist" >&2
@@ -215,6 +278,12 @@ echo "run 2/2: base source + your $copied test file(s) (must fail)…"
 ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
 rc=$?
 
+# A ref in a test name is a claim. A test that passes against the BASE source
+# does not notice the change, whatever it is called — so subtracting this set
+# from run 3's leaves the criteria the runs actually prove. Captured now because
+# run 3 reuses this worktree and overwrites the reports.
+CRITERIA_BASE_OK="$(_criteria_from_reports "$WT")"
+
 # 126/127 are "not executable" / "command not found" — a broken command, never a
 # test noticing anything.
 if [[ $rc -eq 126 || $rc -eq 127 ]]; then
@@ -260,6 +329,41 @@ fi
 # base" form per language. Do NOT add `no such file or directory`: that is a
 # normal assertion failure when a test checks for an output artifact.
 if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|NameError|AttributeError: module|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|undefined: [A-Za-z_]|cannot find function|cannot find value|cannot find type|error CS[0-9]+|error\[E0[0-9]+\]|command not found' "$WT/.exloom-out" 2>/dev/null; then
+  # A purely additive change cannot satisfy the three-run proof: its tests do not
+  # compile at base. Mutation asks the same question without needing the code to
+  # be absent. The contract is the EXIT CODE — the repo owns the tool and the
+  # threshold, exloom does not parse reports.
+  MUTCMD="$(head -1 .claude/exloom-mutation-command 2>/dev/null | tr -d '\r')"
+  if [[ -n "$MUTCMD" ]] && git ls-files --error-unmatch .claude/exloom-mutation-command >/dev/null 2>&1; then
+    echo
+    echo "The base run failed to BUILD, so the three-run proof cannot apply here."
+    echo "Falling back to mutation, which does not need the code to be absent."
+    echo "run 3/3: mutation of the changed code…"
+    # $WT already holds your change and your tests, and the suite passed there —
+    # run 3 above put it in exactly that state before this branch was reached.
+    ( cd "$WT" && eval "$MUTCMD" ) >"$WT/.mut-out" 2>&1
+    mut_rc=$?
+    if [[ $mut_rc -eq 0 ]]; then
+      CRITERIA_RAN="$(_criteria_from_reports "$WT")"
+      _receipt PROVED_BY_MUTATION
+      echo
+      echo "PROVED BY MUTATION — the tests kill the mutants your repo's threshold requires."
+      echo "The three-run proof does not apply to a purely additive change; this answers"
+      echo "the same question (would the tests notice this being wrong?) without needing"
+      echo "the code to be absent."
+      [[ -n "$CRITERIA_RAN" ]] && echo "criteria covered by passing tests: $CRITERIA_RAN"
+      exit 0
+    fi
+    _receipt NOT_PROVED
+    echo
+    echo "NOT PROVED — mutants survived (exit $mut_rc)."
+    echo "Tests exist and pass, but they do not notice the change being wrong."
+    echo
+    echo "command: $MUTCMD"
+    echo "--- last 25 lines ---"; tail -25 "$WT/.mut-out" 2>/dev/null
+    exit 1
+  fi
+
   _receipt NOT_PROVED
   echo
   echo "NOT PROVED — the base run failed to BUILD, not to assert (exit $rc)."
@@ -267,9 +371,14 @@ if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not e
   echo "without it. That shows the tests depend on the change; it does not show"
   echo "they would notice the change being WRONG."
   echo
-  echo "To prove that, the test must be able to run against the old code and fail"
-  echo "on the assertion — e.g. exercise behaviour through an interface that"
-  echo "exists at base, or assert on an observable output rather than on a symbol."
+  echo "Two ways forward:"
+  echo "  1. If the change extends existing behaviour, exercise it through an"
+  echo "     interface that exists at base and assert on an observable output."
+  echo "  2. If the change is PURELY ADDITIVE — a new API, a new control — then"
+  echo "     no such interface exists and this proof cannot apply, however the"
+  echo "     test is written. Pin a mutation command in"
+  echo "     .claude/exloom-mutation-command (committed) that exits 0 when your"
+  echo "     threshold is met, and re-run: PIT, Stryker, mutmut, go-mutesting."
   echo
   echo "--- last 25 lines ---"; tail -25 "$WT/.exloom-out" 2>/dev/null
   exit 1
@@ -277,10 +386,36 @@ fi
 
 
 if [[ $rc -ne 0 ]]; then
+  # Read from the run-3 worktree, which holds your change and your tests and
+  # passed, then drop anything that also passed at base — see CRITERIA_BASE_OK.
+  CRITERIA_RAN="$(_criteria_from_reports "$WT")"
+  CRITERIA_UNPROVED=""
+  if [[ -n "$CRITERIA_RAN" ]]; then
+    for _c in $CRITERIA_RAN; do
+      case " $CRITERIA_BASE_OK " in
+        *" $_c "*) CRITERIA_UNPROVED="${CRITERIA_UNPROVED} ${_c}" ;;
+        *) CRITERIA_PROVED="${CRITERIA_PROVED:-} ${_c}" ;;
+      esac
+    done
+    CRITERIA_RAN="$(printf '%s' "${CRITERIA_PROVED:-}" | tr -s ' ' | sed 's/^ //;s/ $//')"
+    CRITERIA_UNPROVED="$(printf '%s' "$CRITERIA_UNPROVED" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  fi
   _receipt PROVED
   echo
   echo "PROVED — without the source change, the tests fail (exit $rc)."
   echo "The tests notice this change. That is the property; it is not a guarantee they assert the RIGHT thing."
+  if [[ -n "$CRITERIA_RAN" ]]; then
+    echo
+    echo "criteria PROVED (their tests pass with the change and not without it):"
+    printf '  %s\n' $CRITERIA_RAN
+  fi
+  if [[ -n "$CRITERIA_UNPROVED" ]]; then
+    echo
+    echo "criteria CLAIMED but not proved — these tests pass against the BASE source,"
+    echo "so they do not notice the change whatever their name says. A ref in a test"
+    echo "name is a claim; this is the check on it."
+    printf '  %s\n' $CRITERIA_UNPROVED
+  fi
   exit 0
 fi
 _receipt NOT_PROVED

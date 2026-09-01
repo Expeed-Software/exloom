@@ -234,12 +234,30 @@ exloom_push_target_branches() {
 # that are unambiguous from a file list — "frontend AND backend changed" and
 # "more than one module" need stack knowledge the hook does not have, and stay
 # with the skill as judgment.
+# The nearest candidate wins, not the first that resolves: where main is a
+# release branch and dev the integration branch, taking main puts the whole
+# release gap in the diff and every branch derives Tier 3. origin/HEAD names
+# the branch a clone checks out, which is a different question.
+exloom_fork_point() {   # exloom_fork_point <tip>
+  local tip="$1" cand mb dist best="" best_dist=""
+  for cand in origin/main origin/master origin/dev origin/develop \
+              origin/development origin/trunk main master dev develop; do
+    git rev-parse --verify --quiet "$cand" >/dev/null 2>&1 || continue
+    mb="$(git merge-base "$tip" "$cand" 2>/dev/null)" || continue
+    [[ -n "$mb" ]] || continue
+    dist="$(git rev-list --count "${mb}..${tip}" 2>/dev/null)" || continue
+    [[ "$dist" =~ ^[0-9]+$ ]] || continue
+    if [[ -z "$best_dist" || "$dist" -lt "$best_dist" ]]; then
+      best="$mb"; best_dist="$dist"
+    fi
+  done
+  [[ -n "$best" ]] || return 1
+  printf '%s' "$best"
+}
+
 exloom_derive_tier() {
   local tip="$1" base files f n docs_only=1
-  base="$(git merge-base "$tip" origin/main 2>/dev/null \
-       || git merge-base "$tip" origin/master 2>/dev/null \
-       || git merge-base "$tip" origin/dev 2>/dev/null \
-       || git merge-base "$tip" origin/develop 2>/dev/null || true)"
+  base="$(exloom_fork_point "$tip")"
   [[ -n "$base" ]] || return 1
   # Review artifacts are not the change under review.
   files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
@@ -324,28 +342,10 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
   return 1
 }
 
-# ---------- lanes: rigour earned by stakes, not imposed by process ----------
-#
-# exloom shipped one lane, and it was the strictest one: the same ten steps for a
-# null check and for a subsystem. That is why one-line fixes turned into features
-# and why branches stopped landing. Tiers scale REVIEW DEPTH, derived from the
-# diff; they do not scale CEREMONY, and ceremony is what a small change cannot
-# afford.
-#
-# Three lanes, on a different axis from tier:
-#
-#   sprint     branch -> code -> prove -> smoke -> push. No spec, no plan, no
-#              fidelity audit, L1 only. The gate still runs; the receipts are
-#              still written; the checklist records that it was a Sprint, so a
-#              skipped step is a recorded fact rather than a silent absence.
-#   standard   the full flow. The default, and unchanged.
-#   certified  standard with no escape hatches and mandatory signed provenance.
-#
-# WHAT A LANE MAY NOT DO IS WEAKEN A SAFETY CHECK. The proof receipt, the smoke
-# test, the tier derivation, receipt forgery-resistance and the security surface
-# are identical in all three. A lane changes how much happens BEFORE the code,
-# and which reviewers the tier's ceremony demands after it — never whether the
-# evidence is real.
+# Lanes scale CEREMONY; tiers scale review depth. sprint = no spec/plan, L1 only.
+# standard = the full flow. certified = no escape hatches, signed commit.
+# No lane weakens a safety check: proof, smoke, tier derivation and the security
+# surface are identical in all three.
 exloom_repo_lane() {
   local f=".claude/exloom-lane" v=""
   if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
@@ -363,10 +363,8 @@ exloom_declared_lane() {
   case "$v" in sprint|standard|certified) printf '%s' "$v" ;; *) printf '' ;; esac
 }
 
-# The tier the CEREMONY runs at, which is not always the tier of record. Sprint
-# caps it at 1 — L1 and the smoke test, never adversarial or cross-layer — while
-# the declared tier stays honest, because the tier describes the diff and lying
-# about it would corrupt every other check that reads it.
+# The tier the ceremony runs at. Sprint caps it at 1; the declared tier stays as
+# it is, because other checks read it.
 exloom_effective_tier() {   # exloom_effective_tier <tier> <lane>
   local tier="$1" lane="${2:-standard}"
   if [[ "$lane" == "sprint" && "$tier" -gt 1 ]] 2>/dev/null; then printf '1'; else printf '%s' "$tier"; fi
@@ -555,10 +553,10 @@ exloom_check_verdicts() {
   # exloom_security_surface. Computed once here rather than in the tier lookup,
   # because only this function knows which commits are being compared.
   local sec_base sec_extra=""
-  sec_base="$(git merge-base "$reviewed" origin/main 2>/dev/null \
-           || git merge-base "$reviewed" origin/master 2>/dev/null \
-           || git merge-base "$reviewed" origin/dev 2>/dev/null \
-           || git merge-base "$reviewed" origin/develop 2>/dev/null || true)"
+  # The same fork point the tier uses. First-that-resolves compared the branch
+  # against a stale release branch, so a dependency bump somebody else made
+  # months ago read as this change's security surface.
+  sec_base="$(exloom_fork_point "$reviewed" || true)"
   if [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$reviewed"; then
     sec_extra="security"
   fi
@@ -986,6 +984,10 @@ exloom_check_proof() {
       fi
       case "$line" in
         *'"result":"PROVED"'*)     ok=1; break ;;
+        # An additive change cannot satisfy the three-run proof: its tests do not
+        # compile at base. Mutation asks the same question without needing the
+        # code to be absent.
+        *'"result":"PROVED_BY_MUTATION"'*) ok=1; break ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
@@ -1098,19 +1100,9 @@ Set **Lane:** standard (or certified) and run the gates the tier requires."
   # gets a security auditor in every lane.
   eff_tier="$(exloom_effective_tier "$tier" "$lane")"
 
-  # Certified has no escape hatches. That is the whole difference from Standard:
-  # every other lane accepts a documented skip, because a documented skip beats an
-  # undocumented one, and Certified exists for the reader who can accept neither.
-  #
-  # Checked HERE rather than beside the audit output at the end, because Certified
-  # also mandates signed provenance — and that check would otherwise always fire
-  # first, answering a content problem the author can fix in a minute with an
-  # environment problem they may not be able to fix at all.
-  #
-  # A recorded round-cap answer is exempt. It lives in this section for want of a
-  # better home, but it is a decision the user made when asked, not a step
-  # somebody skipped, and blocking it would make the cap unanswerable in the one
-  # lane most likely to reach it.
+  # Certified has no escape hatches. Checked before the signing check so a fixable
+  # content problem is reported ahead of an environment one. A recorded round-cap
+  # answer is exempt — it is a decision, not a skipped step.
   if [[ "$lane" == "certified" ]]; then
     local c_eh c_used
     c_eh="$(printf '%s\n' "$content" | awk '/^## Escape hatches used/{f=1;next} /^## /{f=0} f')"

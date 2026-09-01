@@ -86,18 +86,6 @@ the boundary while implementing.
 Unknowns that are still unknown. Better here than papered over with false
 precision.
 
-<!-- IDENTITY, and why it is worth the pedantry.
+## Identity
 
-     F-001              this feature
-     F-001/R-3          a requirement
-     F-001/R-3/AC-2     a criterion
-
-     Refs are sequential and gapless within their parent. R-1, R-2, R-4 is a lint
-     error and so is R-2b — renumber instead, while the spec is still draft.
-
-     Once the spec is `approved`, a ref is PERMANENT. Plans cite it, tests cite
-     it, and review checklists cite it; a ref that changes meaning silently
-     invalidates every one of those. Changing what a criterion means creates a
-     NEW criterion and marks the old one superseded. Removing one after approval
-     leaves the ref allocated and marked removed. Permanence beats tidiness the
-     moment anything downstream has pointed at it. -->
+`F-001` · `F-001/R-3` · `F-001/R-3/AC-2`. Refs are sequential and gapless. Once the spec is `approved` they are permanent: changing what a criterion means creates a new one and marks the old `superseded`.

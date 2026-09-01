@@ -4,32 +4,9 @@
 # Usage: bash lint-spec.sh <spec.md> [<spec.md> ...]
 # Exit 0 when every file passes, 1 when any ERROR is found. WARNs never fail.
 #
-# WHY THIS IS A SCRIPT AND NOT A CHECKLIST ITEM. `reviewing-plans` already asks
-# nine questions in prose, and prose checks do not run. The Keel spec format put
-# the argument plainly: a spec whose requirements run R-1, R-2, R-4 is a lint
-# error, and it is an error rather than a warning because both of those existed
-# in the hand-written specs of the people who wrote the rule. If the authors of a
-# convention drift from it, the agents will.
-#
-# WHAT IS AN ERROR VERSUS A WARN, and the line is deliberate. Errors are
-# STRUCTURAL — a machine can be certain, and being wrong is impossible. Warns are
-# JUDGEMENT — a machine has a hint, and being wrong is likely. A judgement call
-# that blocks is how a linter becomes something people route around, and exloom
-# has already learned that lesson at the review gate.
-#
-# ERRORS
-#   - a ref that is not well-formed
-#   - requirement or criterion refs that are not sequential and gapless
-#   - a requirement with no acceptance criterion (it is unverifiable)
-#   - a criterion with no Given/When/Then body
-#   - TBD / TODO / FIXME / ??? anywhere in the document
-#   - a missing required section
-#
-# WARNS
-#   - no `unwanted` requirement where the spec's own words mention money,
-#     permissions or deletion
-#   - a requirement that names an implementation (Postgres, Redis, a class name)
-#   - an approved spec whose ref does not match its filename
+# Errors are structural — refs, missing criteria, placeholders, missing sections.
+# Warns are judgement — a named implementation, or money/permissions/deletion with
+# no `unwanted` requirement. A judgement call that blocks gets the linter disabled.
 
 set -uo pipefail
 
@@ -153,9 +130,9 @@ for f in "${FILES[@]}"; do
   fi
 
   # ---------- the negative space ----------
-  # Keel's rule, and it earns its place: "unwanted requirements are mandatory for
-  # anything involving money, permissions, or data loss. Most defects live in the
-  # negative space and most specs never go there."
+  # `unwanted` requirements are mandatory for anything involving money,
+  # permissions, or data loss. Most defects live in the negative space, and most
+  # specs never go there.
   #
   # A WARN, not an error. Whether a spec that says "delete" is really about data
   # loss is a judgement, and the cost of being wrong is a blocked spec that was

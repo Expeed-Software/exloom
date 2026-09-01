@@ -120,7 +120,8 @@ Use this when the repo has no code yet or only scaffolding.
 
 2. **Pick template.** Select the matching template from `../../assets/claude-md-templates/`. If no template matches the stated stack, use `default.md` and fill it in manually.
 
-3. **Fill template.** Add the project name, description, and team context. Apply all the baselines — there are no existing conventions to conflict with. Include an empty Overrides section with a comment: `<!-- Add project-specific exceptions to the baselines here -->`.
+3. **Fill template.** Add the project name, description, and team context. Apply all the baselines — there are no existing conventions to conflict with. Include an empty Overrides section with a comment: `
+`.
 
 4. **Commit with permission.** Propose the commit message `docs: add CLAUDE.md for [project name]` and wait for user approval before committing.
 

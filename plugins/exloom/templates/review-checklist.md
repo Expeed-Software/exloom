@@ -70,12 +70,7 @@
 - [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
 - [ ] Reversal proof runs in CI on this commit
 
-<!-- Keep examples OUT of the section below: exloom scans it for a cite and reads
-     two lines past it for a keyword, so an example would dispose a real finding.
-     Each entry is FILE:LINE followed by one of FIXED THE INSTANCE (and where the
-     class is tracked), DEFERRED (with the ticket), FIXED THE CLASS (name the
-     test), or GENUINELY SEPARATE (why it is unrelated). Fixing the instance and
-     tracking the class is a normal answer, not a lesser one. -->
+
 
 ## Re-finds (the same finding reported in more than one round)
 
@@ -84,21 +79,7 @@ none
 ## Escape hatches used
 - [ ] None (default)
 
-<!-- Add a line per skipped step, in this form — the example lives in this comment
-     because `<step name>` is a placeholder the gate rejects, so leaving it in the
-     document blocks every branch that correctly skipped nothing:
 
-       - Skipped steps with written justification:
-         - smoke test — headless CI box, verified on staging instead
-
-     After the round cap the gate blocks and the session asks you to choose: fix
-     the open criticals, merge as-is, or see the findings first. If you choose to
-     merge, record your answer here so the branch stops asking and the next
-     reader sees who decided:
-
-       - User approved at round cap — approved after 4 passes, remaining items are minor
-
-     Do not add that line unless the user actually answered the prompt. -->
 
 ## Provenance
 - AI-assisted: <ai-assisted>
@@ -116,7 +97,5 @@ Reviewed code commit: <reviewed-sha>
 Attested by: <who-attests>
 Date: YYYY-MM-DD
 
-<!-- "Attested by" is the AUTHOR's self-attestation, not a reviewer's sign-off.
-     Who reviewed is recorded in .claude/reviews/<branch-name>.verdicts/, by
-     exloom, on real dispatches. Do not treat this line as review evidence. -->
+
 

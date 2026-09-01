@@ -305,7 +305,7 @@ mint 'I looked at the diff and it seems fine to me.'
 ok "UNKNOWN code review -> blocked" "$(chk)" "2"
 
 # Byte-for-byte the shape exloom 2.0.0 actually wrote — every key, in order,
-# copied from a live receipt in apptor-cms. A simplified stand-in would pass
+# copied from a real receipt. A simplified stand-in would pass
 # while the real thing failed on a key the parser did not expect.
 put_legacy "{\"agent\":\"l1-reviewer\",\"subagent_type\":\"exloom:l1-reviewer\",\"head\":\"$RV\",\"at\":\"2026-08-28T18:24:11Z\",\"session\":\"7bc2e35f-7c0f-4f69-b7f2-bbea28ffe7a5\"}"
 ok "legacy 2.0.0 receipt (real shape, no verdict key) -> still allowed" "$(chk)" "0"
@@ -747,7 +747,7 @@ echo "== SubagentStop: the verdict is captured at COMPLETION =="
 #   {"hook_event_name":"SubagentStop","agent_type":"exloom:l1-reviewer",
 #    "agent_id":"...","last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
 # Without this, a REJECTED review was indistinguishable from an approval on a
-# live branch — reported from apptor-agents.
+# live branch.
 subrepo substop
 SSV=".claude/reviews/feat/plan.verdicts"
 ssfeed() {   # ssfeed <report>
@@ -1213,6 +1213,198 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
+echo "== the fork point is the NEAREST branch, not the first one named =="
+
+# The rule was "origin/main, else master, else dev". In a repo that keeps main as
+# a RELEASE branch and dev as the integration branch, the first candidate puts the
+# whole release gap in the diff, so EVERY branch derives Tier 3 off somebody
+# else's migration — and Tier 3 has no escape hatch by design.
+#
+# `git symbolic-ref refs/remotes/origin/HEAD` does not rescue it: it names the
+# branch a clone checks out, which is a different question from the branch work
+# merges into.
+subrepo forkpoint noorigin
+printf 'r1\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD          # a release branch, pinned here
+for i in 2 3 4 5 6; do
+  printf 'r%s\n' "$i" > "src/f$i.java"
+  git add -A >/dev/null 2>&1; git commit -qm "dev$i" >/dev/null 2>&1
+done
+printf 'x\n' > src/migrations_placeholder.txt
+mkdir -p db/migrations && printf 'create table t;\n' > db/migrations/001.sql
+git add -A >/dev/null 2>&1; git commit -qm "someone elses migration" >/dev/null 2>&1
+git update-ref refs/remotes/origin/dev HEAD           # integration branch, far ahead
+printf 'class Mine {}\n' > src/Mine.java
+git add -A >/dev/null 2>&1; git commit -qm mine >/dev/null 2>&1
+
+ok "the nearest candidate wins, not the first named" \
+   "$(exloom_fork_point HEAD)" "$(git rev-parse origin/dev)"
+ok "...so the tier describes THIS change, not the release gap" "$(exloom_derive_tier HEAD)" "1"
+# The regression this guards: with origin/main chosen, the diff carries somebody
+# else's migration and the tier is 3 — unescapable, on a one-file change.
+ok "...where the old rule would have derived 3 off the migration" \
+   "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD | grep -c 'db/migrations')" "1"
+ok "...and the nearest-base diff does not contain it at all" \
+   "$(git diff --name-only "$(exloom_fork_point HEAD)" HEAD | grep -c 'db/migrations' || true)" "0"
+
+# A repo where main IS the integration branch must be unaffected.
+subrepo forkpoint_mainonly noorigin
+printf 'a\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+printf 'b\n' > src/b.txt; git add -A >/dev/null 2>&1; git commit -qm mine >/dev/null 2>&1
+ok "main-only repo: unchanged" "$(exloom_fork_point HEAD)" "$(git rev-parse origin/main)"
+# A local `main` IS a legitimate candidate, so the no-candidate case needs a repo
+# whose only branch is named something else entirely.
+ok "no candidate branch at all -> fails rather than guessing a base" \
+   "$(cd "$REG" && rm -rf nb && git init -q -b wip nb 2>/dev/null; cd "$REG/nb" && git config user.email t@e.com && git config user.name t && printf 'x\n' > f && git add -A >/dev/null 2>&1 && git commit -qm x >/dev/null 2>&1; exloom_fork_point HEAD >/dev/null 2>&1 && echo found || echo none)" "none"
+
+cd "$WORK" || exit 1
+
+echo "== criterion coverage is produced by the runner, never by a test's name =="
+
+# The criterion-to-test join, done without a per-framework adapter: the ref goes
+# in the TEST NAME, and every runner that matters emits JUnit XML. One parser
+# instead of one per framework.
+#
+# The hole that makes a naive version worthless: a name is hand-written. A test
+# called "F-012/R-3/AC-2 — …" that asserts nothing passes, and would report the
+# criterion covered — the one number in exloom an author could forge by typing.
+# The proof run already answers it, at zero extra cost: a test that passes
+# against the BASE source does not notice the change, whatever its name says.
+subrepo criteria noorigin
+mkdir -p reports
+cat > "$REG/criteria/mkreport.sh" <<'MK'
+#!/usr/bin/env bash
+# Stands in for a test runner. It must PASS at base with the base tests (run 1),
+# and fail at base once the new test is staged (run 2) — so it keys off the test
+# file's content, exactly as a real suite does.
+mkdir -p test-results
+new_test=0; grep -q exercises tests/t.txt 2>/dev/null && new_test=1
+if [[ $new_test -eq 0 || -f src/feature.txt ]]; then
+  cat > test-results/r.xml <<'X'
+<testsuite name="s" tests="3">
+  <testcase classname="T" name="F-012/R-3/AC-1 — notices the change"/>
+  <testcase classname="T" name="F012_R3_AC2 underscore form also notices"/>
+  <testcase classname="T" name="F-012/R-9/AC-1 — asserts nothing at all"/>
+</testsuite>
+X
+  exit 0
+fi
+cat > test-results/r.xml <<'X'
+<testsuite name="s" tests="3">
+  <testcase classname="T" name="F-012/R-3/AC-1 — notices the change"><failure>no feature</failure></testcase>
+  <testcase classname="T" name="F012_R3_AC2 underscore form also notices"><failure>no feature</failure></testcase>
+  <testcase classname="T" name="F-012/R-9/AC-1 — asserts nothing at all"/>
+</testsuite>
+X
+exit 1
+MK
+chmod +x "$REG/criteria/mkreport.sh"
+printf 'bash mkreport.sh\n' > .claude/exloom-test-command
+mkdir -p tests && printf 'placeholder\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+printf 'the feature\n' > src/feature.txt
+printf 'exercises it\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm change >/dev/null 2>&1
+
+PJ=".claude/reviews/feat/plan.verdicts/proof.json"
+bash "$PROVE" >/dev/null 2>&1
+crit="$(sed -n 's/.*"criteria":"\([^"]*\)".*/\1/p' "$PJ" 2>/dev/null | tail -1)"
+ok "a criterion whose test fails at base and passes with the change is PROVED" \
+   "$(printf '%s' "$crit" | grep -c 'F-012/R-3/AC-1' | head -1)" "1"
+ok "...and the underscore form resolves to the same ref shape" \
+   "$(printf '%s' "$crit" | grep -c 'F-012/R-3/AC-2' | head -1)" "1"
+# The lie. This test passes either way, so its name is a claim the run refutes.
+ok "a test that passes WITHOUT the change claims a criterion it does not cover" \
+   "$(printf '%s' "$crit" | grep -c 'F-012/R-9/AC-1' | head -1)" "0"
+ok "...and the run says so out loud, rather than dropping it silently" \
+   "$(bash "$PROVE" 2>&1 | grep -c 'CLAIMED but not proved' | head -1)" "1"
+ok "the receipt records a PROVED result alongside the criteria" \
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$PJ" | tail -1)" "PROVED"
+
+echo "== an additive change is provable by mutation, not by absence =="
+
+# The three-run proof is structurally unsatisfiable for a purely additive change:
+# every test exercising a new API fails to COMPILE at base. The script refuses to
+# call that proof — correctly — which left no way to prove an additive change at
+# all, and "additive, no behaviour change without opt-in" is the shape of most
+# new security controls.
+subrepo mutation noorigin
+cat > "$REG/mutation/runner.sh" <<'MK'
+#!/usr/bin/env bash
+# A new API. Passes at base with the base tests; once the new test is staged it
+# cannot resolve the symbol, which is a BUILD error rather than an assertion.
+new_test=0; grep -q calls tests/t.txt 2>/dev/null && new_test=1
+if [[ $new_test -eq 1 && ! -f src/newapi.txt ]]; then
+  echo "error: cannot find symbol: newApi" >&2
+  exit 1
+fi
+exit 0
+MK
+chmod +x "$REG/mutation/runner.sh"
+printf 'bash runner.sh\n' > .claude/exloom-test-command
+mkdir -p tests && printf 'placeholder\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+printf 'brand new api\n' > src/newapi.txt
+printf 'calls the new api\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
+
+MJ=".claude/reviews/feat/plan.verdicts/proof.json"
+out="$(bash "$PROVE" 2>&1)"
+ok "with no mutation command -> still NOT PROVED, as before" \
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$MJ" | tail -1)" "NOT_PROVED"
+ok "...and the message names the additive case and the way out" \
+   "$(printf '%s' "$out" | grep -c 'PURELY ADDITIVE' | head -1)" "1"
+
+# The repo pins a mutation command. THE CONTRACT IS THE EXIT CODE: every tool has
+# its own report format and its own threshold flag, so exloom does not parse and
+# does not own the bar.
+printf 'bash mutant.sh\n' > .claude/exloom-mutation-command
+cat > mutant.sh <<'MK'
+#!/usr/bin/env bash
+[[ -f .mutants-survive ]] && { echo "2 mutants survived"; exit 1; }
+echo "all mutants killed"; exit 0
+MK
+chmod +x mutant.sh
+git add -A >/dev/null 2>&1; git commit -qm mut >/dev/null 2>&1
+: > "$MJ"
+bash "$PROVE" >/dev/null 2>&1
+ok "a pinned mutation command proves an additive change" \
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$MJ" | tail -1)" "PROVED_BY_MUTATION"
+# The gate reads receipts from the committed ref, so commit it first.
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+ok "...and the gate accepts that result" \
+   "$(exloom_check_proof ".claude/reviews/feat/plan.md" HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1; echo $?)" "0"
+
+# An UNCOMMITTED mutation command is ignored, for the same reason the test
+# command's hash is recorded: a proof that a file nobody reviewed can switch on
+# is not a proof.
+subrepo mutation_uncommitted noorigin
+cat > runner.sh <<'MK'
+#!/usr/bin/env bash
+new_test=0; grep -q calls tests/t.txt 2>/dev/null && new_test=1
+if [[ $new_test -eq 1 && ! -f src/newapi.txt ]]; then
+  echo "error: cannot find symbol: newApi" >&2; exit 1
+fi
+exit 0
+MK
+chmod +x runner.sh
+printf 'bash runner.sh\n' > .claude/exloom-test-command
+mkdir -p tests && printf 'p\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+printf 'new\n' > src/newapi.txt; printf 'calls\n' > tests/t.txt
+git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
+printf 'true\n' > .claude/exloom-mutation-command      # never committed
+UJ=".claude/reviews/feat/plan.verdicts/proof.json"
+bash "$PROVE" >/dev/null 2>&1
+ok "an uncommitted mutation command is ignored" \
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$UJ" | tail -1)" "NOT_PROVED"
+
+cd "$WORK" || exit 1
+
 echo "== the spec linter: structural errors block, judgement calls warn =="
 
 # `reviewing-plans` asks nine questions in prose, and prose checks do not run.
@@ -1258,8 +1450,8 @@ good "$REQ_OK"
 ok "a well-formed spec passes" "$(lintrc)" "0"
 ok "...silently" "$(lint | grep -c ERROR | head -1)" "0"
 
-# Gapless refs. Keel made this an error rather than a warning because the people
-# who wrote the rule had already broken it in their own hand-written specs.
+# Gapless refs. An error rather than a warning, because the mistake showed up in
+# specs hand-written by the people who wrote the rule.
 good "$(printf '%s' "$REQ_OK" | sed 's/^R-1/R-2/')"
 ok "a spec starting at R-2 -> error" "$(lintrc)" "1"
 ok "...naming the expected ref" "$(lint | grep -c 'expected R-1, found R-2' | head -1)" "1"
@@ -1433,11 +1625,11 @@ istest() {   # istest <path> -> test|source, using the script's own function
     is_test "$1" && echo test || echo source' _ "$1"
 }
 ok "src/main spec package -> source" \
-   "$(istest 'apptor-agents/src/main/java/ai/apptor/agents/orchestration/spec/TopicSpec.java')" "source"
+   "$(istest 'svc/src/main/java/com/example/orchestration/spec/TopicSpec.java')" "source"
 ok "src/main anything -> source" \
    "$(istest 'mod/src/main/java/com/x/test/Helper.java')" "source"
 ok "src/test -> test" \
-   "$(istest 'apptor-agents/src/test/java/ai/apptor/agents/RootKeyShapeTest.java')" "test"
+   "$(istest 'svc/src/test/java/com/example/RootKeyShapeTest.java')" "test"
 ok "ruby spec/ dir -> test" "$(istest 'spec/models/order_spec.rb')" "test"
 ok "js .spec.ts -> test"     "$(istest 'src/order.spec.ts')" "test"
 ok "go _test.go -> test"     "$(istest 'internal/order/order_test.go')" "test"
@@ -1524,7 +1716,7 @@ ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
 ok "...and the message is NOT the cap message" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"
 
-# Reported from a real branch: four dispatches on disk, the cap did not fire, the
+# Seen in practice: four dispatches on disk, the cap did not fire, the
 # push went through with no prompt. Cause — the count read only the COMMITTED
 # ref, and nothing commits receipts until /review-complete says so. It answered 0
 # rather than erroring: fail-open in the mechanism whose only job is to notice
