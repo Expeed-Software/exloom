@@ -18,6 +18,31 @@ The model already plans, tests, and self-reviews without being told. What a team
 
 Nothing here instructs you how to think about code. If a skill would only tell you to be careful, it was removed.
 
+## Quick start — a feature, start to finish
+
+This is the sequence. The table below is for looking up a single step; this is what you actually do.
+
+| # | Step | What you run | What it produces |
+|---|---|---|---|
+| 1 | Decide what to build | `exloom:brainstorming` | a spec — the problem, the approach, what's out of scope |
+| 2 | Turn it into a plan | `exloom:planning-for-handoff` | a plan — exact files, tasks, acceptance criteria |
+| 3 | Get on a branch | `exloom:isolating-execution` | a feature branch (the gate skips protected branches) |
+| 4 | Start the review record | `/review-init` | `.claude/reviews/<branch>.md` with a tier |
+| 5 | Build it | `exloom:executing-handoff-plans` | the code — not more, not less; deviations logged |
+| 6 | Prove the tests notice it | `bash scripts/prove-change-is-tested.sh` | `proof.json` — PROVED or the reason it isn't |
+| 7 | Check for drift | `exloom:auditing-plan-fidelity` | files changed that no task called for |
+| 8 | Run it | `/smoke-test` | real output from the real thing |
+| 9 | Review | `/review-complete` | reviewer receipts, findings, fixes |
+| 10 | Ship | `git push`, open the PR | the gate lets it through |
+
+**A small change starts at step 3.** A one-line bug fix does not need a spec or a plan — branch, fix, prove, smoke, review, push. Steps 5 and 7 need a plan to work against, so they only apply when there is one.
+
+**Round 2 is L1 only.** Fix what it found, re-run `/review-complete`. Adversarial and security run once, after L1 has settled, and their approval does not expire when you fix something.
+
+**When a reviewer finds something, fix what it cited.** A finding is a defect report, not a design brief. If the fix seems to need a new file, class, or test class — stop and ask first. That is the single behaviour that turns a one-line change into a feature.
+
+See `worked-example.md` in this skill for one real change taken through all ten steps.
+
 ## Skills
 
 | Situation | Skill |
