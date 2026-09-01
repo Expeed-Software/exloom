@@ -1213,6 +1213,160 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
+echo "== the spec linter: structural errors block, judgement calls warn =="
+
+# `reviewing-plans` asks nine questions in prose, and prose checks do not run.
+# The line between ERROR and WARN is the whole design: errors are structural and
+# a machine cannot be wrong about them; warns are judgement and a machine
+# probably is. A judgement call that blocks is how a linter gets switched off.
+LINT="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/lint-spec.sh"
+subrepo speclint
+SPEC="s.md"
+lint()  { bash "$LINT" "$SPEC" 2>&1; }
+lintrc() { bash "$LINT" "$SPEC" >/dev/null 2>&1; echo $?; }
+
+good() {   # a spec that should pass, with $1 spliced into the requirements
+  cat > "$SPEC" <<EOF
+---
+ref: F-001
+status: draft
+---
+# F-001 · thing
+## Problem
+It is broken.
+## Chosen approach
+Fix it.
+## Rejected approaches
+- Other thing — worse.
+## Requirements
+${1}
+## Non-goals
+Not doing the other thing.
+EOF
+}
+REQ_OK='R-1 · event
+WHEN a thing happens THE SYSTEM SHALL do the other thing.
+
+  AC-1 · unit
+  ```gherkin
+  Given a thing
+  When it happens
+  Then the other thing is recorded
+  ```'
+
+good "$REQ_OK"
+ok "a well-formed spec passes" "$(lintrc)" "0"
+ok "...silently" "$(lint | grep -c ERROR | head -1)" "0"
+
+# Gapless refs. Keel made this an error rather than a warning because the people
+# who wrote the rule had already broken it in their own hand-written specs.
+good "$(printf '%s' "$REQ_OK" | sed 's/^R-1/R-2/')"
+ok "a spec starting at R-2 -> error" "$(lintrc)" "1"
+ok "...naming the expected ref" "$(lint | grep -c 'expected R-1, found R-2' | head -1)" "1"
+
+good "${REQ_OK}
+
+R-3 · event
+WHEN another thing happens THE SYSTEM SHALL respond.
+
+  AC-1 · unit
+  \`\`\`gherkin
+  Given x
+  When y
+  Then z
+  \`\`\`"
+ok "a gap between requirements -> error" "$(lint | grep -c 'expected R-2, found R-3' | head -1)" "1"
+
+# Criteria are numbered WITHIN their requirement, so the counter resets.
+good "${REQ_OK}
+
+R-2 · event
+WHEN another thing happens THE SYSTEM SHALL respond.
+
+  AC-1 · unit
+  \`\`\`gherkin
+  Given x
+  When y
+  Then z
+  \`\`\`"
+ok "two requirements each with their own AC-1 -> fine" "$(lintrc)" "0"
+
+# A requirement nothing can check is the one thing a spec may never contain.
+good 'R-1 · event
+WHEN a thing happens THE SYSTEM SHALL do the other thing.'
+ok "a requirement with no criterion -> error" "$(lintrc)" "1"
+ok "...saying it is unverifiable" "$(lint | grep -c 'has no acceptance criterion' | head -1)" "1"
+
+good 'R-1 · event
+WHEN a thing happens THE SYSTEM SHALL do the other thing.
+
+  AC-1 · unit
+  It should work.'
+ok "a criterion with no When/Then body -> error" "$(lintrc)" "1"
+
+good "$REQ_OK"
+printf 'TODO: decide the rest\n' >> "$SPEC"
+ok "a TODO anywhere -> error" "$(lintrc)" "1"
+
+good "$REQ_OK"
+python3 -c "
+import io,sys
+p=sys.argv[1]; s=io.open(p,encoding='utf-8',newline='').read()
+io.open(p,'w',encoding='utf-8',newline='').write(s.replace('## Non-goals','## Nongoals'))" "$SPEC"
+ok "a missing required section -> error" "$(lintrc)" "1"
+ok "...naming which one" "$(lint | grep -c 'missing required section: Non-goals' | head -1)" "1"
+
+# The negative space. A WARN, never an error: whether a spec that says "delete"
+# is really about data loss is judgement, and a false block is how a check dies.
+good 'R-1 · event
+WHEN a refund is issued THE SYSTEM SHALL credit the original payment method.
+
+  AC-1 · unit
+  ```gherkin
+  Given a paid order
+  When a refund is issued
+  Then the original method is credited
+  ```'
+ok "money with no 'unwanted' requirement -> warns" \
+   "$(lint | grep -c 'most defects live in the negative space' | head -1)" "1"
+ok "...and does NOT block" "$(lintrc)" "0"
+good 'R-1 · unwanted
+IF a refund exceeds the payment THEN THE SYSTEM SHALL reject it.
+
+  AC-1 · unit
+  ```gherkin
+  Given a payment of 10
+  When a refund of 11 is issued
+  Then it is rejected
+  ```'
+ok "...and stops warning once the negative case is stated" \
+   "$(lint | grep -c 'negative space' | head -1)" "0"
+
+# Implementation detail in a requirement is a warn for the same reason.
+good 'R-1 · event
+WHEN a job is submitted THE SYSTEM SHALL store it in Postgres.
+
+  AC-1 · unit
+  ```gherkin
+  Given a job
+  When it is submitted
+  Then it survives a restart
+  ```'
+ok "naming a database in a requirement -> warns" \
+   "$(lint | grep -c 'names an implementation' | head -1)" "1"
+ok "...and still passes" "$(lintrc)" "0"
+
+# CRLF. Every anchored match in this script would silently miss without the
+# normalisation, and Git Bash on Windows is where exloom actually runs.
+good "$REQ_OK"
+python3 -c "
+import io,sys
+p=sys.argv[1]; s=io.open(p,'rb').read().replace(b'\n',b'\r\n')
+io.open(p,'wb').write(s)" "$SPEC"
+ok "a CRLF spec lints identically" "$(lintrc)" "0"
+
+cd "$WORK" || exit 1
+
 echo "== the proof binds the COMMAND it proved, not just its own presence =="
 
 # cmd_hash was written by prove-change-is-tested.sh and read by nothing. The only

@@ -120,34 +120,63 @@ scope creep starts immediately.
 
 ### Step 6: Write the Spec
 
-**What to do:** Save the agreed design where this repo keeps specs — if the repo's CLAUDE.md (or the user) specifies a docs location, use it; otherwise default to `docs/exloom/specs/YYYY-MM-DD-<topic>.md`. Commit if user permits.
+**What to do:** Copy `templates/spec-template.md` to where this repo keeps specs —
+if the repo's CLAUDE.md (or the user) specifies a location, use it; otherwise
+`docs/exloom/specs/F-<nnn>-<slug>.md`. Allocate `<nnn>` as one past the highest
+`F-` already in that directory. Commit if the user permits.
 
 **How to do it well:** The spec must be readable by someone not in the session.
-Canonical format: problem statement, constraints, chosen approach with rationale,
-rejected approaches with rationale, components, data flow, error handling, edge
-cases, non-goals, open questions. Filename: date + topic in kebab-case.
-Reference code by file path. Record contentious decisions with both perspectives.
-Mark ambiguity as open questions — don't paper over it.
+The template carries the canonical shape: problem, chosen approach with
+rationale, rejected approaches with rationale, numbered requirements each
+carrying at least one acceptance criterion, edge cases, non-goals, open
+questions. Reference code by file path. Record contentious decisions with both
+perspectives. Mark ambiguity as open questions rather than papering over it.
 
-**What bad looks like:** Spec only makes sense to someone in the conversation.
-No rejected alternatives — three months later, someone proposes the same
-rejected idea because the reasoning was never recorded.
+**The requirements section is the part that makes this a spec rather than a
+memo.** Each requirement is one behaviour, in one of the five EARS shapes, with
+at least one acceptance criterion written as Given/When/Then. Two rules do most
+of the work:
 
-### Step 7: Self-Review the Spec
+- **Say what the system does, never how it is built.** `SHALL store the job in
+  Postgres` is an architecture decision wearing a requirement's clothes; `SHALL
+  persist the job so it survives a restart` is the requirement.
+- **Anything touching money, permissions, or data loss needs an `unwanted`
+  requirement** — `IF <bad thing> THEN THE SYSTEM SHALL <response>`. Most defects
+  live in the negative space and most specs never go there.
 
-**What to do:** Before handing the spec to the user, review it against five
-systematic checks. Fix problems inline without announcing them.
+**Refs are permanent once the spec is approved.** `F-012/R-3/AC-2` is cited by
+plans, by tests, and by review checklists; a ref that quietly changes meaning
+invalidates all three. While the spec is still `draft`, renumber freely. After
+approval, changing what a criterion means creates a new one and marks the old
+`superseded`.
 
-**How to do it well:** Five checks. **Placeholder scan:** resolve TODO/TBD or
-mark as open questions with owners. **Internal consistency:** components match
-data flow? Error handling covers edge cases? Non-goals contradict goals?
-**Scope check:** more than one feature? Split it. **Ambiguity check:** could
-two developers build different things? Tighten until they couldn't. **Brownfield
-check:** existing patterns referenced, deviations justified? Fix issues directly
-— don't send a message cataloging problems, just fix them.
+**What bad looks like:** A spec that only makes sense to someone in the
+conversation. No rejected alternatives — three months later, someone proposes the
+same rejected idea because the reasoning was never recorded. Requirements nobody
+can check: "the feature works correctly", "performance is acceptable". A
+requirement with no criterion under it, which is the same thing said more
+formally.
 
-**What bad looks like:** TODO placeholders in the final spec. "Handles
-validation" without specifying rules. Overview contradicts detail sections.
+### Step 7: Lint the Spec
+
+**What to do:** Run the linter. Fix the errors.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/lint-spec.sh" docs/exloom/specs/F-012-slug.md
+```
+
+Errors are things a machine can be certain about — gapless refs, a criterion under
+every requirement, a body under every criterion, no placeholders, no missing
+sections. Warnings are two it can only guess at: an implementation named inside a
+requirement, and money, permissions or deletion with no `unwanted` requirement
+anywhere. **Fix the errors. Judge the warnings** — one you disagree with is a
+warning to ignore, not a document to contort.
+
+**This step used to be five prose checks and a linter.** The prose checks were
+"scan for placeholders", "check internal consistency", "check for ambiguity" —
+things a model does unprompted, so instructing them again spends tokens without
+changing the spec. What was left is the part that is not self-review: a script
+that either exits 0 or does not.
 
 ### Step 8: User Reviews, Then Transition
 

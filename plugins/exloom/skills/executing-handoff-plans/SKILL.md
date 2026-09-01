@@ -99,14 +99,11 @@ Commit message format should include the plan reference and task number. Example
 
 ### After Execution
 
-All tasks are complete. This is the most dangerous moment in execution — the temptation to declare victory is strong. Resist it. Before declaring the work done, verify each of these conditions explicitly:
+All tasks are complete. Run `exloom:auditing-plan-fidelity`.
 
-- **All checkboxes checked.** Every task in the plan has been marked complete. If any are unchecked, execution is not finished.
-- **All deviations resolved.** Not just logged — resolved. Every deviation entry must have a status of "Resolved" with a brief summary. "Paused" entries mean there are open questions. Open questions mean execution is not complete.
-- **Final validation passed.** The plan's overall acceptance criteria or final validation step has been run and passed. Task-level validations passing does not guarantee the integrated result works.
-- **No unplanned file changes.** Every file you created or modified should trace back to a plan task. If you touched a file that is not mentioned in the plan, that is a deviation that needs to be logged and resolved, even retroactively.
+It does mechanically what this section used to ask you to do by hand: it compares the plan's file list against the diff, checks the spec's criteria against the tasks in both directions, and reads the Deviation Log for entries left open. Three of those are set differences. A model re-reading its own work finds fewer of them than `comm` does, and asking for both spends the tokens twice.
 
-Once all four conditions are met, compile a brief execution summary: how many tasks completed, how many deviations were logged and resolved, what the final test count looks like, and any out-of-scope observations worth revisiting. This summary becomes input for the verification step.
+The one thing to bring to it that it cannot compute: **a paused deviation is not a resolved one.** If you logged something and moved on without settling it, say so now rather than letting the audit find an entry with no resolution.
 
 Then run `/review-complete`. Execution completing is not the same as the work being correct. Verification is a separate concern — it checks that the integrated result meets the plan's acceptance criteria end-to-end, not just task-by-task.
 

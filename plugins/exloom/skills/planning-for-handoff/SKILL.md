@@ -15,7 +15,7 @@ Even if you are executing your own plan — solo path, no handoff — the same r
 
 ## Process
 
-Follow these 9 steps in order. Do not skip steps — each one exists because skipping it causes specific, predictable failures described in the Failure Modes section below.
+Follow these 9 steps in order. Each exists because skipping it causes a specific failure described under Failure Modes.
 
 **Where the plan lives.** Save the plan where this repo keeps plans: if the repo's CLAUDE.md (or the user) specifies a location — e.g. `.claude/plans/current.md` — use that; otherwise default to `docs/exloom/plans/YYYY-MM-DD-<topic>-plan.md`. Commit it so it is reviewable and so the person who executes it — including a future session — can find it.
 
@@ -27,9 +27,17 @@ Follow these 9 steps in order. Do not skip steps — each one exists because ski
 
 **What bad looks like.** Jumping straight to task lists without a spec. You end up discovering requirements mid-plan, rewriting tasks, and shipping a plan that is really a draft design disguised as an execution guide. The executor inherits your confusion. Another variant: the spec exists but is a single paragraph of vague intent — the plan author fills in the design gaps implicitly, embedding design decisions inside task descriptions where nobody reviews them as design decisions.
 
-### Step 2: Write acceptance criteria first
+### Step 2: Take the acceptance criteria from the spec — do not invent them
 
-**What to do.** Before writing any tasks, write the observable, testable outcomes that define "done." These go at the top of the plan.
+**What to do.** Copy the spec's criteria refs into the plan. Do not write new ones.
+
+**Why this is step 2 and not "write criteria".** Until 4.8.0 this step said *write acceptance criteria first*, while the spec format had no criteria section at all — so planning consumed something brainstorming never produced. The criteria were invented here, by whoever wrote the plan, and traced back to nothing the user had approved. That is how a branch ends up correctly implementing a definition of "done" nobody agreed to.
+
+The criteria live in the spec as `F-012/R-3/AC-2`. The plan's job is to say which tasks satisfy which of them, not to decide what "done" means — that decision was made and approved at brainstorming.
+
+**If a criterion you need is missing, go back and add it to the spec.** That is a small edit to a draft, or a change request against an approved one. It is never a criterion that exists only in the plan, because nothing downstream can tell such a criterion apart from scope creep.
+
+**Every task cites at least one AC. Every AC is cited by at least one task.** Both directions matter and they fail differently: an AC no task serves is forgotten scope, and a task serving no AC is scope creep. `exloom:auditing-plan-fidelity` checks both after execution, but it is far cheaper to get right here.
 
 **How to do it well.** Every criterion must be verifiable by the executor without asking the author what they meant. "Users can log in" is not testable — testable by whom, using what, expecting what response? "POST `/auth/login` with valid credentials returns 200 with a JWT containing `sub`, `exp`, and `role` claims" is testable. An executor can write that test without any additional context. Aim for 4-8 criteria. If you have more than 10, your scope may be too large for a single plan.
 
@@ -79,17 +87,21 @@ Follow these 9 steps in order. Do not skip steps — each one exists because ski
 
 **What to do.** Break the work into bite-sized tasks. Each task should be a single atomic change — one logical unit of work, one validation step, one commit — and be self-contained.
 
-**How to do it well.** Each task needs four things: (1) files involved with exact paths, (2) what to do in concrete terms, (3) a validation step with the command to run and the expected output, (4) a commit message. Show code snippets where code is needed — do not describe code in prose when you can show it. Show commands with expected output so the executor knows they did it right. Write tasks as if the executor may read them out of order — do not rely on "as we did in Task 3." Repeat context where needed. The validation step is non-negotiable — it is the executor's proof that the task is complete. "Run `pytest tests/api/test_export.py -v` and confirm all 5 tests pass" is a validation step. "Make sure it works" is not. For any task that implements business logic (calculations, validation, branching, state changes), the validation step must be an **automated test**, not a manual check or a build/curl — "run `pytest …` and confirm N tests pass," not "curl the endpoint and eyeball the response." A manual or build-only check is acceptable only for pure wiring with no logic (e.g., a button renders, a module imports). Specifying "validation = build + curl" for logic is exactly how the test discipline gets silently skipped at execution time. And order it **test-first**: a business-logic task is "write the failing test, then implement until it passes" — the test comes before the code, in the same task. Do NOT split "implement X" into one task and "test X" into a later task; tests deferred to the end is how TDD silently becomes test-after, or never. (Pure wiring with no logic is the exception.)
+**How to do it well.** Each task needs five things: (1) the acceptance criteria it serves, by ref (`F-012/R-3/AC-2`), (2) files involved with exact paths, (3) what to do in concrete terms, (4) a validation step with the command to run and the expected output, (5) a commit message. **A task that cites no criterion is scope creep, and writing the citation is where you notice** — if you cannot name what a task is for, that is the finding, not a formatting gap. Show code snippets where code is needed — do not describe code in prose when you can show it. Show commands with expected output so the executor knows they did it right. Write tasks as if the executor may read them out of order — do not rely on "as we did in Task 3." Repeat context where needed. The validation step is non-negotiable — it is the executor's proof that the task is complete. "Run `pytest tests/api/test_export.py -v` and confirm all 5 tests pass" is a validation step. "Make sure it works" is not. For any task that implements business logic (calculations, validation, branching, state changes), the validation step must be an **automated test**, not a manual check or a build/curl — "run `pytest …` and confirm N tests pass," not "curl the endpoint and eyeball the response." A manual or build-only check is acceptable only for pure wiring with no logic (e.g., a button renders, a module imports). Specifying "validation = build + curl" for logic is exactly how the test discipline gets silently skipped at execution time. And order it **test-first**: a business-logic task is "write the failing test, then implement until it passes" — the test comes before the code, in the same task. Do NOT split "implement X" into one task and "test X" into a later task; tests deferred to the end is how TDD silently becomes test-after, or never. (Pure wiring with no logic is the exception.)
 
 **What bad looks like.** Tasks that take 30 minutes and contain multiple unrelated changes. Tasks with no validation step — the executor finishes and has no idea if it worked. Tasks that say "similar to above" instead of repeating the relevant information. Tasks described entirely in prose when a 5-line code snippet would eliminate all ambiguity. Tasks that mix infrastructure changes with application changes — "update the database schema and add the API endpoint" is two tasks in two different systems with two different validation steps.
 
-### Step 9: Self-review
+### Step 9: Check coverage both ways
 
-**What to do.** Before declaring the plan done, run three checks: placeholder scan, type consistency check, and spec coverage check.
+**What to do.** One grep, in two directions.
 
-**How to do it well.** Placeholder scan: search for "TBD", "TODO", "appropriate", "relevant", "as needed", "similar to" — these are all plan failures hiding in plain text. Replace every one with a concrete value or decision. Type consistency: verify that function names, variable names, file paths, and API routes are identical across all tasks that reference them. A function called `exportOrders` in Task 2 and `export_orders` in Task 5 will confuse the executor — pick one and use it everywhere. Spec coverage: walk through every requirement in the spec and confirm at least one task addresses it. Requirements without tasks are forgotten scope. Tasks without a corresponding spec requirement are scope creep — either add the requirement to the spec or remove the task.
+```bash
+comm -3 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$SPEC" | sort -u)         <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$PLAN" | sort -u)
+```
 
-**What bad looks like.** Shipping the plan without a self-review pass. Leaving "TBD" placeholders with the intention of filling them in later — you will not. Finding inconsistencies after the executor has already started, forcing rework. A particularly insidious failure: the function is called `exportOrders` in the plan text but `export_orders` in the code snippet three tasks later. The executor follows the code snippet (correct instinct) but then the tests reference `exportOrders` and nothing wires up.
+A criterion in the spec that no task cites is **forgotten scope** — approved and not built. A ref in the plan the spec does not define is a criterion **invented at plan time**, carrying an authority nobody granted it. A task citing nothing is **scope creep**.
+
+**This is the whole step, and it used to be three.** The other two were a placeholder scan and a name-consistency check — both things a model does unprompted, and telling it to do them again buys nothing but tokens. This one stays because it is not self-review: it compares two documents and returns a set difference. A machine finds it; reading twice does not.
 
 ## Acceptance Criteria Are Not Optional
 
@@ -148,7 +160,7 @@ See [task-sizing.md](task-sizing.md).
 | Multiple valid approaches exist | Pick one and state why. Do not present options — the executor is not the decision-maker, the plan author is. |
 | A task depends on another task's output | State the dependency explicitly. "After Task 3 is committed and the migration has run, proceed to Task 4." |
 | Plan references code that might change before execution | Pin to the current commit hash or note the assumption. "Based on `main` at `a1b2c3d` — if `order-service.ts` has changed, re-check the insertion point." |
-| You are unsure if the plan is complete | Run the self-review in Step 9. If you skip self-review, the executor will discover your oversights at the worst time. |
+| You are unsure if the plan is complete | Run the Step 9 coverage check. A criterion no task cites is the gap you cannot see by re-reading. |
 
 ## Failure Modes
 
@@ -164,6 +176,6 @@ See [worked-example.md](worked-example.md).
 - **Commit messages:** follow this repo's existing commit convention
 - **Related skills:** `exloom:review-gate` (the evidence gate at completion), `exloom:brainstorming` (reviews the output)
 
-The handoff path matters. If you are handing the plan to someone else, `reviewing-plans` catches structural problems before the executor starts — missing file paths, vague tasks, uncovered spec requirements. If you are executing your own plan, you still benefit from the self-review in Step 9, but you can proceed directly to execution.
+Run the Step 9 coverage check either way, then execute. It is the same check whether the executor is someone else or a future you.
 
 Either way, the plan is the contract. Deviations from it during execution get logged in the plan's deviation log, not silently absorbed. When the executor discovers that reality differs from the plan — a file moved, an API changed, an edge case the plan did not anticipate — they record it. The deviation log is how the team learns which parts of the planning process need improvement. A plan with zero deviations was either perfect or the executor did not bother logging. Over time, recurring deviation patterns point to systemic planning gaps worth fixing.

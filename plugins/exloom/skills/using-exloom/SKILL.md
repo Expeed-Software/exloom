@@ -11,7 +11,7 @@ The model already plans, tests, and self-reviews without being told. What a team
 
 | Artifact | Produced by | Answers |
 |---|---|---|
-| Spec | `brainstorming` | what we decided to build, and what we rejected |
+| Spec | `brainstorming` | what we decided to build, what we rejected, and what "done" means — as numbered criteria |
 | Plan | `planning-for-handoff` | what to do, in what order, verifiable by someone else |
 | Proof receipt | `scripts/prove-change-is-tested.sh` | do the tests actually fail without this change |
 | Review checklist + receipts | `/review-init` → `/review-complete` | who reviewed, at which commit, with what verdict |
@@ -24,8 +24,8 @@ This is the sequence. The table below is for looking up a single step; this is w
 
 | # | Step | What you run | What it produces |
 |---|---|---|---|
-| 1 | Decide what to build | `exloom:brainstorming` | a spec — the problem, the approach, what's out of scope |
-| 2 | Turn it into a plan | `exloom:planning-for-handoff` | a plan — exact files, tasks, acceptance criteria |
+| 1 | Decide what to build | `exloom:brainstorming` | a spec — problem, approach, numbered requirements, one criterion each |
+| 2 | Turn it into a plan | `exloom:planning-for-handoff` | a plan — exact files, tasks, each citing the criteria it serves |
 | 3 | Get on a branch | `exloom:isolating-execution` | a feature branch (the gate skips protected branches) |
 | 4 | Start the review record | `/review-init` | `.claude/reviews/<branch>.md` with a tier |
 | 5 | Build it | `exloom:executing-handoff-plans` | the code — not more, not less; deviations logged |

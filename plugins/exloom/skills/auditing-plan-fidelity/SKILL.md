@@ -15,14 +15,16 @@ This skill runs between execution and code review. It separates "is this code go
 
 ### Inputs
 
-Before running the audit, gather three artifacts. All three are required. If any is missing, stop and obtain it before proceeding — an audit with incomplete inputs produces incomplete results.
+Before running the audit, gather four artifacts. All are required. If any is missing, stop and obtain it before proceeding — an audit with incomplete inputs produces incomplete results.
+
+**Spec file path.** The `F-nnn-*.md` the plan was built from. This is where the acceptance criteria are *defined*; the plan only cites them. Auditing against the plan's copy of the criteria cannot detect the failure that matters most here — a criterion the spec states and the plan never picked up — because that criterion is absent from the plan by definition.
 
 **Plan file path.** The `.md` plan file the work was executed against. Usually in `.claude/plans/` or a similar location. If the path is unknown, check recent commits for the plan file or ask the PR author. The plan must contain at minimum:
 - A "Files to Touch" section listing every file expected to be created, modified, or deleted
-- Acceptance criteria — the testable conditions that define "done"
+- Criteria refs (`F-012/R-3/AC-2`) on its tasks, citing the spec
 - A Deviation Log section (filled during `exloom:executing-handoff-plans`)
 
-If the plan lacks any of these sections, note it in the audit report. A plan without a "Files to Touch" section makes Step 1 impossible. A plan without acceptance criteria makes Step 2 impossible. Proceed with whatever sections exist and flag the gaps.
+If the plan lacks any of these sections, note it in the audit report. A plan without a "Files to Touch" section makes Step 1 impossible. A plan whose tasks cite no criteria makes half of Step 2 impossible — you can still audit the spec's criteria against the diff, but not against the plan, and "which task was this for?" becomes unanswerable. Proceed with whatever sections exist and flag the gaps.
 
 **Diff range.** The git range covering the full scope of the executed work. (The shell snippets in this skill are bash — `sed`, `comm`, three-dot diff. On Windows, run them in Git Bash, which ships with Git; `comm` and `sed` do not exist in PowerShell. The git commands themselves are identical in any shell.)
 
@@ -92,7 +94,22 @@ The third bucket — `comm -13` — is the drift list. Every file it prints must
 
 ### Step 2: Acceptance Criteria Verification
 
-Read each acceptance criterion from the plan. For every criterion, assign one of three statuses:
+**First, run the coverage check in both directions.** It is a grep, it takes a second, and it finds the two failures a criterion-by-criterion read is worst at spotting — because both are about something that is *absent*, and reading a list draws your eye to what is on it.
+
+```bash
+SPEC=docs/exloom/specs/F-012-slug.md
+PLAN=docs/exloom/plans/....md
+comm -23 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$SPEC" | sort -u) \
+         <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$PLAN" | sort -u)
+```
+
+- **Criteria in the spec that no task cites — forgotten scope.** The user approved this and nobody built it. Nothing else in the review will catch it: every reviewer works from the diff, and a thing that was never built leaves no trace in a diff.
+- **Refs in the plan that the spec does not define — a criterion invented at plan time.** It looks like a requirement and carries the authority of one, and nobody approved it.
+- **Tasks citing no ref at all — scope creep**, in the form that survives review most easily, because the code is usually fine. It is simply work nobody asked for.
+
+Report each as a finding with its ref. These are cheap to state and expensive to discover later.
+
+Then read each criterion from the **spec** — not the plan; the plan cites, the spec defines. For every criterion, assign one of three statuses:
 
 - **Verified.** You can see evidence in the diff that the criterion is met. This includes: code that directly implements the behavior, test assertions that validate it, configuration that enables it. Cite the specific file and change as evidence.
 - **Unverified.** You cannot determine from the diff alone whether the criterion is met. This is common for performance criteria, visual requirements, or integration behaviors that require a running system. Note what needs to be manually tested and where.
@@ -137,6 +154,7 @@ When producing the report:
 ```markdown
 ## Plan Fidelity Audit
 
+**Spec:** [path to spec file]
 **Plan:** [path to plan file]
 **Diff range:** [git diff range]
 **Auditor:** [who ran this audit]
@@ -150,12 +168,20 @@ When producing the report:
 | tests/order.test.ts | Create | Created | As planned |
 | src/utils/format.ts | Modify | Not changed | Planned but not touched |
 
+### Criteria coverage
+| Direction | Result |
+|---|---|
+| Spec criteria with no task | `F-012/R-4/AC-1` — forgotten scope |
+| Plan refs not defined in the spec | none |
+| Tasks citing no criterion | Task 7 (added a caching layer) — scope creep |
+
 ### Acceptance Criteria
-| # | Criterion | Status | Evidence |
+| Ref | Criterion | Status | Evidence |
 |---|---|---|---|
-| 1 | Returns paginated results | Verified | Diff shows limit/offset in query |
-| 2 | Total count in header | Deviated | Count is in response body, not header |
-| 3 | Handles empty result set | Unverified | Needs runtime test with empty DB |
+| F-012/R-1/AC-1 | Returns paginated results | Verified | Diff shows limit/offset in query |
+| F-012/R-1/AC-2 | Total count in header | Deviated | Count is in response body, not header |
+| F-012/R-2/AC-1 | Handles empty result set | Unverified | Needs runtime test with empty DB |
+| F-012/R-4/AC-1 | Rejects a negative page size | **Not built** | No task cited it |
 
 ### Deviation Log Review
 | # | Deviation | Justification | Resolution |
