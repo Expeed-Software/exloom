@@ -110,9 +110,12 @@ for br in "${VBRANCHES[@]}"; do
     # checklist against ITS tip, from the ref (its working tree isn't present).
     exloom_validate_checklist ".claude/reviews/${br}.md" "refs/heads/${br}" 0 "push / open a PR for '$br'"
   fi
-  # 3 = the round cap printed an "ask" decision to stdout. Exit 0 so the harness
-  # reads that JSON and prompts the user; a non-zero exit would throw it away.
-  case "$?" in 0) ;; 3) exit 0 ;; *) exit 2 ;; esac
+  # The round cap used to return 3 here, meaning "an approve/cancel decision was
+  # printed to stdout — exit 0 so the harness prompts". It no longer does: cancel
+  # on that prompt is a tool refusal, not an answer, so the push died and the
+  # person had to retype their intent. The cap now blocks like everything else
+  # and hands the session a question to put to the user.
+  case "$?" in 0) ;; *) exit 2 ;; esac
 done
 
 exit 0

@@ -15,6 +15,12 @@
 
 set -u
 
+# The hooks honour EXLOOM_REVIEW_SKIP unconditionally, so a developer who has the
+# bypass set in their session sees ten phantom failures here and no indication
+# why. The suite tests what the gate does when it is ON; the bypass is tested by
+# setting it deliberately, never by inheriting it.
+unset EXLOOM_REVIEW_SKIP
+
 LIB="plugins/exloom/hooks/lib.sh"
 HOOKS="plugins/exloom/hooks"
 
@@ -1057,6 +1063,75 @@ ok "decorated form still read" \
 ok "no line at all -> UNKNOWN, never silently NO" \
    "$(rn 'VERDICT: APPROVED')" "UNKNOWN"
 
+echo "== one dispatch leaves one receipt line, not eighteen =="
+
+# SubagentStop fires on EVERY turn a reviewer stops on, not only its last. A
+# reviewer that reads eight files stops eight times, and the seven intermediate
+# stops hand over a message with no VERDICT line — which scored UNKNOWN and was
+# appended verbatim. Observed in the field: 18 lines for one commit, 17 UNKNOWN
+# and one REJECTED. The gate read that correctly (it takes the strongest verdict
+# for the commit), so this is legibility, not a wrong decision — but a file that
+# is 90% noise cannot be read by a person, and a reader scanning it newest-first
+# would invert the answer.
+subrepo dedupe
+DSV=".claude/reviews/feat/plan.verdicts"
+# Unlike mint()/rn(), this deliberately does NOT clear the receipt first — the
+# repetition is the thing under test.
+stop() {   # stop <last_assistant_message>
+  python3 -c "
+import json,sys
+print(json.dumps({'hook_event_name':'SubagentStop','session_id':'s',
+  'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+lines() { grep -c . "$DSV/l1-reviewer.json" 2>/dev/null || printf '0'; }
+
+# Seven intermediate stops, then the real report — the field sequence exactly.
+for _ in 1 2 3 4 5 6 7; do stop 'Let me read the next file.'; done
+ok "seven intermediate stops -> ONE unknown line, not seven" "$(lines)" "1"
+ok "...and it blocks, because no verdict was stated" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$DSV/l1-reviewer.json" | tail -1)" "UNKNOWN"
+
+stop 'No findings.
+
+VERDICT: APPROVED
+
+ROUND NEEDED AFTER FIX: NO'
+ok "the real report still lands after the UNKNOWNs" "$(lines)" "2"
+ok "...and it is the verdict a reader sees last" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$DSV/l1-reviewer.json" | tail -1)" "APPROVED"
+
+# A trailing intermediate stop must not append another UNKNOWN after a stated
+# verdict — that is the ordering that would flip a newest-first reader.
+stop 'Anything else?'
+ok "a LATE intermediate stop adds nothing after a verdict" "$(lines)" "2"
+
+# Repetition of the same conclusion is one fact.
+stop 'VERDICT: APPROVED
+
+ROUND NEEDED AFTER FIX: NO'
+ok "the same conclusion twice -> still one line" "$(lines)" "2"
+
+# But a changed conclusion is new information and must land.
+stop 'VERDICT: APPROVED
+
+ROUND NEEDED AFTER FIX: YES'
+ok "a CHANGED round_needed is recorded, not swallowed" "$(lines)" "3"
+stop '## Critical
+- src/a.go:1 — found it on the second pass
+
+VERDICT: REJECTED (1 items)
+
+ROUND NEEDED AFTER FIX: YES'
+ok "a rejection after an approval is recorded" "$(lines)" "4"
+
+# A new commit is a new subject: the suppression is per-commit, never global.
+printf 'moved\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm move >/dev/null 2>&1
+stop 'Let me start reading.'
+ok "a new commit gets its own line" "$(lines)" "5"
+
+cd "$WORK" || exit 1
+
 echo "== the proof binds the COMMAND it proved, not just its own presence =="
 
 # cmd_hash was written by prove-change-is-tested.sh and read by nothing. The only
@@ -1225,40 +1300,58 @@ ok "an UNCOMMITTED receipt still counts" "$(exloom_round_count "$RC" HEAD)" "3"
 git add -A >/dev/null 2>&1; git commit -qm r3receipt >/dev/null 2>&1
 ok "...and is not double-counted once committed" "$(exloom_round_count "$RC" HEAD)" "3"
 
-# At the cap the decision goes to the HARNESS, which prompts the user. Return 3
-# and an "ask" JSON on stdout, NOT exit 2 — a non-zero exit discards the JSON and
-# hard-blocks, so the user is never asked.
+# At the cap the gate BLOCKS and hands the session a question to put to the user.
 #
-# The version this replaces wrote "please ask the user" into stderr, which only
-# the model reads. A session then wrote its own approval line and pushed. Routing
-# the decision through the harness takes the model out of the path.
+# It used to print an "ask" decision instead, which the harness renders as
+# approve/cancel on the push itself. Cancel there is a tool refusal, not an
+# answer: the push died, the session had nothing to act on, and the person had to
+# retype what they wanted. A cap is a decision point, so it has to yield a
+# DECISION — which means named options, which only AskUserQuestion can render,
+# which is a session tool and not a hook capability.
 rounds_at 3
-ok "at the cap -> hands the decision to the harness (3)" "$(rchk)" "3"
-askjson() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; }
-ok "...and stdout is a valid ask decision" \
-   "$(askjson | python3 -c 'import json,sys
-try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
-except Exception: print("invalid")')" "ask"
-ok "...the report reaches the USER, in permissionDecisionReason" \
-   "$(askjson | python3 -c 'import json,sys
-try:
-    r=json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"]
-    print("yes" if "Findings by pass" in r and "RECOMMENDATION" in r else "no")
-except Exception: print("no")')" "yes"
-ok "...and nothing is written to stderr on the ask path" \
-   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | wc -c | tr -d ' ')" "0"
+ok "at the cap -> blocks (2), it does not prompt on the push" "$(rchk)" "2"
+capmsg() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null; }
+ok "...and the report reaches the session" \
+   "$(capmsg | grep -c 'Findings by pass' | head -1)" "1"
+ok "...as an instruction to ask, naming the tool" \
+   "$(capmsg | grep -c 'Use AskUserQuestion' | head -1)" "1"
+ok "...with all three options" \
+   "$(capmsg | grep -cE '^  - (Fix|Merge as-is|Show me the findings)' | head -1)" "3"
+ok "...and nothing is printed to stdout (that would be a decision)" \
+   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null | wc -c | tr -d ' ')" "0"
 
-# The recommendation comes from OPEN criticals, not from the round number.
+# The recommendation comes from OPEN criticals, not from the round number — and
+# the fix option names the DEFECTS. "2 open criticals" is a score; a cite is
+# something a person can decide about.
 printf '{"round":3,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"c1","head":"%s","at":"n"}\n' \
   "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
 git add -A >/dev/null 2>&1; git commit -qm crit >/dev/null 2>&1
-ok "an open critical -> recommend another pass" \
-   "$(askjson | grep -c 'RECOMMENDATION: RUN ANOTHER PASS' | head -1)" "1"
+ok "an open critical -> recommend fixing, not another pass" \
+   "$(capmsg | grep -c 'RECOMMENDATION: FIX, THEN RE-REVIEW' | head -1)" "1"
+ok "...and the fix option names the cite, not a count" \
+   "$(capmsg | grep -c 'Fix src/one.go:1, then re-review' | head -1)" "1"
+ok "...and the cites come from exloom_open_critical_cites" \
+   "$(exloom_open_critical_cites "$RC" HEAD)" "src/one.go:1"
 printf '{"round":3,"agent":"l1-reviewer","severity":"LOW","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"m1","head":"%s","at":"n"}\n' \
   "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
 git add -A >/dev/null 2>&1; git commit -qm minor >/dev/null 2>&1
 ok "only minors open -> recommend merge" \
-   "$(askjson | grep -c 'RECOMMENDATION: MERGE' | head -1)" "1"
+   "$(capmsg | grep -c 'RECOMMENDATION: MERGE' | head -1)" "1"
+
+# A PASS IS NOT A FIX. Re-reviewing a tip nobody changed returns the previous
+# pass's findings and spends a round doing it. This is the mechanism behind
+# "every feature gets bigger and never completes": the counter counted reviews,
+# when the thing that has to happen between rounds is a fix.
+ok "code moved between the last two passes -> not a no-op" \
+   "$(exloom_last_pass_was_noop "$RC" HEAD && echo noop || echo moved)" "moved"
+printf '// just a comment\n' >> src/one.go
+git add -A >/dev/null 2>&1; git commit -qm 'comment only' >/dev/null 2>&1
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm rereview >/dev/null 2>&1
+ok "a pass over unchanged code IS a no-op" \
+   "$(exloom_last_pass_was_noop "$RC" HEAD && echo noop || echo moved)" "noop"
+ok "...and the cap report says so, rather than counting it" \
+   "$(capmsg | grep -c 'ran against the same code as the pass before it' | head -1)" "1"
 
 # A recorded user answer stops the asking.
 printf '\n## Escape hatches used\n- User approved at round cap — approved after 3 passes\n' >> "$RC"
@@ -1278,9 +1371,9 @@ for i in 1 2 3 4; do
   printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
 done
 git add -A >/dev/null 2>&1; git commit -qm approved >/dev/null 2>&1
-ok "4 rounds all APPROVED -> still asks (a counter only goes up)" "$(rchk)" "3"
+ok "4 rounds all APPROVED -> still asks (a counter only goes up)" "$(rchk)" "2"
 ok "...and the report says every reviewer is satisfied" \
-   "$(askjson | grep -c 'every required reviewer is satisfied' | head -1)" "1"
+   "$(capmsg | grep -c 'every required reviewer is satisfied' | head -1)" "1"
 
 echo "== the cap is configurable, but only from a COMMITTED file =="
 

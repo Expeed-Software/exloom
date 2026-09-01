@@ -98,6 +98,28 @@ For each missing section:
 
 Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
 
+### The dispatch prompt — use this, do not write your own
+
+Copy this, fill the two blanks, send nothing else:
+
+```
+Review branch <branch> at <sha>. Diff: git diff <merge-base>...<sha>
+<one line naming what the change is for — the ticket title is enough>
+```
+
+For the second-stage reviewers, add only:
+
+```
+L1 already reported and these are being handled, so do not re-report them:
+  <file:line> — <one line each>
+```
+
+**That is the whole prompt.** Do not summarise your change, do not explain your reasoning, do not say which areas you think matter, do not name a severity, and do not say what you have already checked.
+
+This is not brevity for its own sake. A reviewer that reads your framing reviews your framing. Tell it where you think the risk is and it looks there; tell it what you already verified and it believes you. The agent files already carry the full instruction set — what to check, in what order, what counts as blocking, and `## 4. The author's claims are not evidence`, which explicitly instructs the reviewer to treat your comments, commit messages and summaries as unverified assertions. A long brief is you doing the reviewer's job for it, worse, and then being told what you already believed.
+
+The dispatch prompt is an address, not a briefing.
+
 **Dispatch order matters. Do not run them all at once.**
 
 1. **`l1-reviewer` alone, first.** Fix what it finds, re-run it, until it approves. This is the loop, and it is one cheap reviewer.
@@ -123,6 +145,18 @@ Applied to a review finding, that means:
 - **A finding that needs architecture goes to a ticket**, not into this branch. Record it in the checklist as deferred with the ticket, and move on.
 
 A one-line change should end as a one-line change. Four test classes for one config key is not diligence; it is scope expansion wearing its clothes, and each addition is unreviewed code that generates the next round of findings.
+
+## Do not steer the review
+
+The reviewers are instructed to treat your claims as unverified — `## 4. The author's claims are not evidence` in the agent files. The matching obligation on your side:
+
+- **Do not tell a reviewer what to look for.** It has its own checklist and runs it in order. Pointing it at your concern moves attention away from wherever the defect actually is.
+- **Do not tell it what not to flag.** Not "ignore the docs changes", not "the tests are already covered", not "pre-existing, don't worry about it". Scope labelling is the reviewer's job and it has rules for it.
+- **Do not pre-rate a severity.** "Minor style thing but…" pre-decides the answer you dispatched a reviewer to get.
+- **Do not summarise what you changed or why.** The diff is the change. A summary is a claim about the diff, and a reviewer reading your summary is reviewing your summary.
+- **Do not say what you already verified.** If you tested it, the proof receipt says so mechanically. Saying it in a prompt asks the reviewer to take your word.
+
+**And do not invent process on top of this command.** Rules you make up mid-branch — your own freeze, your own re-review trigger, your own rule that every reviewer must approve the same commit — feel like rigour and are the reason a branch reaches round seven. If exloom does not require it, it is not required. Where you think exloom is wrong, say so and continue as written rather than quietly substituting your own protocol.
 
 Wait for the user. Do NOT mark complete while anything is missing.
 

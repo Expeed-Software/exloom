@@ -340,11 +340,54 @@ if [[ $n_found -gt 0 ]]; then
   echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
 fi
 
+# ---------- do not append a line that adds nothing ----------
+# SubagentStop fires on EVERY turn the reviewer stops on, not only its last one.
+# A reviewer that reads eight files stops eight times, and only the final stop
+# carries the report — the other seven hand over an intermediate message with no
+# VERDICT line, which scored UNKNOWN and was appended verbatim. Observed in the
+# field: 18 lines for one commit, 17 of them UNKNOWN, one REJECTED.
+#
+# The gate read those correctly (it takes the strongest verdict for the commit,
+# not the last line), so this was never a wrong decision — but a receipt file
+# that is 90% noise cannot be read by a human, and any future reader that scans
+# it newest-first would invert the answer.
+#
+# So the append is now conditional on the line being NEW INFORMATION for this
+# commit. Nothing else changes: the first UNKNOWN for a commit is still
+# recorded, and still blocks, because a reviewer that states no verdict has not
+# approved anything.
+_recorded_for_head() {
+  # $1: a JSON fragment to look for on a line already naming this HEAD.
+  local f="${VDIR}/${AGENT}.json"
+  [[ -f "$f" ]] || return 1
+  grep -F "\"head\":\"${HEAD_SHA}\"" "$f" 2>/dev/null | grep -qF "$1"
+}
+
 if [[ $REPORT_SEEN -eq 0 ]]; then
+  # A dispatch line records "a reviewer was launched at this commit". Once that
+  # is on file, launching again at the same commit says nothing further.
+  if _recorded_for_head "\"agent\":\"${AGENT}\""; then
+    exit 0
+  fi
   printf '{"agent":"%s","subagent_type":"%s","head":"%s","at":"%s","session":"%s"}\n' \
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
     >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
   echo "exloom: recorded ${AGENT} DISPATCH receipt at ${HEAD_SHA:0:12} — the reviewer's report is not available at this event (async dispatch), so no verdict was recorded. Read the findings yourself before marking the checklist complete." >&2
+  exit 0
+fi
+
+# An UNKNOWN adds nothing once ANY verdict is on file for this commit — it is
+# almost always an intermediate stop arriving after (or before) the real report.
+# A stated verdict is always recorded, even if an UNKNOWN preceded it; that is
+# the line the gate acts on.
+if [[ "$VERDICT" == "UNKNOWN" ]] && _recorded_for_head '"verdict":"'; then
+  exit 0
+fi
+# And the same conclusion twice for the same commit is one fact, not two. The
+# key is verdict AND round_needed together, because those two fields are the
+# whole content of the line — a second report that changes its mind about
+# whether another round is needed is new information and must land.
+if _recorded_for_head "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND_NEEDED}\""; then
   exit 0
 fi
 

@@ -437,6 +437,55 @@ exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
   printf '%s' "$n"
 }
 
+# WHICH criticals are open, not how many. The cap question asks the user to
+# choose between merging and fixing, and "2 open criticals" is not enough to
+# choose on — a number is a score, a cite is a defect. Echoes up to four
+# `file:line` cites from the latest round.
+exloom_open_critical_cites() {   # exloom_open_critical_cites <checklist> <tip>
+  local vdir all f last maxr out=""
+  vdir="$(exloom_verdict_dir "$1")"
+  all="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}" 2>/dev/null | grep 'findings.jsonl' || true)"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    last="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${f}" 2>/dev/null || true)"
+    maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
+    [[ -n "$maxr" ]] || continue
+    out="${out}$(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep '"severity":"HIGH"' \
+                 | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')
+"
+  done <<< "$all"
+  printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort -u | head -4 | paste -sd', ' - 2>/dev/null \
+    || printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort -u | head -4 | tr '\n' ' '
+}
+
+# Did the LAST review pass look at code anyone had changed?
+#
+# A review pass does not fix anything. Running a fourth pass on a tip identical
+# to the third pass's is a guaranteed repeat of the third pass's findings — it
+# spends a round and moves nothing. This is the mechanism behind "each feature is
+# getting bigger and never completes": the counter counted reviews when the thing
+# that has to happen between rounds is a FIX.
+#
+# Returns 0 when the last pass reviewed unchanged code (a no-op pass), 1 when
+# code moved between the last two passes or there are not yet two to compare.
+exloom_last_pass_was_noop() {   # exloom_last_pass_was_noop <checklist> <tip>
+  local vdir committed working heads prev cur
+  vdir="$(exloom_verdict_dir "$1")"
+  committed="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  working="$(cat "${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  # Order of first appearance, not sort order: these are passes in sequence.
+  heads="$(printf '%s\n%s\n' "$committed" "$working" \
+    | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
+    | awk '!seen[$0]++' | tail -2)"
+  [[ "$(printf '%s\n' "$heads" | grep -c .)" -eq 2 ]] || return 1
+  prev="$(printf '%s\n' "$heads" | head -1)"
+  cur="$(printf '%s\n' "$heads" | tail -1)"
+  git cat-file -e "${prev}^{commit}" 2>/dev/null || return 1
+  git cat-file -e "${cur}^{commit}" 2>/dev/null || return 1
+  exloom_diff_is_behavioural "$prev" "$cur" && return 1
+  return 0
+}
+
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
 #
 # Only the L1 reviewer's approval must cover the shipped commit. The others must
@@ -552,30 +601,69 @@ exloom_check_verdicts() {
     [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
     [[ -n "$outstanding" ]] || outstanding="  every required reviewer is satisfied at this commit
 "
-    local trend crit rec
+    local trend crit cites fix_opt rec noop=""
     trend="$(exloom_severity_trend "$checklist" "$tip" 2>/dev/null || true)"
     [[ -n "$trend" ]] || trend="  (no findings recorded)
 "
     crit="$(exloom_open_criticals "$checklist" "$tip" 2>/dev/null || echo 0)"
-    if [[ "${crit:-0}" -gt 0 ]]; then
-      rec="RUN ANOTHER PASS — ${crit} critical finding(s) are still open in the latest round."
-    else
-      rec="MERGE — no critical findings are open. The remaining items are important/minor."
+    cites="$(exloom_open_critical_cites "$checklist" "$tip" 2>/dev/null || true)"
+
+    # A pass is not a fix. If the last pass reviewed the same code as the one
+    # before it, say so plainly — that round bought nothing, and repeating it
+    # buys nothing either.
+    if exloom_last_pass_was_noop "$checklist" "$tip" 2>/dev/null; then
+      noop="
+NOTE: the last review pass ran against the same code as the pass before it. No
+fix landed between them, so it returned the same findings. Another pass with no
+fix in front of it will do the same.
+"
     fi
 
-    if _exloom_ask "Review has run ${rounds} passes on this branch (cap ${max}).
+    if [[ "${crit:-0}" -gt 0 ]]; then
+      if [[ -n "$cites" ]]; then
+        fix_opt="Fix ${cites}, then re-review"
+      else
+        fix_opt="Fix the ${crit} open critical finding(s), then re-review"
+      fi
+      rec="FIX, THEN RE-REVIEW — ${crit} critical finding(s) are still open."
+    else
+      fix_opt="Fix something anyway, then re-review"
+      rec="MERGE — no critical findings are open. The remaining items are important or minor."
+    fi
+
+    # NOT permissionDecision:"ask". That renders as approve/cancel on the push
+    # itself, and cancel is a tool refusal rather than an answer: the push dies,
+    # the session has nothing to act on, and the person has to retype their
+    # intent. A cap is a decision point, so it has to produce a DECISION.
+    #
+    # So this blocks, and hands the session the question to put to the user. The
+    # push stays blocked either way — the gate is still enforced here, in the
+    # hook. What the session controls is only which of the named options gets
+    # carried out.
+    _exloom_block "$action" "Review has run ${rounds} passes on this branch (cap ${max}).
 
 Findings by pass:
 ${trend}
 Reviewer status:
-${outstanding}
+${outstanding}${noop}
 RECOMMENDATION: ${rec}
 
-Allow to merge and push now. Deny to run another review pass — you will be asked
-again after it, with an updated report."; then
-      # 0 = the harness now owns this decision; it prompts the user.
-      return 3
-    fi
+STOP AND ASK THE USER. Use AskUserQuestion with exactly these options, the
+recommended one first, and do NOT decide it yourself:
+
+  - ${fix_opt}
+  - Merge as-is — the open items are acceptable
+  - Show me the findings first
+
+Then carry out what they choose:
+  fix     -> make the fix, commit it, re-dispatch l1-reviewer, come back here
+  merge   -> record their answer in ${checklist} under 'Escape hatches used' as
+             '- User approved at round cap — <their words>', commit it, push again
+  show    -> print the findings from ${vdir}/*.findings.jsonl and ask again
+
+Do not record that answer unless they actually gave it. Re-running the reviewers
+without a fix in between does not clear this — it is the same code and it will
+return here with the same findings."
     return 2
   fi
 
@@ -1070,35 +1158,24 @@ Configure git signing and re-run /review-complete (it commits with -S), or remov
 }
 
 # Internal: print a uniform BLOCK message. Args: <action> <detail>
-# Hand a decision to the USER, not to the model.
 #
-# Emits the PreToolUse permission JSON with decision "ask", which makes Claude
-# Code show its own prompt carrying this text. Exit 0 — the JSON is the decision,
-# not the exit code.
+# There was a second emitter here, _exloom_ask, which printed the PreToolUse
+# permission JSON with decision "ask" so Claude Code would show its own prompt.
+# It is gone, and the round cap now blocks like everything else.
 #
-# This is the difference between a stop the model can talk past and one it
-# cannot. `exit 2` plus "please ask the user" in stderr is an instruction: a
-# session that decides to write its own approval line and retry will succeed, and
-# one did. Routing it through the harness takes the model out of the decision
-# path entirely.
-_exloom_ask() {
-  local reason="$1"
-  if command -v jq >/dev/null 2>&1; then
-    jq -nc --arg r "$reason" \
-      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
-  elif command -v python3 >/dev/null 2>&1; then
-    REASON="$reason" python3 -c 'import json,os
-print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
-  "permissionDecision":"ask","permissionDecisionReason":os.environ["REASON"]}}))'
-  else
-    # No JSON tool: fall back to a hard block rather than letting the push
-    # through. A gate that cannot express "ask" must not silently allow.
-    printf '%s\n' "$reason" >&2
-    return 1
-  fi
-  return 0
-}
-
+# The reasoning that put it there was sound and the outcome was not. `exit 2`
+# plus "ask the user" in stderr is only an instruction, and a session did write
+# its own approval line and push — so the decision was routed to the harness to
+# take the model out of the path. But the harness renders that as approve/cancel
+# on the push itself, and CANCEL IS NOT AN ANSWER: it refuses the tool, the push
+# dies, the session has nothing to act on, and the person has to retype what they
+# wanted. A cap exists to produce a decision, and two of its three real answers
+# (fix these, show me the findings) cannot be expressed as approve or cancel.
+#
+# Named options need AskUserQuestion, which is a session tool and not a hook
+# capability. So the cap blocks, and the block text tells the session which
+# question to ask and what to do with each answer. The push stays blocked by the
+# hook either way; what the session controls is only which named option runs.
 _exloom_block() {
   local action="$1" detail="$2"
   cat >&2 <<EOF

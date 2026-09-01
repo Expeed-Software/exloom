@@ -123,7 +123,7 @@ git push -u origin fix/24391-negative-discount
 
 The gate checks: checklist complete, no placeholder text, tier not under-declared, `proof.json` says PROVED, L1 approved the commit being shipped. All true — the push goes.
 
-Had this branch reached **three** review passes, Claude Code would have prompted *you* with the findings-per-pass and a merge-or-another-pass recommendation. That prompt is a real one — the session cannot answer it for you.
+Had this branch reached **three** review passes, the push would have blocked and you would have been asked to choose: fix the open Criticals by name and re-review, merge as-is, or see the findings first — with the recommended option first, derived from whether any Critical is still open. Note the wording of the fix option: another *review* pass on unchanged code returns the same findings, so what the cap asks for is a fix.
 
 ---
 

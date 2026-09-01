@@ -19,6 +19,19 @@ The retrospective was clear about which gates carried signal. L1 found real bugs
 
 This protocol encodes those lessons. Every change, regardless of size, needs an L1 code review and a real smoke test (booted system, executed user action, observed result). Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a rollback dry-run. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse to let you declare done or push without it filled.
 
+## If you have used exloom before, four rules changed
+
+Read this even if you think you know the protocol. Sessions carrying older priors re-impose the removed rules on themselves, and every one of them is a round multiplier.
+
+| Rule you may remember | Status now |
+|---|---|
+| Every required reviewer must approve the **same commit** | **Removed in 4.1.0.** Only `l1-reviewer` must cover the commit you ship. Adversarial and security must have run and approved *anywhere* on the branch; a later fix does not invalidate them. Requiring simultaneity is what produced 7–12 round branches — N reviewers chasing a target that moves each time one of them is answered. |
+| The working tree is **frozen** while a reviewer reads it | **Removed in 4.0.0.** There is no freeze marker and no state machine. Do not invent one. |
+| A source edit is blocked until a **plan is approved** | **Removed in 4.0.0.** There is no plan gate. |
+| A finding should be fixed **across its whole class**, with a test proving the class is closed | **Removed in 4.2.0.** A reviewer may note that a finding looks like one of a class; it may not demand a general fix. Fixing the instance and tracking the class in a ticket is a normal answer. |
+
+If you find yourself enforcing something on this branch that exloom does not ask for, stop. Self-imposed process is the most common cause of a branch that will not converge, and it is invisible in the checklist afterwards.
+
 ## What the gate actually verifies
 
 This matters more than the step list, because it is the difference between review and self-certification.
@@ -59,9 +72,19 @@ Reviewer status:
 RECOMMENDATION: MERGE — no critical findings are open.
 ```
 
-**Allow** and the push goes. **Deny** and it does not — run another pass, and the same question comes back with an updated report. The recommendation is derived from open Critical findings in the latest round, not from the pass count: an open Critical recommends another pass however few passes there have been, and none recommends merge however many there have been.
+You are then asked, with named options and the recommended one first:
 
-This is deliberately not a message in the session's output. An earlier version wrote "ask the user" to stderr, which only the model reads — and a session duly wrote its own approval line and pushed. Routing the decision through the harness takes the model out of it. Once you allow, the answer is recorded in the checklist and the branch stops asking.
+- **Fix `OrderTotal.java:12`, `PromotionMapper.java:142`, then re-review** — the open Criticals, by cite
+- **Merge as-is** — the open items are acceptable
+- **Show me the findings first**
+
+Pick one and the session carries it out. The recommendation comes from open Critical findings in the latest round, never from the pass count: an open Critical recommends fixing however few passes there have been, and none recommends merge however many there have been.
+
+**The second option is fix-then-re-review, not "run another pass."** A pass does not fix anything — re-reviewing a commit nobody changed returns the previous pass's findings and spends a round doing it. If the last pass ran against the same code as the one before it, the report says so instead of counting it.
+
+Once you choose merge, the answer is recorded in the checklist and the branch stops asking.
+
+Two earlier versions of this are worth knowing about, because both failed in ways the current one is shaped around. The first wrote "ask the user" to stderr, which only the model reads — a session wrote its own approval line and pushed. The second routed the decision to Claude Code's own approve/cancel prompt, which the model genuinely cannot forge — but cancel is a refusal of the push, not an answer, so the push died with nothing to act on and you had to retype your intent. Named options only exist as a session tool, so the gate blocks and hands the session the question.
 
 Change the cap by committing `.claude/exloom-max-rounds` with a number. Committed only, because raising it weakens the gate and that belongs in a diff.
 
