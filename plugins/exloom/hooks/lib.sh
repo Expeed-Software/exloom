@@ -365,13 +365,66 @@ exloom_max_rounds() {
 # Has a human recorded a decision to ship at the cap? Mechanical: the checklist's
 # escape-hatch section must carry a line naming the cap. The reason is for the
 # next reader, not for the gate — the gate only checks that a person wrote one.
+# Has the USER been asked and decided to ship at the cap?
+#
+# Recorded in the checklist by the session AFTER it puts the report in front of
+# the user and asks. The control here is the asking, not the file: the block
+# message below instructs the session to show the report in the conversation and
+# take an explicit answer. A protected file was tried and is worse — it forces
+# the person out of the session to run a shell command, which is not a decision
+# point, it is an obstacle.
 exloom_cap_override() {   # exloom_cap_override <checklist> <tip>
   local content
   content="$(MSYS_NO_PATHCONV=1 git show "${2}:${1}" 2>/dev/null || true)"
   [[ -n "$content" ]] || return 1
   printf '%s\n' "$content" \
-    | grep -qiE '^[[:space:]]*-[[:space:]]*shipped at round cap[[:space:]]*—[[:space:]]*\S' || return 1
+    | grep -qiE '^[[:space:]]*-[[:space:]]*(user approved at round cap|shipped at round cap)[[:space:]]*—[[:space:]]*\S' || return 1
   return 0
+}
+
+# Severity of findings per round, so the report can say whether the branch is
+# settling or falling apart. Reads <agent>.findings.jsonl, which records a
+# severity and a round for every finding and which nothing else consumes.
+# Echoes e.g. "round 1: 3 HIGH 2 MED | round 2: 1 HIGH | round 3: 0"
+exloom_severity_trend() {   # exloom_severity_trend <checklist> <tip>
+  local vdir all r line out="" hi med lo
+  vdir="$(exloom_verdict_dir "$1")"
+  all="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}" 2>/dev/null | grep 'findings.jsonl' || true)"
+  local combined=""
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    combined="${combined}$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${f}" 2>/dev/null || true)
+"
+  done <<< "$all"
+  [[ -n "$(printf '%s' "$combined" | tr -d '[:space:]')" ]] || return 1
+  for r in $(printf '%s\n' "$combined" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un); do
+    line="$(printf '%s\n' "$combined" | grep "\"round\":${r},")"
+    hi="$(printf '%s\n' "$line" | grep -c '"severity":"HIGH"' || true)"
+    med="$(printf '%s\n' "$line" | grep -c '"severity":"MED"' || true)"
+    lo="$(printf '%s\n' "$line" | grep -c '"severity":"LOW"' || true)"
+    out="${out}round ${r}: ${hi} critical, ${med} important, ${lo} minor
+"
+  done
+  printf '%s' "$out"
+}
+
+# How many unresolved CRITICAL findings are on record? This is what decides the
+# recommendation — a branch with an open critical is not ready however many
+# rounds it has had, and a branch with none is ready however many it took.
+exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
+  local vdir all n=0
+  vdir="$(exloom_verdict_dir "$1")"
+  all="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}" 2>/dev/null | grep 'findings.jsonl' || true)"
+  local last=""
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    last="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${f}" 2>/dev/null || true)"
+    local maxr
+    maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
+    [[ -n "$maxr" ]] || continue
+    n=$(( n + $(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep -c '"severity":"HIGH"' || true) ))
+  done <<< "$all"
+  printf '%s' "$n"
 }
 
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
@@ -455,45 +508,60 @@ exloom_check_verdicts() {
     fi
   done
 
-  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
-
-  # ---------- the round cap ----------
-  # A loop whose exit depends on a reviewer's judgement has no guaranteed
-  # terminating state: the degenerate case where each fix introduces a new defect
-  # is not rare. At the cap the gate stops deciding and hands the decision to a
-  # person, with the outstanding findings in front of them. It does NOT ship
-  # automatically — a cap that silently allows the push is a slower no-gate.
+  # ---------- the round cap, checked BEFORE the reviewers are judged ----------
+  # The cap is a property of the branch, not of the findings. It used to be
+  # checked only when something was outstanding, so a branch that reached round
+  # 10 and then satisfied every reviewer shipped silently — the count never
+  # surfaced. And since verdict capture degraded on async dispatch, "outstanding"
+  # became rare, which disabled the cap almost entirely.
+  #
+  # A counter that only goes up is the point: it cannot be satisfied by more
+  # work, only by a person deciding the branch is done taking rounds.
   local rounds max
   rounds="$(exloom_round_count "$checklist" "$tip")"
   max="$(exloom_max_rounds)"
+  if [[ "$rounds" -ge "$max" ]] && exloom_cap_override "$checklist" "$tip"; then
+    # The user was shown the full report — findings by pass, reviewer status,
+    # recommendation — and chose to merge. That answer settles the branch; it does
+    # not then get second-guessed by the same reviewer state they just read.
+    echo "exloom: shipping at ${rounds} passes on a decision recorded in ${checklist}." >&2
+    return 0
+  fi
   if [[ "$rounds" -ge "$max" ]]; then
-    if exloom_cap_override "$checklist" "$tip"; then
-      echo "exloom: shipping at the round cap (${rounds}/${max}) on a recorded decision in ${checklist}." >&2
-      return 0
-    fi
     local outstanding=""
     [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
     [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
     [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
-    _exloom_block "$action" "Round cap reached on this branch: ${rounds} rounds, cap is ${max}.
+    [[ -n "$outstanding" ]] || outstanding="  every required reviewer is satisfied at this commit
+"
+    local trend crit rec
+    trend="$(exloom_severity_trend "$checklist" "$tip" 2>/dev/null || true)"
+    [[ -n "$trend" ]] || trend="  (no findings recorded)
+"
+    crit="$(exloom_open_criticals "$checklist" "$tip" 2>/dev/null || echo 0)"
+    if [[ "${crit:-0}" -gt 0 ]]; then
+      rec="RUN ANOTHER PASS — ${crit} critical finding(s) are still open in the latest round."
+    else
+      rec="MERGE — no critical findings are open. The remaining items are important/minor."
+    fi
 
-Outstanding:
+    if _exloom_ask "Review has run ${rounds} passes on this branch (cap ${max}).
+
+Findings by pass:
+${trend}
+Reviewer status:
 ${outstanding}
-Findings are recorded in ${vdir}/*.findings.jsonl and in ${checklist}.
+RECOMMENDATION: ${rec}
 
-Three rounds is where exloom stops deciding for you. Either fix what is
-outstanding and dispatch again, or ship deliberately by recording the decision
-in ${checklist} under 'Escape hatches used':
-
-  - Shipped at round cap — <one line: why this is acceptable>
-
-then list each outstanding finding with fixed / deferred + ticket / accepted +
-reason. Commit the checklist and push. The decision travels with the PR, so the
-next person reads why rather than guessing.
-
-To change the cap for this repo, commit .claude/exloom-max-rounds with a number."
+Allow to merge and push now. Deny to run another review pass — you will be asked
+again after it, with an updated report."; then
+      # 0 = the harness now owns this decision; it prompts the user.
+      return 3
+    fi
     return 2
   fi
+
+  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
 
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
   [[ -n "$sec_extra" ]] && detail="${detail}
@@ -921,7 +989,11 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
 
     # Reviewer verdict receipts — the one check that tests an event rather than
     # an assertion. Uses the DECLARED tier, which is >= derived by the check above.
-    exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action" || return 2
+    # 3 means the round cap emitted an "ask" decision: the harness now prompts
+    # the USER. Propagated distinctly so the hook exits 0 — the JSON on stdout is
+    # the decision, and a non-zero exit would discard it and hard-block instead.
+    exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action"
+    case "$?" in 0) ;; 3) return 3 ;; *) return 2 ;; esac
 
     # Author-side proof that the change is actually tested (Tier 1+). The receipt
     # is written only by scripts/prove-change-is-tested.sh, into the directory
@@ -976,6 +1048,35 @@ Configure git signing and re-run /review-complete (it commits with -S), or remov
 }
 
 # Internal: print a uniform BLOCK message. Args: <action> <detail>
+# Hand a decision to the USER, not to the model.
+#
+# Emits the PreToolUse permission JSON with decision "ask", which makes Claude
+# Code show its own prompt carrying this text. Exit 0 — the JSON is the decision,
+# not the exit code.
+#
+# This is the difference between a stop the model can talk past and one it
+# cannot. `exit 2` plus "please ask the user" in stderr is an instruction: a
+# session that decides to write its own approval line and retry will succeed, and
+# one did. Routing it through the harness takes the model out of the decision
+# path entirely.
+_exloom_ask() {
+  local reason="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc --arg r "$reason" \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
+  elif command -v python3 >/dev/null 2>&1; then
+    REASON="$reason" python3 -c 'import json,os
+print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse",
+  "permissionDecision":"ask","permissionDecisionReason":os.environ["REASON"]}}))'
+  else
+    # No JSON tool: fall back to a hard block rather than letting the push
+    # through. A gate that cannot express "ask" must not silently allow.
+    printf '%s\n' "$reason" >&2
+    return 1
+  fi
+  return 0
+}
+
 _exloom_block() {
   local action="$1" detail="$2"
   cat >&2 <<EOF

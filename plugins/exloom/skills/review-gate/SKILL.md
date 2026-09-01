@@ -42,14 +42,28 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 
 **Only L1 has to cover the commit you ship.** The other reviewers must have run and approved somewhere on this branch; a later fix does not invalidate them. Requiring all of them to approve the *same* commit is what produces a long review loop: a fix cancels the approvals of reviewers that were already satisfied, so every round starts over. Fix a finding, re-run L1, push.
 
-**Three rounds, then a person decides.** A round is a distinct commit that L1 reviewed. At the third, the gate stops deciding and blocks with the outstanding findings listed. It does not ship automatically — you either fix them, or record the decision in the checklist:
+**After three passes, the user is asked — by Claude Code, not by the session.** A pass is a distinct commit that L1 reviewed. At the third, the hook returns a `permissionDecision: "ask"`, so the harness shows its own prompt carrying the report:
 
 ```
-## Escape hatches used
-- Shipped at round cap — remaining findings are style-only, tracked in PROJ-9
+Review has run 4 passes on this branch (cap 3).
+
+Findings by pass:
+round 1: 1 critical, 0 important, 0 minor
+round 2: 1 critical, 0 important, 0 minor
+round 3: 0 critical, 0 important, 1 minor
+round 4: 0 critical, 0 important, 1 minor
+
+Reviewer status:
+  l1-reviewer — approved earlier code, not the current tip
+
+RECOMMENDATION: MERGE — no critical findings are open.
 ```
 
-then list each outstanding finding as fixed / deferred with a ticket / accepted with a reason. The gate checks the line exists; judging the reason is for whoever reads the PR. Change the cap by committing `.claude/exloom-max-rounds` with a number.
+**Allow** and the push goes. **Deny** and it does not — run another pass, and the same question comes back with an updated report. The recommendation is derived from open Critical findings in the latest round, not from the pass count: an open Critical recommends another pass however few passes there have been, and none recommends merge however many there have been.
+
+This is deliberately not a message in the session's output. An earlier version wrote "ask the user" to stderr, which only the model reads — and a session duly wrote its own approval line and pushed. Routing the decision through the harness takes the model out of it. Once you allow, the answer is recorded in the checklist and the branch stops asking.
+
+Change the cap by committing `.claude/exloom-max-rounds` with a number. Committed only, because raising it weakens the gate and that belongs in a diff.
 
 What this does **not** buy: it proves a reviewer ran, never that the review was good. A dispatched `l1-reviewer` that returns "looks fine" produces a valid receipt. And anyone can disable the plugin, edit `lib.sh`, or set `EXLOOM_REVIEW_SKIP=1` — this is a cooperating-team gate, not an adversarial boundary. The change it makes is that within a cooperating session, the lazy path no longer produces a passing artifact.
 

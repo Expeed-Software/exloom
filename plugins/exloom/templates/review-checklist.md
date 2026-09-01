@@ -81,14 +81,13 @@ none
        - Skipped steps with written justification:
          - smoke test — headless CI box, verified on staging instead
 
-     At the round cap the gate stops and asks a person to decide. To ship with
-     findings outstanding, add a line in exactly this form, then list each
-     outstanding finding with fixed / deferred + ticket / accepted + reason:
+     After the round cap, Claude Code prompts the USER with the review report and
+     they allow or deny. Once they allow, record their answer here so the branch
+     stops asking and the next reader sees who decided:
 
-       - Shipped at round cap — the remaining findings are style-only
+       - User approved at round cap — approved after 4 passes, remaining items are minor
 
-     The gate checks that the line exists and carries a reason; it does not judge
-     the reason. That is for whoever reads the PR. -->
+     Do not add that line unless the user actually answered the prompt. -->
 
 ## Provenance
 - AI-assisted: <ai-assisted>

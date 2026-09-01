@@ -1163,14 +1163,62 @@ ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
 ok "...and the message is NOT the cap message" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"
 
+# At the cap the decision goes to the HARNESS, which prompts the user. Return 3
+# and an "ask" JSON on stdout, NOT exit 2 — a non-zero exit discards the JSON and
+# hard-blocks, so the user is never asked.
+#
+# The version this replaces wrote "please ask the user" into stderr, which only
+# the model reads. A session then wrote its own approval line and pushed. Routing
+# the decision through the harness takes the model out of the path.
 rounds_at 3
-ok "at the cap -> still blocked (a cap must not auto-ship)" "$(rchk)" "2"
-ok "...and now it IS the cap message" \
-   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "1"
+ok "at the cap -> hands the decision to the harness (3)" "$(rchk)" "3"
+askjson() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; }
+ok "...and stdout is a valid ask decision" \
+   "$(askjson | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("invalid")')" "ask"
+ok "...the report reaches the USER, in permissionDecisionReason" \
+   "$(askjson | python3 -c 'import json,sys
+try:
+    r=json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"]
+    print("yes" if "Findings by pass" in r and "RECOMMENDATION" in r else "no")
+except Exception: print("no")')" "yes"
+ok "...and nothing is written to stderr on the ask path" \
+   "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | wc -c | tr -d ' ')" "0"
 
-printf '\n## Escape hatches used\n- Shipped at round cap — remaining findings are style-only, tracked in PROJ-9\n' >> "$RC"
-git add -A >/dev/null 2>&1; git commit -qm override >/dev/null 2>&1
-ok "a recorded human decision at the cap -> allowed" "$(rchk)" "0"
+# The recommendation comes from OPEN criticals, not from the round number.
+printf '{"round":3,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"c1","head":"%s","at":"n"}\n' \
+  "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm crit >/dev/null 2>&1
+ok "an open critical -> recommend another pass" \
+   "$(askjson | grep -c 'RECOMMENDATION: RUN ANOTHER PASS' | head -1)" "1"
+printf '{"round":3,"agent":"l1-reviewer","severity":"LOW","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"m1","head":"%s","at":"n"}\n' \
+  "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm minor >/dev/null 2>&1
+ok "only minors open -> recommend merge" \
+   "$(askjson | grep -c 'RECOMMENDATION: MERGE' | head -1)" "1"
+
+# A recorded user answer stops the asking.
+printf '\n## Escape hatches used\n- User approved at round cap — approved after 3 passes\n' >> "$RC"
+git add -A >/dev/null 2>&1; git commit -qm userok >/dev/null 2>&1
+ok "the user's recorded answer -> no further prompt" "$(rchk)" "0"
+python3 -c "
+import sys,re
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+s=re.sub(r'- User approved at round cap.*\n','',s)
+open(p,'w',encoding='utf-8',newline='').write(s)" "$RC"
+git add -A >/dev/null 2>&1; git commit -qm rmok >/dev/null 2>&1
+
+# And the cap fires on the COUNT, even when every reviewer is satisfied.
+: > "$RCV/l1-reviewer.json"
+for i in 1 2 3 4; do
+  printf 'ok%s\n' "$i" > src/one.go; git add -A >/dev/null 2>&1; git commit -qm "ok$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm approved >/dev/null 2>&1
+ok "4 rounds all APPROVED -> still asks (a counter only goes up)" "$(rchk)" "3"
+ok "...and the report says every reviewer is satisfied" \
+   "$(askjson | grep -c 'every required reviewer is satisfied' | head -1)" "1"
 
 echo "== the cap is configurable, but only from a COMMITTED file =="
 

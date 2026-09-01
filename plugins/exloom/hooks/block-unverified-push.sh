@@ -104,12 +104,15 @@ for br in "${VBRANCHES[@]}"; do
   exloom_is_protected_branch "$br" && continue
   exloom_is_skip_branch "$br" && continue
   if [[ "$br" == "$CURRENT_BRANCH" ]]; then
-    exloom_validate_checklist ".claude/reviews/${br}.md" "HEAD" 1 "push / open a PR for '$br'" || exit 2
+    exloom_validate_checklist ".claude/reviews/${br}.md" "HEAD" 1 "push / open a PR for '$br'"
   else
     # Pushing a branch other than the one checked out — validate ITS committed
     # checklist against ITS tip, from the ref (its working tree isn't present).
-    exloom_validate_checklist ".claude/reviews/${br}.md" "refs/heads/${br}" 0 "push / open a PR for '$br'" || exit 2
+    exloom_validate_checklist ".claude/reviews/${br}.md" "refs/heads/${br}" 0 "push / open a PR for '$br'"
   fi
+  # 3 = the round cap printed an "ask" decision to stdout. Exit 0 so the harness
+  # reads that JSON and prompts the user; a non-zero exit would throw it away.
+  case "$?" in 0) ;; 3) exit 0 ;; *) exit 2 ;; esac
 done
 
 exit 0
