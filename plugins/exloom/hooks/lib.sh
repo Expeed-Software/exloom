@@ -402,9 +402,12 @@ exloom_round_count() {   # exloom_round_count <checklist> <tip>
   vdir="$(exloom_verdict_dir "$1")"
   committed="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
   working="$(cat "${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  # awk, not `grep -c . || printf 0`: grep prints 0 AND exits 1 on no match, so the
+  # fallback fired too and the answer was the two-line string "0\n0" — which every
+  # arithmetic test on it then rejected with a syntax error on stderr.
   printf '%s\n%s\n' "$committed" "$working" \
     | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
-    | sort -u | grep -c . || printf '0'
+    | sort -u | awk 'END{print NR}'
 }
 
 # The round cap. A repo may raise or lower it with a COMMITTED
@@ -478,7 +481,11 @@ exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
     local maxr
     maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
     [[ -n "$maxr" ]] || continue
-    n=$(( n + $(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep -c '"severity":"HIGH"' || true) ))
+    # DISTINCT defects, by fingerprint — not finding lines. The same defect
+    # reported in three passes is one thing still open, and counting the lines
+    # said "3 critical findings" beside a single cite.
+    n=$(( n + $(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep '"severity":"HIGH"' \
+                 | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u | awk 'END{print NR}') ))
   done <<< "$all"
   printf '%s' "$n"
 }
@@ -1147,7 +1154,20 @@ Run /review-complete — it names each tier-required section still missing."
     | awk '/<!--/{inc=1} !inc{print} /-->/{inc=0}' \
     | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
   if printf '%s' "$scan" | grep -Eq "$placeholder_re" || printf '%s' "$scan" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
-    _exloom_block "$action" "A required section of $checklist still contains template placeholder text.
+    # NAME THE LINES. Saying only "a required section" left the author grepping a
+    # regex out of this file to find out which one, while every other block in
+    # here names exactly what is missing. Reported with the heading each line sits
+    # under, since a bare line is not always enough to place it.
+    local unfilled
+    unfilled="$(printf '%s\n' "$scan" \
+      | awk -v re="$placeholder_re" '
+          /^## /{sec=$0}
+          $0 ~ re || /^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$/ {
+            printf "  %s\n      %s\n", (sec==""?"(header)":sec), $0
+          }' | head -20)"
+    _exloom_block "$action" "$checklist still contains template placeholder text:
+
+${unfilled}
 Fill in the real evidence for the declared tier, or revert the final-verdict ticks."
     return 2
   fi
@@ -1242,8 +1262,16 @@ Run /review-complete to record who and what produced this change."
       [[ "$worktree" == "1" ]] && ref="HEAD"
       p_commit="$(git log -1 --format=%H "$ref" -- "$checklist" 2>/dev/null)"
       if [[ -z "$p_commit" ]] || ! git verify-commit "$p_commit" >/dev/null 2>&1; then
-        _exloom_block "$action" "Signed provenance is required (.claude/exloom-provenance-signed.enabled) but the commit that recorded $checklist is not a verified signed commit.
-Configure git signing and re-run /review-complete (it commits with -S), or remove the marker for v1."
+        # Name the reason that actually applies. Naming the marker when the LANE
+        # asked for it sent people looking for a file that was not there, and
+        # told them to remove it.
+        local why="the repo has .claude/exloom-provenance-signed.enabled" out="remove that marker"
+        if [[ "$lane" == "certified" ]]; then
+          why="this branch is on the Certified lane"
+          out="move the branch to the Standard lane (**Lane:** standard)"
+        fi
+        _exloom_block "$action" "Signed provenance is required — ${why} — but the commit that recorded $checklist is not a verified signed commit.
+Configure git commit signing (GPG or SSH) and re-run /review-complete, which commits with -S. Otherwise ${out}."
         return 2
       fi
     fi

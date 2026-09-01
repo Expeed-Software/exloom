@@ -47,6 +47,13 @@ make "one requirement, one behaviour" visible:
 or data loss.** Most defects live in the negative space, and most specs never go
 there.
 
+**The test covering a criterion carries its ref in the test's name** — e.g.
+`@DisplayName("F-001/R-1/AC-1 — rejects an over-large discount")` or
+`def test_F001_R1_AC1_rejects_over_large_discount():`. `prove-change-is-tested.sh`
+reads the runner's own JUnit XML and records which criteria actually passed, so
+coverage is measured from the test run rather than claimed. A name works in every
+framework; an annotation needs a reader for each one.
+
 R-1 · event
 WHEN a discount larger than the line total is submitted THE SYSTEM SHALL reject
 the request and return the line total unchanged.

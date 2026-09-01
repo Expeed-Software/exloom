@@ -1213,6 +1213,37 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
+echo "== the round a finding belongs to is derived, never read from a state file =="
+
+# `.claude/reviews/<branch>.state` was read here and written by nothing in exloom,
+# so every finding landed in round 0. Two things silently stopped working: the
+# severity trend collapsed to one bucket, and the same defect found in three
+# passes counted as three open criticals, so the cap reported "3 critical
+# findings" beside a single cite.
+subrepo rounds noorigin
+printf 'x\n' > src/a.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+for i in 1 2 3; do
+  printf 'r%s\n' "$i" > src/a.java; git commit -aqm "r$i" >/dev/null 2>&1
+  python3 -c "
+import json
+msg = '## Critical\n- src/a.java:1 - the same defect every time\n\nVERDICT: REJECTED (1 items)'
+print(json.dumps({'hook_event_name':'SubagentStop','agent_type':'exloom:l1-reviewer',
+                  'session_id':'s','last_assistant_message':msg}))" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+done
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+FJ=".claude/reviews/feat/plan.verdicts/l1-reviewer.findings.jsonl"
+ok "each pass records its own round, not 0" \
+   "$(sed -n 's/.*"round":\([0-9]*\).*/\1/p' "$FJ" | tr '\n' ' ' | sed 's/ *$//')" "1 2 3"
+ok "the trend shows three passes, not one bucket" \
+   "$(exloom_severity_trend ".claude/reviews/feat/plan.md" HEAD | grep -c '^round ')" "3"
+# One defect reported three times is one thing still open.
+ok "open criticals counts DEFECTS, not finding lines" \
+   "$(exloom_open_criticals ".claude/reviews/feat/plan.md" HEAD)" "1"
+
+cd "$WORK" || exit 1
+
 echo "== the fork point is the NEAREST branch, not the first one named =="
 
 # The rule was "origin/main, else master, else dev". In a repo that keeps main as
@@ -1712,6 +1743,14 @@ rchk() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev
 
 rounds_at 2
 ok "round count is distinct reviewed commits" "$(exloom_round_count "$RC" HEAD)" "2"
+# `grep -c .` prints 0 AND exits 1 on no match, so the `|| printf 0` fallback fired
+# `grep -c .` prints 0 AND exits 1 on no match, so the `|| printf 0` fallback fired
+# too, and the answer was a two-line string. Every arithmetic test on it then
+# failed with a syntax error on stderr, at every push before the first review.
+ok "no receipts at all -> exactly one zero, not two" \
+   "$(exloom_round_count ".claude/reviews/no-such-branch.md" HEAD)" "0"
+ok "...and it survives an arithmetic test without erroring" \
+   "$(r="$(exloom_round_count ".claude/reviews/no-such-branch.md" HEAD)"; if [[ "$r" -ge 3 ]] 2>/dev/null; then echo cap; else echo nocap; fi)" "nocap"
 ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
 ok "...and the message is NOT the cap message" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"

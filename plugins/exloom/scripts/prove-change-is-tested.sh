@@ -21,6 +21,17 @@
 #           default branch, else HEAD~1)
 #   --cmd   the test command (default: auto-detected, see below)
 #
+# Repo config, all committed:
+#   .claude/exloom-test-command      the test command, pinned
+#   .claude/exloom-test-report       where the runner writes JUnit XML, as a path
+#                                    glob relative to the repo root (e.g.
+#                                    build/test-results/**). Only needed when the
+#                                    reports are somewhere unconventional; the
+#                                    usual locations are found without it.
+#   .claude/exloom-mutation-command  proves a purely additive change, which the
+#                                    three-run proof cannot. Must exit 0 when your
+#                                    mutation threshold is met.
+#
 # Exit codes:
 #   0  proved: removing the source change makes the tests fail
 #   1  NOT proved: tests still pass without the change  <-- the finding

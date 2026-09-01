@@ -245,8 +245,20 @@ esac
 #
 # The severity is on the HEADING; the finding line carries only a cite. Requiring
 # both on one line records nothing from any shipped agent.
-ROUND="$(sed -n 's/.*"round":\([0-9]*\).*/\1/p' ".claude/reviews/${BRANCH}.state" 2>/dev/null | tail -1)"
-[[ -n "$ROUND" ]] || ROUND=0
+# The round is DERIVED, not read from a state file. It used to come from
+# `.claude/reviews/<branch>.state`, which nothing in exloom ever wrote — so every
+# finding was recorded as round 0 and two things silently stopped working: the
+# severity trend collapsed to a single bucket, and the same defect found in three
+# passes counted as three open criticals.
+#
+# A round is a distinct reviewed commit, which is what exloom_round_count already
+# means by it. Computed here from l1-reviewer's receipt so every agent's findings
+# agree on which pass they belong to, and +1 because this dispatch is the pass
+# being recorded.
+ROUND="$(cat "${VDIR}/l1-reviewer.json" 2>/dev/null \
+  | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
+  | grep -v "^${HEAD_SHA}$" | sort -u | awk 'END{print NR+1}')"
+[[ "$ROUND" =~ ^[0-9]+$ ]] || ROUND=1
 
 FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
 n_found=0

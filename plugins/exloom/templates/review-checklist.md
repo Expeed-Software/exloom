@@ -74,12 +74,21 @@
 
 ## Re-finds (the same finding reported in more than one round)
 
+One entry per repeated finding: the cite, then one of FIXED THE INSTANCE (say
+where the class is tracked), DEFERRED (with the ticket), FIXED THE CLASS (name
+the test), or GENUINELY SEPARATE (why it is unrelated). Fixing the instance and
+tracking the class is a normal answer, not a lesser one.
+
 none
 
 ## Escape hatches used
 - [ ] None (default)
 
-
+Each skipped step goes on its own line as a list item, naming the step and the
+reason. If you answered the round-cap prompt by choosing to merge, record that
+answer here as a list item reading "User approved at round cap", an em dash, then
+their words - the branch stops asking once it is there, and the next reader sees
+who decided. Do not write that line unless they actually answered.
 
 ## Provenance
 - AI-assisted: <ai-assisted>

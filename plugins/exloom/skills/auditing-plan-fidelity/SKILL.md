@@ -109,6 +109,14 @@ comm -23 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$SPEC" | sort -u) \
 
 Report each as a finding with its ref. These are cheap to state and expensive to discover later.
 
+**Then read what the test run actually proved**, which is a different claim from what the plan cites:
+
+```bash
+sed -n 's/.*"criteria":"\([^"]*\)".*/\1/p' .claude/reviews/<branch>.verdicts/proof.json | tail -1
+```
+
+`prove-change-is-tested.sh` writes that field from the runner's own JUnit XML, counting only criteria whose test **passed with the change and did not pass without it**. A criterion the plan cites but this list omits has no test that notices it — the citation is a claim, this is the check on it. The proof run also prints any criterion whose test passes against the base source, which means the test does not exercise the change whatever its name says.
+
 Then read each criterion from the **spec** — not the plan; the plan cites, the spec defines. For every criterion, assign one of three statuses:
 
 - **Verified.** You can see evidence in the diff that the criterion is met. This includes: code that directly implements the behavior, test assertions that validate it, configuration that enables it. Cite the specific file and change as evidence.
