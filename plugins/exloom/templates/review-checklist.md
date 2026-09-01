@@ -2,8 +2,16 @@
 
 **Tier:** [0 | 1 | 2 | 3]
 **Tier rationale:** <one sentence>
+**Lane:** standard
 **Blast radius:** <N files changed, M modules touched, user-facing yes/no>
 **Started:** YYYY-MM-DD
+
+> **Tier and Lane are different axes.** The tier is derived from the diff and
+> decides how deep the review goes. The lane is your choice and decides how much
+> happens *before* the code: `sprint` (no spec, no plan, L1 + smoke + proof),
+> `standard` (the full flow), `certified` (standard, no escape hatches, signed
+> provenance). Sprint is not available at Tier 3. Omit the field and the repo
+> default applies — `standard` unless `.claude/exloom-lane` says otherwise.
 
 > Reviewer dispatch is NOT self-attested. exloom records a verdict receipt under
 > `.claude/reviews/<branch-name>.verdicts/` when a reviewer subagent actually
@@ -83,9 +91,10 @@ none
        - Skipped steps with written justification:
          - smoke test — headless CI box, verified on staging instead
 
-     After the round cap, Claude Code prompts the USER with the review report and
-     they allow or deny. Once they allow, record their answer here so the branch
-     stops asking and the next reader sees who decided:
+     After the round cap the gate blocks and the session asks you to choose: fix
+     the open criticals, merge as-is, or see the findings first. If you choose to
+     merge, record your answer here so the branch stops asking and the next
+     reader sees who decided:
 
        - User approved at round cap — approved after 4 passes, remaining items are minor
 

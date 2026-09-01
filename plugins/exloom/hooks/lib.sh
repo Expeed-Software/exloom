@@ -324,6 +324,54 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
   return 1
 }
 
+# ---------- lanes: rigour earned by stakes, not imposed by process ----------
+#
+# exloom shipped one lane, and it was the strictest one: the same ten steps for a
+# null check and for a subsystem. That is why one-line fixes turned into features
+# and why branches stopped landing. Tiers scale REVIEW DEPTH, derived from the
+# diff; they do not scale CEREMONY, and ceremony is what a small change cannot
+# afford.
+#
+# Three lanes, on a different axis from tier:
+#
+#   sprint     branch -> code -> prove -> smoke -> push. No spec, no plan, no
+#              fidelity audit, L1 only. The gate still runs; the receipts are
+#              still written; the checklist records that it was a Sprint, so a
+#              skipped step is a recorded fact rather than a silent absence.
+#   standard   the full flow. The default, and unchanged.
+#   certified  standard with no escape hatches and mandatory signed provenance.
+#
+# WHAT A LANE MAY NOT DO IS WEAKEN A SAFETY CHECK. The proof receipt, the smoke
+# test, the tier derivation, receipt forgery-resistance and the security surface
+# are identical in all three. A lane changes how much happens BEFORE the code,
+# and which reviewers the tier's ceremony demands after it — never whether the
+# evidence is real.
+exloom_repo_lane() {
+  local f=".claude/exloom-lane" v=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    v="$(head -1 "$f" 2>/dev/null | tr -cd 'a-z')"
+  fi
+  case "$v" in sprint|standard|certified) printf '%s' "$v" ;; *) printf 'standard' ;; esac
+}
+
+# The lane declared in the checklist, if any. Reads content on stdin. Empty when
+# the branch declares none, which is not an error — the repo default applies.
+exloom_declared_lane() {
+  local v
+  v="$(grep -E '^\*\*Lane:\*\*' | head -1 | sed -E 's/.*Lane:\*\*[[:space:]]*//' \
+       | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z')"
+  case "$v" in sprint|standard|certified) printf '%s' "$v" ;; *) printf '' ;; esac
+}
+
+# The tier the CEREMONY runs at, which is not always the tier of record. Sprint
+# caps it at 1 — L1 and the smoke test, never adversarial or cross-layer — while
+# the declared tier stays honest, because the tier describes the diff and lying
+# about it would corrupt every other check that reads it.
+exloom_effective_tier() {   # exloom_effective_tier <tier> <lane>
+  local tier="$1" lane="${2:-standard}"
+  if [[ "$lane" == "sprint" && "$tier" -gt 1 ]] 2>/dev/null; then printf '1'; else printf '%s' "$tier"; fi
+}
+
 # Reviewers required at a given tier, plus any the surface demands regardless.
 exloom_required_reviewers() {
   local tier="$1" extra="${2:-}" list=""
@@ -498,7 +546,7 @@ exloom_last_pass_was_noop() {   # exloom_last_pass_was_noop <checklist> <tip>
 # go as 1/p^N. Decoupling makes it 1/p: L1 covers what ships, the others cover
 # that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
-  local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
+  local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
   local vdir agent file content sha ok approved_at behind seen_verdict legacy_at
   local -a missing=() stale=() unapproved=()
   vdir="$(exloom_verdict_dir "$checklist")"
@@ -670,6 +718,11 @@ return here with the same findings."
   if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
 
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
+  # Say which lane set that bar. A Sprint branch asked for one reviewer where the
+  # tier would have asked for three, and a reader of this message should not have
+  # to work out why the demand looks light.
+  [[ "$lane" == "sprint" ]] && detail="This branch is on the Sprint lane, so the reviewer set is capped at Tier 1.
+${detail}"
   [[ -n "$sec_extra" ]] && detail="${detail}
 security-auditor is required by the SURFACE this diff touches (a dependency
 manifest or a deserialization entry point), not by the tier."
@@ -1017,6 +1070,67 @@ Check out that branch and run /review-init, /smoke-test, /review-complete."; ret
     fi
   fi
 
+  # Which lane is this branch on? The checklist decides; the repo file is only a
+  # default, because the lane is a property of the WORK, not of the repository.
+  local lane eff_tier
+  lane="$(printf '%s\n' "$content" | exloom_declared_lane)"
+  [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
+
+  # Sprint is not available at Tier 3. Migrations, auth, tenancy, secrets and
+  # crypto are exactly the stakes that earn rigour, and the tier is derived from
+  # the diff rather than declared — so this cannot be talked around by calling a
+  # migration a weekend spike. "Rigour earned by stakes" has to cut both ways or
+  # it is just a bypass with a nicer name.
+  if [[ "$lane" == "sprint" && "$tier" -ge 3 ]]; then
+    _exloom_block "$action" "$checklist declares the Sprint lane at Tier ${tier}.
+
+Sprint exists so a small change does not need a spec, a plan and three reviewers.
+Tier 3 means this diff touches migrations, auth, tenancy, secrets or crypto —
+the stakes that earn the full flow. There is no Sprint lane at Tier 3.
+
+Set **Lane:** standard (or certified) and run the gates the tier requires."
+    return 2
+  fi
+
+  # Sprint caps the CEREMONY at Tier 1 while the declared tier stays honest for
+  # the record: L1 and the smoke test, not adversarial or cross-layer. The
+  # security surface is passed separately and still applies — a bumped dependency
+  # gets a security auditor in every lane.
+  eff_tier="$(exloom_effective_tier "$tier" "$lane")"
+
+  # Certified has no escape hatches. That is the whole difference from Standard:
+  # every other lane accepts a documented skip, because a documented skip beats an
+  # undocumented one, and Certified exists for the reader who can accept neither.
+  #
+  # Checked HERE rather than beside the audit output at the end, because Certified
+  # also mandates signed provenance — and that check would otherwise always fire
+  # first, answering a content problem the author can fix in a minute with an
+  # environment problem they may not be able to fix at all.
+  #
+  # A recorded round-cap answer is exempt. It lives in this section for want of a
+  # better home, but it is a decision the user made when asked, not a step
+  # somebody skipped, and blocking it would make the cap unanswerable in the one
+  # lane most likely to reach it.
+  if [[ "$lane" == "certified" ]]; then
+    local c_eh c_used
+    c_eh="$(printf '%s\n' "$content" | awk '/^## Escape hatches used/{f=1;next} /^## /{f=0} f')"
+    if ! printf '%s\n' "$c_eh" | grep -q '^\- \[x\] None'; then
+      c_used="$(printf '%s\n' "$c_eh" | grep -E '^[[:space:]]*-[[:space:]]' \
+        | grep -vi 'None (default)' | grep -vi 'Skipped steps with written justification' \
+        | grep -v '<step name>' \
+        | grep -viE 'user approved at round cap|shipped at round cap' || true)"
+      if [[ -n "$(printf '%s' "$c_used" | tr -d '[:space:]')" ]]; then
+        _exloom_block "$action" "This branch is on the Certified lane, which has no escape hatches. Recorded:
+$(printf '%s\n' "$c_used" | sed 's/^[[:space:]]*/  /')
+
+Either do the step, or move the branch to the Standard lane (**Lane:** standard)
+and ship with the skip on the record. Certified means a reader never has to take
+a skip on trust, so it cannot also be the lane that permits them."
+        return 2
+      fi
+    fi
+  fi
+
   # Final verdict signed.
   if ! printf '%s\n' "$content" | grep -q '^\- \[x\] All required gates passed for declared tier' \
      || ! printf '%s\n' "$content" | grep -q '^\- \[x\] Checklist committed' \
@@ -1030,9 +1144,9 @@ Run /review-complete — it names each tier-required section still missing."
   local placeholder_re drop scan
   placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*)>'
   drop=''
-  if   [[ "$tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
-  elif [[ "$tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
-  elif [[ "$tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
+  if   [[ "$eff_tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
+  elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
+  elif [[ "$eff_tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
   fi
   # HTML comments are guidance, not evidence, and the template uses them to show
   # what a filled-in line looks like — which necessarily quotes the placeholder
@@ -1102,12 +1216,12 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     # 3 means the round cap emitted an "ask" decision: the harness now prompts
     # the USER. Propagated distinctly so the hook exits 0 — the JSON on stdout is
     # the decision, and a non-zero exit would discard it and hard-block instead.
-    exloom_check_verdicts "$checklist" "$tier" "$tip" "$reviewed_sha" "$action"
+    exloom_check_verdicts "$checklist" "$eff_tier" "$tip" "$reviewed_sha" "$action" "$lane"
     case "$?" in 0) ;; 3) return 3 ;; *) return 2 ;; esac
 
-    # Author-side proof that the change is actually tested (Tier 1+). The receipt
-    # is written only by scripts/prove-change-is-tested.sh, into the directory
-    # protect-verdicts.sh guards, so the result cannot be typed.
+    # Author-side proof that the change is actually tested. Keyed on the DECLARED
+    # tier, never the effective one: the proof is a safety check, not ceremony,
+    # and it is the cheapest evidence exloom produces. Sprint keeps it.
     if [[ "$tier" -ge 1 ]]; then
       exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" || return 2
     fi
@@ -1126,8 +1240,12 @@ Run /review-complete to record who and what produced this change."
       return 2
     fi
 
-    # v2 (opt-in): the commit that recorded the checklist must be a verified signed commit.
-    if [[ -f ".claude/exloom-provenance-signed.enabled" ]]; then
+    # v2 (opt-in): the commit that recorded the checklist must be a verified
+    # signed commit. The Certified lane requires it whether the marker exists or
+    # not — an unsigned attestation is the one thing a regulated reader cannot
+    # accept, and a lane that asked for it only when a file happened to be
+    # present would not be worth declaring.
+    if [[ -f ".claude/exloom-provenance-signed.enabled" || "$lane" == "certified" ]]; then
       local p_commit ref="$tip"
       [[ "$worktree" == "1" ]] && ref="HEAD"
       p_commit="$(git log -1 --format=%H "$ref" -- "$checklist" 2>/dev/null)"

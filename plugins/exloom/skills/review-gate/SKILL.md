@@ -32,6 +32,24 @@ Read this even if you think you know the protocol. Sessions carrying older prior
 
 If you find yourself enforcing something on this branch that exloom does not ask for, stop. Self-imposed process is the most common cause of a branch that will not converge, and it is invisible in the checklist afterwards.
 
+## Lanes: the tier is derived, the lane is chosen
+
+Added in 4.7.0, and the reason is the same one behind every row in that table. exloom shipped one lane and it was the strictest one — the same ten steps for a null check as for a subsystem. Tiers scale *review depth*, derived from the diff. They never scaled *ceremony*, and ceremony is what a small change cannot afford.
+
+`**Lane:**` in the checklist, defaulting to a committed `.claude/exloom-lane`, else `standard`:
+
+- **`sprint`** — no spec, no plan, no fidelity audit; the reviewer set is capped at Tier 1. Branch, build, prove, smoke, L1, push.
+- **`standard`** — the full flow. Unchanged, and still the default, so nothing about an existing repo shifts under it.
+- **`certified`** — standard, with **no escape hatches** and a signed checklist commit.
+
+**A lane may not weaken a safety check.** The proof receipt, the smoke test, the tier derived from the diff, receipt forgery-resistance, and the security auditor when the *surface* demands it are identical in all three. A lane changes how much happens before the code and which reviewers the ceremony asks for after it — never whether the evidence is real.
+
+Two consequences worth stating plainly:
+
+**Sprint is refused at Tier 3.** Migrations, auth, tenancy, secrets and crypto are exactly the stakes that earn rigour, and the tier is derived from the diff — so a migration cannot be re-labelled a weekend spike. "Earned by stakes" has to cut both ways or it is a bypass with a friendlier name.
+
+**A Sprint branch that turns out to matter gets `/harden`, not a rewrite.** It recovers the spec from the diff that now exists, flips the lane, and names what the higher bar requires. Nothing is regenerated and no ref changes. A spec written before the code is a guess; one recovered from code that runs and passes its tests describes something real, which makes it the better review of the two.
+
 ## What the gate actually verifies
 
 This matters more than the step list, because it is the difference between review and self-certification.

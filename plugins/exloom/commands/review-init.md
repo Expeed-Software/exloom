@@ -37,6 +37,22 @@ Show the proposed tier, the rule that triggered it, and the `git diff --stat` ou
 
 Two of the rules above are judgment the hook cannot make, so it derives a lower floor and leaves the decision here: deployment/k8s/helm/docker paths floor at Tier 2 (raise to 3 when the change is flag- or prod-related), and "frontend AND backend changed" or "more than one module" need stack knowledge a file list does not carry. Apply them yourself.
 
+## Step 2b — Propose a lane
+
+The tier is derived from the diff. The **lane** is the user's call, and it decides how much happens *before* the code — not how deep the review goes.
+
+| Lane | For | Before the code | After it |
+|---|---|---|---|
+| `sprint` | a spike, a demo, a bug fix you already understand | nothing — branch and go | L1, smoke, proof |
+| `standard` | work meant to become a real system | spec, plan, fidelity audit | whatever the tier requires |
+| `certified` | regulated, or someone outside the team must be able to audit it | same as standard | tier's requirements, **no escape hatches**, signed provenance |
+
+Ask once, with a recommendation, and default to the repo's committed `.claude/exloom-lane` (or `standard` when there is none). Recommend `sprint` when the change is small and self-contained and the user described it as a fix or a spike; recommend `standard` otherwise.
+
+**Sprint is not available at Tier 3.** If the derived tier is 3, do not offer it — say that migrations, auth, tenancy, secrets and crypto are the stakes that earn the full flow, and that the gate refuses the combination.
+
+Write the answer into the checklist's `**Lane:**` field. A Sprint branch is not exempt from evidence, only from ceremony: the receipts, the proof and the smoke test are identical, and the checklist records the lane so a skipped step is a recorded fact rather than a silent absence.
+
 ## Step 3 — Create the checklist
 
 Copy the plugin's `templates/review-checklist.md` to `.claude/reviews/<branch-name>.md`.

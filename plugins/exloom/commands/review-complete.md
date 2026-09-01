@@ -17,6 +17,22 @@ Parse the Tier field. If missing or not `0`, `1`, `2`, or `3`, refuse — the ti
 
 Then check the tier against the diff, using the same rules `/review-init` applies (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). If the declared tier is lower than what the diff earns, say so and raise it before going further — the gate derives the same minimum and will block otherwise. There is no escape hatch for an under-declared tier.
 
+## Step 1b — Read the lane
+
+Read `**Lane:**` from the checklist. Absent, the repo default applies (committed `.claude/exloom-lane`, else `standard`).
+
+**On the Sprint lane the required set is capped at Tier 1** whatever the declared tier: L1 review, smoke test, proof. Adversarial, cross-layer and runbook sections are not required — mark them `N/A — Sprint lane` rather than leaving them blank, so the skip is recorded rather than merely absent.
+
+Three things Sprint does **not** change, because they are safety and not ceremony:
+
+- the proof receipt (Tier 1+),
+- the tier derived from the diff — an under-declared tier still blocks,
+- the security auditor when the diff's *surface* demands it (a dependency manifest, a deserialization entry point).
+
+**Sprint at Tier 3 is refused by the gate.** Do not work around it by lowering the tier — that blocks too. Tell the user the change earns the full flow and offer `/harden`.
+
+**On the Certified lane** there are no escape hatches at all, and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch and is still accepted.
+
 ## Step 2 — Check required sections for the tier
 
 For every reviewer a tier requires, "was it dispatched?" is answered by the receipt file, never by the checklist. Check with:

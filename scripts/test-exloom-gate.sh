@@ -1132,6 +1132,87 @@ ok "a new commit gets its own line" "$(lines)" "5"
 
 cd "$WORK" || exit 1
 
+echo "== lanes: rigour earned by stakes, not imposed by process =="
+
+# exloom shipped one lane and it was the strictest one — the same ten steps for a
+# null check and a subsystem. Tiers scale review DEPTH, derived from the diff;
+# they never scaled CEREMONY, which is what a small change cannot afford.
+subrepo lanes
+
+ok "no marker -> standard, so nothing changes for an existing repo" "$(exloom_repo_lane)" "standard"
+printf 'sprint\n' > .claude/exloom-lane
+ok "an UNCOMMITTED lane file is ignored" "$(exloom_repo_lane)" "standard"
+git add -A >/dev/null 2>&1; git commit -qm lane >/dev/null 2>&1
+ok "...and honoured once committed" "$(exloom_repo_lane)" "sprint"
+printf 'nonsense\n' > .claude/exloom-lane; git add -A >/dev/null 2>&1; git commit -qm junk >/dev/null 2>&1
+ok "junk falls back to standard, never to the weakest lane" "$(exloom_repo_lane)" "standard"
+git rm -q --cached .claude/exloom-lane >/dev/null 2>&1; rm -f .claude/exloom-lane
+git add -A >/dev/null 2>&1; git commit -qm rmlane >/dev/null 2>&1
+
+ok "checklist declares the lane" \
+   "$(printf '**Tier:** 1\n**Lane:** sprint\n' | exloom_declared_lane)" "sprint"
+ok "...case-insensitively" \
+   "$(printf '**Lane:** Certified\n' | exloom_declared_lane)" "certified"
+ok "no Lane line -> empty, so the repo default applies" \
+   "$(printf '**Tier:** 1\n' | exloom_declared_lane)" ""
+ok "an invented lane is not a lane" \
+   "$(printf '**Lane:** yolo\n' | exloom_declared_lane)" ""
+
+# Sprint caps the CEREMONY, never the tier of record — the tier describes the
+# diff, and lying about it would corrupt every other check that reads it.
+ok "sprint caps ceremony at tier 1"      "$(exloom_effective_tier 2 sprint)" "1"
+ok "...and never RAISES a lower tier"    "$(exloom_effective_tier 0 sprint)" "0"
+ok "standard leaves the tier alone"      "$(exloom_effective_tier 2 standard)" "2"
+ok "certified leaves the tier alone"     "$(exloom_effective_tier 3 certified)" "3"
+
+# The reviewer set follows the effective tier, so a Sprint branch on a 6-file diff
+# asks for L1 instead of L1 + adversarial...
+ok "tier 2 normally wants two reviewers" \
+   "$(exloom_required_reviewers "$(exloom_effective_tier 2 standard)")" "l1-reviewer adversarial-reviewer"
+ok "...and one on the Sprint lane" \
+   "$(exloom_required_reviewers "$(exloom_effective_tier 2 sprint)")" "l1-reviewer"
+# ...but a SAFETY check is not ceremony and no lane turns it off.
+ok "the security surface still applies on Sprint" \
+   "$(exloom_required_reviewers "$(exloom_effective_tier 2 sprint)" security)" "l1-reviewer security-auditor"
+
+# Sprint is refused at Tier 3. The tier is derived from the diff, so a migration
+# cannot be re-labelled a weekend spike — "earned by stakes" has to cut both ways
+# or it is a bypass with a nicer name.
+LCL=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$LCL")"
+lchk() { exloom_validate_checklist "$LCL" HEAD 1 "test" >/dev/null 2>&1; echo $?; }
+lmsg() { exloom_validate_checklist "$LCL" HEAD 1 "test" 2>&1 >/dev/null; }
+printf '**Tier:** 3\n**Lane:** sprint\n' > "$LCL"
+ok "Sprint at Tier 3 -> blocked" "$(lchk)" "2"
+ok "...and the message says why the lane is refused, not the tier" \
+   "$(lmsg | grep -c 'There is no Sprint lane at Tier 3' | head -1)" "1"
+printf '**Tier:** 2\n**Lane:** sprint\n' > "$LCL"
+ok "Sprint at Tier 2 -> allowed past the lane check" \
+   "$(lmsg | grep -c 'no Sprint lane at Tier 3' | head -1)" "0"
+
+# Certified has no escape hatches, and that is checked BEFORE signed provenance —
+# otherwise an author with a fixable content problem is shown an environment
+# problem they may not be able to fix at all.
+printf '**Tier:** 1\n**Lane:** certified\n\n## Escape hatches used\n- Skipped: smoke test — headless box\n' > "$LCL"
+ok "an escape hatch on Certified -> blocked" "$(lchk)" "2"
+ok "...naming the lane, not the missing signature" \
+   "$(lmsg | grep -c 'Certified lane, which has no escape hatches' | head -1)" "1"
+ok "...and quoting the skip it found" \
+   "$(lmsg | grep -c 'smoke test — headless box' | head -1)" "1"
+printf '**Tier:** 1\n**Lane:** certified\n\n## Escape hatches used\n- [x] None (default)\n' > "$LCL"
+ok "no escape hatch on Certified -> past that check" \
+   "$(lmsg | grep -c 'has no escape hatches' | head -1)" "0"
+# A recorded round-cap answer is a decision the user made, not a step skipped.
+printf '**Tier:** 1\n**Lane:** certified\n\n## Escape hatches used\n- User approved at round cap — minors only\n' > "$LCL"
+ok "a round-cap answer is not an escape hatch on Certified" \
+   "$(lmsg | grep -c 'has no escape hatches' | head -1)" "0"
+
+# Standard is unchanged by all of this.
+printf '**Tier:** 3\n**Lane:** standard\n\n## Escape hatches used\n- Skipped: smoke test — headless box\n' > "$LCL"
+ok "Standard still accepts a documented skip at Tier 3" \
+   "$(lmsg | grep -c 'has no escape hatches' | head -1)" "0"
+
+cd "$WORK" || exit 1
+
 echo "== the proof binds the COMMAND it proved, not just its own presence =="
 
 # cmd_hash was written by prove-change-is-tested.sh and read by nothing. The only

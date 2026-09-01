@@ -35,7 +35,25 @@ This is the sequence. The table below is for looking up a single step; this is w
 | 9 | Review | `/review-complete` | reviewer receipts, findings, fixes |
 | 10 | Ship | `git push`, open the PR | the gate lets it through |
 
-**A small change starts at step 3.** A one-line bug fix does not need a spec or a plan — branch, fix, prove, smoke, review, push. Steps 5 and 7 need a plan to work against, so they only apply when there is one.
+## Pick a lane before you pick a step
+
+Rigour is earned by stakes, not imposed by process. Running all ten steps on a null check is how a one-line fix becomes a feature, and it is why branches stop landing.
+
+| Lane | Steps | What it costs you | Declared |
+|---|---|---|---|
+| **Sprint** | 3, 4, 5, 6, 8, 9, 10 | nothing before the code — L1, smoke and proof after it | `**Lane:** sprint` |
+| **Standard** | all ten | a spec and a plan, and the reviewers the tier asks for | the default |
+| **Certified** | all ten | standard, plus no escape hatches and signed commits | `**Lane:** certified` |
+
+`/review-init` asks. The repo default lives in a committed `.claude/exloom-lane`; absent, it is `standard`.
+
+**Sprint is not exempt from evidence, only from ceremony.** The gate runs identically: the same receipts, the same proof, the same smoke test, the same tier derived from the diff. What Sprint drops is the spec, the plan, the fidelity audit, and the reviewers above L1. The checklist records the lane, so a step that was skipped is a recorded fact rather than a silent absence.
+
+**Sprint is not available at Tier 3.** Migrations, auth, tenancy, secrets and crypto are the stakes that earn the full flow, and the tier is derived from the diff — so a migration cannot be re-labelled a spike.
+
+**If a Sprint branch turns out to matter, run `/harden`.** It recovers the spec from the diff that now exists, flips the lane, and names what the higher bar requires. Nothing is regenerated. That is a better review than the one you skipped, because there is working software to check the spec against.
+
+**Even on Standard, a small change starts at step 3.** A one-line bug fix does not need a spec or a plan. Steps 5 and 7 need a plan to work against, so they only apply when there is one.
 
 **Round 2 is L1 only.** Fix what it found, re-run `/review-complete`. Adversarial and security run once, after L1 has settled, and their approval does not expire when you fix something.
 
@@ -65,9 +83,10 @@ Invoke one when it applies. Do not invoke one for a conversational reply, a fact
 ## Commands — invoke them, don't reproduce them
 
 ```
-/review-init      when work starts on the branch
+/review-init      when work starts on the branch — picks the lane
 /smoke-test       before claiming done
 /review-complete  before push / PR
+/harden           when a Sprint branch turns out to matter
 ```
 
 `/review-complete` dispatches the reviewer subagents the tier requires. Each real dispatch writes a receipt that the gate demands and that nobody can write by hand. Reading the command and performing the steps yourself produces the checklist and none of the receipts, so the push stays blocked. Having the text in context is not running it.
