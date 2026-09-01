@@ -733,6 +733,57 @@ ok "git push origin feat/z 2>&1 -> feat/z"       "$(pt 'git push origin feat/z 2
 ok "git push origin HEAD -> HEAD"                "$(pt 'git push origin HEAD')" "HEAD"
 ok "git push origin other-branch -> other-branch" "$(pt 'git push origin other-branch')" "other-branch"
 
+echo "== SubagentStop: the verdict is captured at COMPLETION =="
+
+# The cause behind the async compensation. PostToolUse fires at launch and has no
+# report; SubagentStop fires on completion and carries it verbatim. Payload shape
+# below is captured from a real dispatch, not invented:
+#   {"hook_event_name":"SubagentStop","agent_type":"exloom:l1-reviewer",
+#    "agent_id":"...","last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
+# Without this, a REJECTED review was indistinguishable from an approval on a
+# live branch — reported from apptor-agents.
+subrepo substop
+SSV=".claude/reviews/feat/plan.verdicts"
+ssfeed() {   # ssfeed <report>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+rm -rf .claude/reviews
+ssfeed '## Critical
+- src/one.go:4 — real defect
+
+VERDICT: REJECTED (1 items)
+
+ROUND NEEDED AFTER FIX: YES'
+ok "completion records the real verdict" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$SSV/l1-reviewer.json" 2>/dev/null | tail -1)" "REJECTED"
+ok "...and round_needed from the same report" \
+   "$(sed -n 's/.*"round_needed":"\([A-Z]*\)".*/\1/p' "$SSV/l1-reviewer.json" 2>/dev/null | tail -1)" "YES"
+ok "...and the findings" \
+   "$(grep -c . "$SSV/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
+
+# The decisive one: a dispatch line and a completion line share a commit. The
+# dispatch line has no verdict and used to be grandfathered as passing, which
+# would let a REJECTED review through.
+SSC=".claude/reviews/feat/plan.md"; printf '# c\n' > "$SSC"
+rm -rf .claude/reviews; mkdir -p "$SSV"
+printf '%s' '{"session_id":"s","hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_response":{"isAsync":true,"status":"async_launched"}}' \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ssfeed 'VERDICT: REJECTED (1 items)'
+printf '# c\n' > "$SSC"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+exloom_check_verdicts "$SSC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
+ok "a verdict-less dispatch line does NOT grandfather a REJECTED away" "$?" "2"
+
+# A genuinely old receipt — no verdict anywhere — must still be grandfathered.
+rm -rf .claude/reviews; mkdir -p "$SSV"
+printf '{"agent":"l1-reviewer","head":"%s","at":"n","session":"s"}\n' "$(git rev-parse HEAD)" > "$SSV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm legacy >/dev/null 2>&1
+exloom_check_verdicts "$SSC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
+ok "a pre-verdict receipt is still grandfathered" "$?" "0"
+
 echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
 
 # Captured from a real dispatch, verbatim. On an async launch the payload carries
@@ -1162,6 +1213,17 @@ ok "round count is distinct reviewed commits" "$(exloom_round_count "$RC" HEAD)"
 ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
 ok "...and the message is NOT the cap message" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"
+
+# Reported from a real branch: four dispatches on disk, the cap did not fire, the
+# push went through with no prompt. Cause — the count read only the COMMITTED
+# ref, and nothing commits receipts until /review-complete says so. It answered 0
+# rather than erroring: fail-open in the mechanism whose only job is to notice
+# accumulation.
+printf 'uncommitted\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r3 >/dev/null 2>&1
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
+ok "an UNCOMMITTED receipt still counts" "$(exloom_round_count "$RC" HEAD)" "3"
+git add -A >/dev/null 2>&1; git commit -qm r3receipt >/dev/null 2>&1
+ok "...and is not double-counted once committed" "$(exloom_round_count "$RC" HEAD)" "3"
 
 # At the cap the decision goes to the HARNESS, which prompts the user. Return 3
 # and an "ask" JSON on stdout, NOT exit 2 — a non-zero exit discards the JSON and

@@ -20,6 +20,16 @@ Check `.claude/exloom.local.md` for `smoke_test_boot_command` in the frontmatter
 - Node service → `npm run dev` or `npm start`.
 - Docker-composed stack → `docker compose up -d` plus service command.
 
+**If there is no app to boot — a library, an SDK, a CLI, a parser.** There is still a smoke test, and `N/A — library` is not it. Skipping here removes the one step designed to catch what code review cannot, on exactly the changes where the reviewers see least.
+
+The equivalent is: **exercise the change through the public entry point an adopter actually calls, and show the observable result.** Not a unit test, not an internal method — the API a consumer imports, invoked from a scratch file outside the test sources, with the output printed.
+
+- Library / SDK → a scratch `main` or REPL snippet that imports the published artifact and calls the entry point, with the returned value or thrown exception printed in full.
+- Parser / validator → feed it the input the change is about; print the accept/reject and the message verbatim, escaping anything invisible so the evidence survives a copy-paste.
+- CLI → run the binary with real arguments; paste stdout, stderr and the exit code.
+
+One real example, from a change to a refusal path: *load a document through the public entry point an adopter calls, print the refusal with every codepoint escaped.* That is a smoke test. It boots nothing and it is still evidence.
+
 Ask the user to confirm or correct the boot command. Also ask for prerequisites (DB running? dependencies installed? env vars set?). Record them.
 
 ## Step 3 — Establish the user action

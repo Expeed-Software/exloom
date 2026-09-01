@@ -72,6 +72,20 @@ Could this change be rolled back in production if it goes wrong? If not, that is
 
 For every finding, ask: "what reviewer or test should have caught this?" If the answer is "L1" or "tests", note it — it signals the implementer needs to strengthen that gate for next time. If the answer is "nothing could have caught this except this step", that validates the adversarial review's existence.
 
+## 8. Is every claim the diff makes actually true?
+
+**This is the one nothing else in the protocol can do.** L1 reviews the diff, per file. A claim the diff *makes about code outside itself* has its falsifying evidence in files L1 never opens, so a diff can be entirely correct and still ship a lie.
+
+Extract every claim the change asserts beyond its own lines — then go and check each one against the tree:
+
+- **Universal statements in docs, javadoc, comments, READMEs, CHANGELOGs.** "Every built-in factory routes through this method." "All inputs are sanitised here." "This is the only entry point." Grep for the counterexample. One real case: eight javadocs said every built-in factory routed through one method while two reference factories a file away echoed raw, and a sibling class had no sanitiser at all. The diff was clean and L1 passed it twice.
+- **"Fixed the class" claims.** If the change or its checklist says a whole class of defect is now closed, verify the class is closed. Fixing the instance and *claiming* the class is the same lie in a different place, and it has shown up on two consecutive branches.
+- **Migration and compatibility claims.** "Backwards compatible", "no callers affected", "safe to roll back" — each is checkable, and each is believed by the next reader without checking.
+
+A false claim is a **blocking** finding even when the code is correct, because it routes every future reader wrong and nothing downstream re-checks it. Cite the claim's location and the file that falsifies it.
+
+Note that a docs-only or comment-only change scores Tier 0 by file extension and gets L1 alone. That is exactly where this class hides.
+
 # Output format
 
 ```

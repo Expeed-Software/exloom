@@ -49,13 +49,35 @@ except Exception:
   printf '%s' "$out"
 }
 
-TOOL="$(_field tool_name)"
-case "$TOOL" in
-  Task|Agent|task|agent) ;;
-  *) exit 0 ;;
-esac
-
-SUBAGENT="$(_field tool_input.subagent_type)"
+# ---------- which event is this? ----------
+# Registered on BOTH PostToolUse and SubagentStop, because they carry different
+# halves of the same fact.
+#
+# PostToolUse fires when the agent is LAUNCHED. On an async dispatch its
+# tool_response is {"isAsync":true,"status":"async_launched",...} — the reviewer
+# has not run, so there is no verdict to read. That event records the dispatch.
+#
+# SubagentStop fires on COMPLETION and carries the report verbatim:
+#   {"agent_type":"exloom:l1-reviewer","agent_id":"...",
+#    "last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
+#
+# Capturing at PostToolUse alone is why every real dispatch recorded no verdict,
+# and why a REJECTED review was indistinguishable from an approval on a live
+# branch. This is the cause; the receipt-shape change in 4.0.2 was only the
+# compensation.
+EVENT="$(_field hook_event_name)"
+if [[ "$EVENT" == "SubagentStop" ]]; then
+  SUBAGENT="$(_field agent_type)"
+  IS_COMPLETION=1
+else
+  TOOL="$(_field tool_name)"
+  case "$TOOL" in
+    Task|Agent|task|agent) ;;
+    *) exit 0 ;;
+  esac
+  SUBAGENT="$(_field tool_input.subagent_type)"
+  IS_COMPLETION=0
+fi
 [[ -n "$SUBAGENT" ]] || exit 0
 
 # Which reviewer is this? Suffix match, so both `l1-reviewer` and the namespaced
@@ -110,6 +132,12 @@ SESSION="$(_safe "$SESSION")"
 # approval. The raw scan is now a last resort AND has tool_input removed first.
 _response_text() {
   local out=""
+  # SubagentStop hands the finished report over directly. Preferred whenever
+  # present — it is the reviewer's actual output, not a launch acknowledgement.
+  if [[ "$IS_COMPLETION" -eq 1 ]]; then
+    out="$(_field last_assistant_message)"
+    [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
+  fi
   if command -v jq >/dev/null 2>&1; then
     out="$(printf '%s' "$HOOK_INPUT" | jq -r '
       (.tool_output // .tool_response // .tool_result // .response // empty)

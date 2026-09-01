@@ -46,8 +46,19 @@ commands only — it is **not** set in your shell, so a command using it fails w
 "No such file or directory". Locate the template instead:
 
 ```bash
-find ~/.claude/plugins -path '*exloom*/templates/review-checklist.md' | head -1
+find ~/.claude/plugins -path '*exloom*/templates/review-checklist.md' | sort -V | tail -1
 ```
+
+**`| head -1` is wrong here and silently gives you a stale template.** Several
+plugin versions stay in the cache, and `find` returns them path-sorted, so
+`head -1` picks the *lowest* version number — on one real machine, 1.4.0. A
+session following that instruction gets a checklist with no test-contract
+fidelity line, no Re-finds section and no Provenance block, then fills it in
+honestly and is blocked by a gate checking for sections its template never had.
+`sort -V | tail -1` takes the highest version.
+
+Sanity-check the file you copied: it must contain `## Re-finds` and
+`## Provenance`. If it does not, you have an old template.
 
 Substitute:
 

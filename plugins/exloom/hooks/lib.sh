@@ -341,12 +341,22 @@ exloom_required_reviewers() {
 # How many review rounds has this branch had? Distinct commits appearing in the
 # L1 receipt, which is one JSON line per real dispatch. Deterministic — no model,
 # no judgement.
+# Counts BOTH the committed receipts and any sitting uncommitted in the working
+# tree, then de-duplicates.
+#
+# Reading only the committed ref made this silently answer 0 whenever the
+# receipts had not been committed yet — which is most of the time, since nothing
+# commits them until /review-complete says so. On a real branch four dispatches
+# were on disk and this returned zero, so the cap never fired and the push went
+# through with no prompt. A counter that reports "no rounds" when it cannot see
+# the rounds is worse than one that errors: it fails open in the mechanism whose
+# only job is to notice accumulation.
 exloom_round_count() {   # exloom_round_count <checklist> <tip>
-  local vdir content
+  local vdir committed working
   vdir="$(exloom_verdict_dir "$1")"
-  content="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
-  [[ -n "$content" ]] || { printf '0'; return 0; }
-  printf '%s\n' "$content" \
+  committed="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  working="$(cat "${vdir}/l1-reviewer.json" 2>/dev/null || true)"
+  printf '%s\n%s\n' "$committed" "$working" \
     | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
     | sort -u | grep -c . || printf '0'
 }
@@ -440,7 +450,7 @@ exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
 # that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5"
-  local vdir agent file content sha ok approved_at behind
+  local vdir agent file content sha ok approved_at behind seen_verdict legacy_at
   local -a missing=() stale=() unapproved=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
@@ -461,7 +471,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; legacy_at=""
     # Read whole receipt LINES, so the commit and the verdict on one line are
     # evaluated together. Reading them separately would let an APPROVED verdict
     # from an old commit vouch for a REJECTED review of the current one.
@@ -486,12 +496,20 @@ exloom_check_verdicts() {
       # "verdict" key at all. Those still count — refusing them would block every
       # in-flight branch the moment this version is installed, and a migration
       # that breaks running work does not get adopted, it gets uninstalled.
+      # A dispatch and a completion both write a line at the same commit: the
+      # first carries no verdict (the reviewer had not run), the second carries
+      # the real one. Breaking on the first verdict-less line would grandfather a
+      # REJECTED review through, so the legacy path is only reachable when NO
+      # covering line carries a verdict at all — i.e. genuinely old receipts.
       case "$rline" in
-        *'"verdict":"APPROVED"'*) ok=1; approved_at="$sha"; break ;;
-        *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) rejected=1 ;;
-        *) ok=1; approved_at="$sha"; break ;;   # legacy receipt, no verdict recorded
+        *'"verdict":"APPROVED"'*) seen_verdict=1; ok=1; approved_at="$sha"; break ;;
+        *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) seen_verdict=1; rejected=1 ;;
+        *) legacy_at="$sha" ;;   # dispatch-only, or a pre-verdict receipt
       esac
     done < <(printf '%s\n' "$content")
+    if [[ $ok -ne 1 && $seen_verdict -eq 0 && -n "$legacy_at" ]]; then
+      ok=1; approved_at="$legacy_at"
+    fi
     if [[ $ok -ne 1 ]]; then
       if [[ $rejected -eq 1 ]]; then unapproved+=( "$agent" ); else stale+=( "$agent" ); fi
     elif [[ "$agent" != "l1-reviewer" && -n "$approved_at" ]]; then
