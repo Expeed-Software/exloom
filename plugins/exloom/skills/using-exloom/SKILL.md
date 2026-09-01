@@ -24,9 +24,16 @@ Nothing here instructs you how to think about code. If a skill would only tell y
 |---|---|
 | New feature or behaviour change, no spec yet | `exloom:brainstorming` |
 | Have a spec, need a plan someone else could execute | `exloom:planning-for-handoff` |
+| About to start executing — before the first commit | `exloom:isolating-execution` |
+| Executing a written plan | `exloom:executing-handoff-plans` |
+| Execution finished, before review | `exloom:auditing-plan-fidelity` |
 | Closing work — done, shipping, opening a PR | `exloom:review-gate` |
 | Learned something worth keeping | `exloom:capturing-learnings` |
 | Writing or updating a repo's CLAUDE.md | `exloom:authoring-claude-md` |
+
+**The three execution skills are the scope discipline.** `executing-handoff-plans` says write what the plan describes — *not more, not less, not differently* — and log every deviation instead of improvising. `auditing-plan-fidelity` then compares the shipped diff against the plan and reports drift: files changed that no task called for, acceptance criteria quietly altered. `isolating-execution` puts the work on a feature branch, which is what makes the gate apply at all — the hooks skip protected branches.
+
+They were cut in 4.0.0 as "technique the model already does" and restored in 4.4.0. That was a misjudgement: a check that compares work against an artifact is not technique, because the model is the thing being checked. Their absence is a large part of how one-line changes grew into features.
 
 Invoke one when it applies. Do not invoke one for a conversational reply, a factual answer, or a trivial mechanical edit.
 
