@@ -1330,6 +1330,54 @@ ok "open criticals counts DEFECTS, not finding lines" \
 
 cd "$WORK" || exit 1
 
+echo "== the gate says where it stands at every completion, not only at the end =="
+
+# Sessions hand-dispatch reviewers and never invoke /review-complete, and the
+# reason is structural rather than sloppiness: dispatching directly produces the
+# same findings, so the two feel equivalent, and nothing contradicts that until
+# the push is refused. What the command adds - the tier derived from the diff,
+# which receipts are missing, which sections are unfilled - is real work with no
+# visible output at the moment it matters. So it is printed at that moment.
+subrepo gatestatus noorigin
+mkdir -p .claude/reviews/feat
+printf 'a\n' > src/A.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+printf 'b\n' > src/A.java
+printf 'class C {}\n' > src/Controller.java
+git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+
+status() {   # status <tier> <lane>
+  printf '**Tier:** %s\n**Lane:** %s\n\n- Findings: none\n' "$1" "$2" > .claude/reviews/feat/plan.md
+  printf 'x%s\n' "$RANDOM" >> src/A.java
+  git add -A >/dev/null 2>&1; git commit -qm bump >/dev/null 2>&1
+  python3 -c "
+import json
+print(json.dumps({'hook_event_name':'SubagentStop','session_id':'s','agent_type':'exloom:l1-reviewer',
+ 'last_assistant_message':'No findings.\n\nVERDICT: APPROVED\n\nROUND NEEDED AFTER FIX: NO'}))" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" 2>&1 >/dev/null
+}
+
+# An under-declared tier is the failure a session cannot see for itself: the
+# checklist says Tier 0, the diff has grown, and nothing says so until the push.
+ok "an under-declared tier is named at completion, not at push" \
+   "$(status 1 standard | grep -c 'derives to 2')" "1"
+ok "a required reviewer that never ran is named" \
+   "$(status 2 standard | grep -c 'adversarial-reviewer  NOT DISPATCHED')" "1"
+# ...and the lane is respected, so Sprint is not nagged about reviewers it does
+# not need. A status that over-reports is one people learn to ignore.
+ok "the Sprint lane is not told to run reviewers it does not require" \
+   "$(status 2 sprint | grep -c 'NOT DISPATCHED')" "0"
+ok "...and it says the reviewer set is capped" \
+   "$(status 2 sprint | grep -c 'capped at Tier 1')" "1"
+ok "the status names the command that records it" \
+   "$(status 1 standard | grep -c '/review-complete')" "1"
+# Never blocks: this is information, and a hook that fails here would stop
+# recording receipts, which is the one thing it exists to do.
+ok "the status never changes the hook's exit code" \
+   "$(status 1 standard >/dev/null 2>&1; echo $?)" "0"
+
+cd "$WORK" || exit 1
+
 echo "== the fork point is the NEAREST branch, not the first one named =="
 
 # The rule was "origin/main, else master, else dev". In a repo that keeps main as

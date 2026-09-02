@@ -239,19 +239,37 @@ exloom_push_target_branches() {
 # release gap in the diff and every branch derives Tier 3. origin/HEAD names
 # the branch a clone checks out, which is a different question.
 exloom_fork_point() {   # exloom_fork_point <tip>
-  local tip="$1" cand mb dist best="" best_dist=""
-  for cand in origin/main origin/master origin/dev origin/develop \
-              origin/development origin/trunk main master dev develop; do
-    git rev-parse --verify --quiet "$cand" >/dev/null 2>&1 || continue
+  local tip="$1"
+
+  # MEMOISED, and the refs listed in ONE call. The first version probed ten
+  # candidate names with three git subprocesses each, on every invocation, and
+  # derive_tier and check_verdicts both call it — about 3-6 seconds per gate
+  # evaluation on Windows, where a process spawn is expensive. The test suite went
+  # from ten seconds to minutes and that is how it was noticed.
+  if [[ "${_EXLOOM_FP_TIP:-}" == "$tip" && -n "${_EXLOOM_FP:-}" ]]; then
+    printf '%s' "$_EXLOOM_FP"; return 0
+  fi
+
+  local cand mb dist best="" best_dist="" existing
+  existing="$(git for-each-ref --format='%(refname:short)'                 refs/remotes/origin refs/heads 2>/dev/null)"
+  for cand in origin/main origin/master origin/dev origin/develop               origin/development origin/trunk main master dev develop; do
+    case "
+${existing}
+" in *"
+${cand}
+"*) ;; *) continue ;; esac
     mb="$(git merge-base "$tip" "$cand" 2>/dev/null)" || continue
     [[ -n "$mb" ]] || continue
     dist="$(git rev-list --count "${mb}..${tip}" 2>/dev/null)" || continue
     [[ "$dist" =~ ^[0-9]+$ ]] || continue
     if [[ -z "$best_dist" || "$dist" -lt "$best_dist" ]]; then
       best="$mb"; best_dist="$dist"
+      # Nothing can be nearer than the tip itself.
+      [[ "$dist" -eq 0 ]] && break
     fi
   done
   [[ -n "$best" ]] || return 1
+  _EXLOOM_FP_TIP="$tip"; _EXLOOM_FP="$best"
   printf '%s' "$best"
 }
 
@@ -536,6 +554,68 @@ exloom_last_pass_was_noop() {   # exloom_last_pass_was_noop <checklist> <tip>
   git cat-file -e "${prev}^{commit}" 2>/dev/null || return 1
   git cat-file -e "${cur}^{commit}" 2>/dev/null || return 1
   exloom_diff_is_behavioural "$prev" "$cur" && return 1
+  return 0
+}
+
+# A short answer to "where does the gate stand right now", printed after every
+# reviewer completes rather than only when someone runs /review-complete.
+#
+# The bookkeeping was invisible until the end, and that is why sessions
+# hand-dispatch reviewers and never invoke the command: dispatching directly
+# produces the same findings, so it FEELS equivalent, and nothing contradicts
+# that until the push is refused. What the command adds - the tier derived from
+# the diff, which receipts are missing or stale, which sections are unfilled - is
+# real work that produces no visible output at the moment it matters.
+#
+# So it is printed at the moment it matters. A reviewer just finished; this says
+# what that changed and what is still outstanding. Nothing here blocks, and it
+# does not replace the command - it removes the reason to defer it.
+exloom_gate_status() {   # exloom_gate_status <branch> <tip>
+  local branch="$1" tip="$2" checklist vdir content lane tier derived eff
+  checklist=".claude/reviews/${branch}.md"
+  vdir="$(exloom_verdict_dir "$checklist")"
+
+  content="$(cat "$checklist" 2>/dev/null || true)"
+  tier="$(printf '%s\n' "$content" | grep -E '^\*\*Tier:\*\*' | head -1 \
+          | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
+  lane="$(printf '%s\n' "$content" | exloom_declared_lane)"
+  [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
+  derived="$(exloom_derive_tier "$tip" 2>/dev/null || true)"
+  [[ "$tier" =~ ^[0-3]$ ]] || tier="$derived"
+  [[ "$tier" =~ ^[0-3]$ ]] || return 0
+  eff="$(exloom_effective_tier "$tier" "$lane")"
+
+  local sec_base sec_extra=""
+  sec_base="$(exloom_fork_point "$tip" 2>/dev/null || true)"
+  [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$tip" && sec_extra="security"
+
+  echo "exloom: gate status for ${branch}" >&2
+  if [[ -n "$derived" && "$derived" =~ ^[0-3]$ && "$tier" -lt "$derived" ]]; then
+    echo "  tier          declared ${tier}, but this diff derives to ${derived} - the push will be refused until it is raised" >&2
+  else
+    echo "  tier          ${tier} (${lane} lane$( [[ "$eff" != "$tier" ]] && printf ', reviewer set capped at Tier %s' "$eff" ))" >&2
+  fi
+
+  local agent file
+  for agent in $(exloom_required_reviewers "$eff" "$sec_extra"); do
+    file="${vdir}/${agent}.json"
+    if [[ ! -s "$file" ]]; then
+      echo "  ${agent}  NOT DISPATCHED" >&2
+    elif grep -q "\"head\":\"${tip}\"" "$file" 2>/dev/null; then
+      echo "  ${agent}  covers this commit" >&2
+    else
+      echo "  ${agent}  covers an earlier commit - re-run it if code changed since" >&2
+    fi
+  done
+
+  if [[ -n "$content" ]]; then
+    local unfilled
+    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)' || true)"
+    [[ "${unfilled:-0}" -gt 0 ]] && echo "  checklist     ${unfilled} placeholder line(s) still unfilled" >&2
+  else
+    echo "  checklist     none yet - run /review-init" >&2
+  fi
+  echo "  next          /review-complete records this and is what the gate reads; dispatching reviewers by hand does none of the bookkeeping above" >&2
   return 0
 }
 

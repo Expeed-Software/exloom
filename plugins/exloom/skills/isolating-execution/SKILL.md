@@ -95,6 +95,13 @@ native worktree mechanism if it has one; otherwise:
 git worktree add ../<repo>-<topic> -b feature/<topic>
 ```
 
+- **Then work from inside it.** Open your session at the worktree path — do not
+  create it and keep working from the base checkout. exloom's hooks resolve the
+  repository from the session's own directory, so a reviewer dispatched from
+  beside the worktree writes its receipt somewhere else, or nowhere; the gate
+  then reports that reviewer as never dispatched and re-running cannot clear it.
+  The hook says so on stderr rather than failing silently, but the fix is to be
+  in the right directory, not to interpret the warning.
 - Put the worktree beside the repo, not inside it (a worktree nested in the repo
   must be gitignored or it pollutes status).
 - The plan, spec, and review checklist travel with the branch because they are

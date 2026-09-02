@@ -477,4 +477,16 @@ fi
 
 
 echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${AGENT}.json) — commit it with the checklist" >&2
+
+# WHERE THE GATE STANDS, printed here rather than only when someone runs
+# /review-complete. A session that dispatches reviewers by hand gets the same
+# findings as the command, so the two feel equivalent and nothing contradicts
+# that until the push is refused — by which point the tier was never derived, a
+# required reviewer was never run, and the checklist still holds placeholders.
+# Saying it at every completion removes the reason to defer the command.
+_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib.sh"
+if [[ -r "$_LIB" ]]; then
+  # shellcheck source=/dev/null
+  . "$_LIB" 2>/dev/null && exloom_gate_status "$BRANCH" "$HEAD_SHA" 2>&1 >/dev/null | cat >&2
+fi
 exit 0
