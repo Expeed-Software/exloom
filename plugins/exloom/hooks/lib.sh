@@ -771,6 +771,10 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   # reading it.
   local -a lines=()
   local actionable=0 covered=0 required=0
+  # Set only for the reviewer states that have NO escape hatch: rejected, never
+  # reported, never dispatched. A stale receipt is deliberately excluded - see
+  # the cap block below.
+  local must_clear=0
 
   # ---------- past the cap, this stops asking for rounds ----------
   #
@@ -814,7 +818,7 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     file="${vdir}/${agent}.json"
     if [[ ! -s "$file" ]]; then
       lines+=("  ${agent}  NOT DISPATCHED")
-      actionable=1
+      actionable=1; must_clear=1
       continue
     fi
     state="stale"
@@ -836,8 +840,8 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     done < "$file"
     case "$state" in
       ok)         covered=$((covered + 1)) ;;
-      unapproved) lines+=("  ${agent}  reviewed this code and did NOT approve it"); actionable=1 ;;
-      launched)   lines+=("  ${agent}  launched, but its report never reached exloom - re-dispatch it without a name"); actionable=1 ;;
+      unapproved) lines+=("  ${agent}  reviewed this code and did NOT approve it"); actionable=1; must_clear=1 ;;
+      launched)   lines+=("  ${agent}  launched, but its report never reached exloom - re-dispatch it without a name"); actionable=1; must_clear=1 ;;
       *)
         # Past the cap the fact is still worth stating; the instruction is not.
         # A fix commit always leaves the L1 receipt behind the tip, so an
@@ -893,7 +897,20 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   # same question, but a session in a review loop is not pushing — it is
   # reviewing — so this is the only place the question reliably gets asked.
   if [[ "$at_cap" -eq 1 ]]; then
-    if [[ "$st_answered" -eq 1 ]]; then
+    # The cap counts review ROUNDS - passes opened to look for new findings. A
+    # reviewer that was rejected, went stale, or never reported has not finished
+    # the round it was already required for, and re-running it is not a new one.
+    #
+    # Forbidding that dispatch deadlocks the gate against itself: a rejected
+    # receipt has no escape hatch, the push gate says to clear it, and this
+    # message says not to. The only way out was a person overriding what the
+    # gate itself demanded.
+    if [[ "$must_clear" -eq 1 ]]; then
+      echo "exloom: ${branch} is at the round cap (${st_rounds}/${st_max}), but the reviewers above have not cleared." >&2
+      echo "  Dispatch them - that is not another round, it finishes the one already required." >&2
+      echo "  The cap forbids opening a NEW pass to look for new findings. It does not" >&2
+      echo "  forbid clearing a rejected, stale or never-reported receipt." >&2
+    elif [[ "$st_answered" -eq 1 ]]; then
       echo "exloom: ${branch} has ${st_rounds} passes and a recorded cap decision - the round question is answered, do not dispatch another reviewer." >&2
     else
       echo "exloom: STOP - ${branch} has had ${st_rounds} review passes (cap ${st_max}). Do not dispatch another reviewer." >&2

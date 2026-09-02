@@ -2194,6 +2194,48 @@ ok "...and does not ask for another reviewer" "$(printf '%s' "$SOUT" | grep -c '
 ok "...naming the pass count and the cap"     "$(printf '%s' "$SOUT" | grep -c '4 review passes (cap 3)')" "1"
 ok "...and hands over the three options"      "$(printf '%s' "$SOUT" | grep -c 'Merge as-is')" "1"
 
+# A REJECTED receipt at the cap is the one case where "do not dispatch" deadlocks
+# the gate against itself. A rejection has no escape hatch, the push gate says to
+# clear it, and clearing it needs the dispatch this message used to forbid - so
+# the only way out was a person overriding what the gate itself demanded.
+#
+# Stale is deliberately NOT in this set: a fix commit always leaves the L1 receipt
+# behind the tip, so treating that as clearable rebuilds the endless loop the cap
+# exists to stop. The test above pins that half; this one pins the other.
+subrepo capreject
+RCL=".claude/reviews/feat/plan.md"; RVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$RVD"; printf '**Tier:** 1
+' > "$RCL"
+for i in 1 2 3 4; do
+  printf 'j%s
+' "$i" >> src/base.txt
+  git add -A >/dev/null 2>&1; git commit -qm "j$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-0%sT00:00:00Z","session":"s"}
+'     "$(git rev-parse HEAD)" "$i" >> "$RVD/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+ROUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
+ok "a rejected receipt at the cap is still clearable"    "$(printf '%s' "$ROUT" | grep -c 'not another round')" "1"
+ok "...and does not forbid the dispatch that clears it"    "$(printf '%s' "$ROUT" | grep -c 'Do not dispatch another reviewer')" "0"
+ok "...while still naming the cap it is at"    "$(printf '%s' "$ROUT" | grep -c 'at the round cap')" "1"
+
+# The same shape for a receipt that recorded a launch and never a verdict - the
+# named-subagent case. It never reported, so it has not had its round.
+subrepo caplaunch
+NCL=".claude/reviews/feat/plan.md"; NVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$NVD"; printf '**Tier:** 1
+' > "$NCL"
+for i in 1 2 3 4; do
+  printf 'n%s
+' "$i" >> src/base.txt
+  git add -A >/dev/null 2>&1; git commit -qm "n$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-0%sT00:00:00Z","session":"s"}
+'     "$(git rev-parse HEAD)" "$i" >> "$NVD/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+NOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
+ok "a launch-only receipt at the cap is clearable too"    "$(printf '%s' "$NOUT" | grep -c 'not another round')" "1"
+
 # Under the cap it must still do its ordinary job, or the fix would just be a
 # mute button.
 subrepo undercap
