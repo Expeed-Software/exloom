@@ -32,7 +32,9 @@ Rigour is earned by stakes. Running the full flow on a null check is how a one-l
 |---|---|---|---|
 | **Sprint** | nothing | L1, smoke test, proof | `**Lane:** sprint` |
 | **Standard** | a spec and a plan | whatever the tier requires | the default |
-| **Certified** | a spec and a plan | tier's requirements, no escape hatches, signed commit | `**Lane:** certified` |
+| **Certified** | a spec and a plan | tier's requirements, no workflow-step escape hatches, signed commit | `**Lane:** certified` |
+
+"No workflow-step escape hatches" means the gate refuses a Certified checklist that records a skipped step under `## Escape hatches used` — a step you chose not to do is not a step you may write your way past. It does not mean the branch cannot be pushed: `EXLOOM_REVIEW_SKIP=1` still bypasses the hooks on any lane, and always writes a bypass receipt. One is a workflow decision the gate reads; the other is an out-of-band override that leaves a trace.
 
 The lane is your choice; the **tier** is derived from the diff and decides how deep the review goes. They are different axes: a migration is Tier 3 whatever lane you are on, and **Sprint is refused at Tier 3** — those are the stakes that earn the full flow.
 

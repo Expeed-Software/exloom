@@ -66,7 +66,9 @@ The tier is derived from the diff. The **lane** is the user's call, and it decid
 |---|---|---|---|
 | `sprint` | a spike, a demo, a bug fix you already understand | nothing — branch and go | L1, smoke, proof |
 | `standard` | work meant to become a real system | spec, plan, fidelity audit | whatever the tier requires |
-| `certified` | regulated, or someone outside the team must be able to audit it | same as standard | tier's requirements, **no escape hatches**, signed provenance |
+| `certified` | regulated, or someone outside the team must be able to audit it | same as standard | tier's requirements, **no workflow-step escape hatches**, signed provenance |
+
+On Certified, a skipped step recorded under `## Escape hatches used` blocks the push — writing a justification is not a way past a step. `EXLOOM_REVIEW_SKIP=1` is separate: it overrides the hooks on any lane and always leaves a bypass receipt.
 
 Ask once, with a recommendation, and default to the repo's committed `.claude/exloom-lane` (or `standard` when there is none). Recommend `sprint` when the change is small and self-contained and the user described it as a fix or a spike; recommend `standard` otherwise.
 

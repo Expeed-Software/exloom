@@ -42,7 +42,7 @@ exloom is for teams shipping code. exloom-qa is for teams proving it works. They
 
 ## Versioning and releases
 
-Each plugin carries its own version in its own `plugin.json` and releases on its own schedule. Release tags are prefixed per plugin (`exloom--v1.6.0`, `exloom-qa--v0.2.0`) so the two histories never collide. Installs resolve from the default branch, so merging to `main` is what publishes; tags and GitHub Releases are changelog, not delivery.
+Each plugin carries its own version in its own `plugin.json` and releases on its own schedule. `exloom` tags bare (`v5.1.0`); every other plugin prefixes with its own name (`exloom-qa--v0.1.8`) so the histories never collide. Installs resolve from the default branch, so merging to `main` is what publishes; tags and GitHub Releases are changelog, not delivery.
 
 ## Contributing
 
