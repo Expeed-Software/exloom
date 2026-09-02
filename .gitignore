@@ -24,3 +24,9 @@ __pycache__/
 .venv/
 venv/
 .exloom/
+
+# Session working artifacts. These are notes about *this* repo's development —
+# review checklists, plans, QA sheets — and they carry branch names, ticket
+# numbers and incident detail that have no business in a public repository.
+# Keep them local; the plugin itself ships under plugins/.
+.claude/
