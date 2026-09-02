@@ -487,6 +487,9 @@ echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${A
 _LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib.sh"
 if [[ -r "$_LIB" ]]; then
   # shellcheck source=/dev/null
+  # `2>&1 >/dev/null` in THIS order: stderr goes to the pipe, then stdout goes to
+  # /dev/null. Reversing it sends both to /dev/null and the status vanishes -
+  # easy to "tidy" into being wrong, so it is spelled out here.
   . "$_LIB" 2>/dev/null && exloom_gate_status "$BRANCH" "$HEAD_SHA" 2>&1 >/dev/null | cat >&2
 fi
 exit 0

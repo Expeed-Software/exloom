@@ -71,7 +71,25 @@ case "$TOOL" in
     else
       # Reading, staging and committing receipts must keep working — only deny
       # the forms that create or change one.
-      printf '%s' "$SCAN_CMD" | grep -Eq '>>?|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e' || exit 0
+      #
+      # REDIRECT TARGETS, not "is there a > anywhere". Matching a bare `>` blocked
+      # two read-only forms, both reported from real sessions and both dismissed
+      # here once before they were reproduced:
+      #
+      #   ls -1 .claude/reviews/x.verdicts/ 2>/dev/null    a stderr redirect
+      #   ls .claude/reviews/<branch>.verdicts/            `<branch>` contains a >
+      #
+      # The second is the form /review-complete literally instructs, so the
+      # command told people to run something the gate refused.
+      #
+      # A redirect operator follows whitespace, a `&`, a digit (2>), or the start
+      # of the command. Inside `<branch>` the `>` follows a letter, so it is not
+      # one. `2>/dev/null` IS a redirect, and its target is /dev/null, which is
+      # not a receipt.
+      REDIR="$(printf '%s' "$SCAN_CMD"         | grep -oE '(^|[[:space:]]|&|[0-9])>>?[[:space:]]*[^[:space:];|&()]+'         | sed -E 's/^.*>>?[[:space:]]*//')"
+      if ! printf '%s' "$REDIR" | grep -Eq "$VERDICT_RE"          && ! printf '%s' "$SCAN_CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e'; then
+        exit 0
+      fi
       TARGET="$CMD"
     fi
     ;;

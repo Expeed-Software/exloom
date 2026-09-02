@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, runbook/rollback for Tier 3) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
+description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, a recovery plan for Tier 3) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
 ---
 
 # Review Gate
@@ -17,7 +17,7 @@ Consider a large, multi-batch refactor that passed every review it was given —
 
 The retrospective was clear about which gates carried signal. L1 found real bugs every batch. L2 tended to rubber-stamp when the author wrote both the spec and the code. Final passes were almost entirely performative. Per-plan contract checks caught within-layer issues but were blind to the UI ↔ backend seam. The two things that would have caught the gap — an actual smoke test and a hostile adversarial pass focused on cross-layer contracts — were either skipped or too narrowly scoped.
 
-This protocol encodes those lessons. Every change, regardless of size, needs an L1 code review and a real smoke test (booted system, executed user action, observed result). Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a rollback dry-run. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse to let you declare done or push without it filled.
+This protocol encodes those lessons. Every change, regardless of size, needs an L1 code review and a real smoke test (booted system, executed user action, observed result). Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a recovery plan that says what reverting does not fix. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse to let you declare done or push without it filled.
 
 ## If you have used exloom before, four rules changed
 
@@ -119,7 +119,7 @@ What this does **not** buy: it proves a reviewer ran, never that the review was 
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
 | <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + proof-is-tested + checklist |
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + adversarial review |
-| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + exact rollback command + a reversal test in CI |
+| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + a three-part recovery plan |
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight — the gate derives the minimum from the diff and blocks a downgrade, so this is enforced, not advised. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
 
@@ -178,18 +178,26 @@ Dispatch the `security-auditor` agent. It runs the repo's security scanners — 
 
 This is a **first pass, not a guarantee** — it never certifies code "secure," only "no issues found by the checks that ran." A Critical or High finding blocks the change until it is fixed or risk-accepted in writing. The full method lives in the `security-auditor` agent.
 
-### Step 6 — Runbook + rollback (Tier 3 only)
+### Step 6 - Recovery plan (Tier 3 only)
 
-The review proves the code is safe to *merge*. So every item in this section is a property of the diff — something a reviewer can check at this commit. Verification against a deployed environment is deliberately **not** recorded here: this document is written once and read at merge, the gate binds it to a SHA and cannot bind it to the state of a running system, and a slot demanding evidence the gate cannot check is where fabrication goes. Deployment verification belongs to the deploy process, which owns the environment and can observe it.
+The review proves the code is safe to *merge*. So every item here is a property of the diff - something a reviewer can check at this commit. Verification against a deployed environment is deliberately **not** recorded here: this document is written once and read at merge, the gate binds it to a SHA and cannot bind it to the state of a running system, and a slot demanding evidence the gate cannot check is where fabrication goes.
 
-Required content in the checklist:
-- **Runbook path** — a markdown doc committed alongside the change, listing deploy order, health checks, signals to watch, and common failure modes. The file must exist at the path given; `/review-complete` checks.
-- **Rollback command** — the exact command that undoes this change. Not a description of one.
-- **Reversal proof** — the automated test, run by CI on this commit, that exercises the rollback: applies the change, reverses it, asserts the pre-change state. Name it by test id or path.
+**This section used to ask for a "rollback command" and a "reversal proof".** That is one field doing two jobs, and it answers the easy one. Reverting the *code* is nearly always possible; undoing its *effects* frequently is not. Worse, a field that assumes every change can be undone leaves an author whose change genuinely cannot with three options - write a command that does not work, bypass the gate, or argue with it - and all three are worse than the truth.
 
-If the reversal genuinely cannot be exercised in code — an infrastructure action such as a DNS cutover or a load-balancer swap — write `untestable in code` and one sentence naming what will verify it at deploy time. This is not for a reversal that is merely inconvenient to test: a migration with a down-script is always testable, and so is a feature flag.
+So it asks three questions instead, and all three are answerable for every change:
 
-An untested rollback is not a rollback; it is a wish. And a rollback proven by a test keeps proving itself on every commit, where one proven by a log pasted into a document stops being true the moment the code moves.
+- **Runbook path** - a markdown doc committed alongside the change: deploy order, health checks, signals to watch, common failure modes. The file must exist; `/review-complete` checks.
+- **Stop the bleeding** - the exact command or action that halts the damage. Revert the deploy, flip the flag, disable the route. This one always exists, and the box asks that it has been run at least once somewhere that is not production.
+- **What that does not fix** - the state reverting the code leaves in the new shape. Rows already rewritten, emails already sent, events consumers already received, caches rebuilt, credentials rotated. `nothing` is a valid answer and must be written rather than left blank.
+- **How that state is recovered** - a named backup *and how you verified a restore works*, a replay or repair procedure, or `NOT RECOVERABLE` with the reason shipping anyway was right.
+
+Two things that answer is strict about.
+
+**An unverified backup is not a recovery plan.** "We have nightly backups" is a belief about infrastructure. "Restored last night's dump into staging on 2026-09-01" is a fact about this change.
+
+**`NOT RECOVERABLE` is a legitimate answer**, and for some changes the only true one - a migration that drops values, an email already sent. It is not an escape hatch and reviewers should not argue with it. It exists so a one-way door is a decision somebody makes on the record, rather than a discovery made during an incident.
+
+The failure this replaces is specific: reverting a deploy while the database, the queue and a third party are all in the new state turns one incident into two, and the old field made that look handled.
 
 ## Checklist template
 

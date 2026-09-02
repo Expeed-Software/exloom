@@ -78,9 +78,14 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 ### Tier 3 required (Tier 2 +)
 - Security review: `security-auditor.json` receipt present, tool output pasted, findings dispositioned.
 - Runbook path filled and the file exists at that path.
-- Rollback command filled with an exact command, not a description.
-- Reversal proof names a test id or path — and that test exists in the repo. If it reads `untestable in code`, a one-sentence deploy-time verification follows it.
+- **Stop the bleeding** filled with an exact command or action, not a description. This one always exists - reverting a deploy, flipping a flag, disabling a route.
+- **What that does not fix** filled. `nothing` is a valid answer and must be stated rather than left blank; the common real answers are rows already rewritten, messages already sent, events consumers already received, caches rebuilt, credentials rotated.
+- **How that state is recovered** filled. Three shapes are acceptable and no others: a named backup *plus how the author verified a restore works*; a replay or repair procedure; or `NOT RECOVERABLE` with the reason shipping anyway was right.
+  - An unverified backup is not a recovery plan. "We have nightly backups" does not answer it; "restored last night's dump into staging on 2026-09-01" does.
+  - `NOT RECOVERABLE` is legitimate - a migration that drops values, an email already sent - and is not an escape hatch to argue with. It is the author making a one-way door explicit. Check only that the reason is stated; do not push back on it.
 - Both Tier 3 boxes ticked.
+
+Do **not** ask for a single "rollback command". It answers whether the *code* can be reverted, which is nearly always yes, while implying the *effects* were handled - and reverting a deploy while the database, the queue and a third party are all in the new state is how one incident becomes two.
 
 ## Step 3 — Verify section content is real, not placeholder
 

@@ -236,7 +236,7 @@ that is this document's notation, not output, and it is rejected as ambiguous.
 # Rules
 
 - Every blocking finding must include the exact verification command you ran (or a reviewer would run) to confirm the bug. "Trust me" is not acceptable.
-- If you find nothing, that is also a finding — state what you verified and how. A clean report with no evidence of effort is worse than no report.
+- Flagging nothing is allowed - but show what you ran and traced. A clean report with no evidence of effort is not acceptable; a clean report that names what you checked is a good result, not a failed hunt.
 - Do not soften findings. "The backend might not read this field" is wrong. Either it does or it does not — grep, then state plainly.
 - Integration gaps cost the most. Weight your attention accordingly: spend more time on Q1 and Q2 than on the rest combined.
 

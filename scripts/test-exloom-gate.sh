@@ -1367,14 +1367,61 @@ ok "a required reviewer that never ran is named" \
 # not need. A status that over-reports is one people learn to ignore.
 ok "the Sprint lane is not told to run reviewers it does not require" \
    "$(status 2 sprint | grep -c 'NOT DISPATCHED')" "0"
-ok "...and it says the reviewer set is capped" \
-   "$(status 2 sprint | grep -c 'capped at Tier 1')" "1"
+# A SATISFIED gate is one line, not a block. Printing the same shape either way
+# puts "your branch cannot ship" on the same channel and prefix as "receipt
+# recorded", three times a round - which is how a status gets tuned out, and
+# would rebuild the problem it was written to fix with more output.
+ok "a satisfied gate is one line, not a block" \
+   "$(status 2 sprint | grep -c 'gate satisfied')" "1"
+ok "...and prints no ACTION NEEDED header" \
+   "$(status 2 sprint | grep -c 'ACTION NEEDED')" "0"
+ok "an actionable gate is clearly marked as such" \
+   "$(status 2 standard | grep -c 'ACTION NEEDED')" "1"
+ok "...and still names the lane and the cap" \
+   "$(status 2 sprint | grep -c 'sprint lane')" "1"
 ok "the status names the command that records it" \
    "$(status 1 standard | grep -c '/review-complete')" "1"
 # Never blocks: this is information, and a hook that fails here would stop
 # recording receipts, which is the one thing it exists to do.
 ok "the status never changes the hook's exit code" \
    "$(status 1 standard >/dev/null 2>&1; echo $?)" "0"
+
+cd "$WORK" || exit 1
+
+echo "== reading a receipt is not writing one =="
+
+# The write check matched a bare `>` anywhere in the command, so two read-only
+# forms were denied. Both were reported from real sessions and dismissed twice
+# here before being reproduced:
+#
+#   ls -1 .claude/reviews/x.verdicts/ 2>/dev/null    a stderr redirect
+#   ls .claude/reviews/<branch>.verdicts/            `<branch>` contains a >
+#
+# The second is the form /review-complete instructs verbatim, so the command told
+# people to run something the gate refused. Over-blocking is what teaches people
+# to reach for EXLOOM_REVIEW_SKIP, which costs more than the forgery it prevents.
+subrepo pvreads noorigin
+mkdir -p .claude/reviews/feat
+printf 'x\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+pv() {
+  printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":%s}}' \
+    "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")" \
+    | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1
+  echo $?
+}
+ok "a stderr redirect is not a write"        "$(pv 'ls -1 .claude/reviews/feat/x.verdicts/ 2>/dev/null')" "0"
+ok "an unsubstituted <branch> is not a write" "$(pv 'ls .claude/reviews/<branch>.verdicts/')" "0"
+ok "plain listing still reads"                "$(pv 'ls .claude/reviews/feat/x.verdicts/')" "0"
+ok "cat with a discarded stderr still reads"  "$(pv 'cat .claude/reviews/feat/x.verdicts/l1-reviewer.json 2>/dev/null')" "0"
+ok "staging a receipt still works"            "$(pv 'git add .claude/reviews/feat/x.verdicts')" "0"
+# And every write form must still be denied - the point of the hook.
+ok "truncating a receipt is denied"           "$(pv 'echo forged > .claude/reviews/feat/x.verdicts/l1-reviewer.json')" "2"
+ok "appending to a receipt is denied"         "$(pv 'echo forged >> .claude/reviews/feat/x.verdicts/l1-reviewer.json')" "2"
+ok "redirecting anything into one is denied"  "$(pv 'cat /dev/null > .claude/reviews/feat/x.verdicts/proof.json')" "2"
+ok "tee into a receipt is denied"             "$(pv 'tee .claude/reviews/feat/x.verdicts/l1-reviewer.json < /tmp/f')" "2"
+ok "removing a receipt is denied"             "$(pv 'rm .claude/reviews/feat/x.verdicts/l1-reviewer.json')" "2"
+ok "destroying the reviews tree is denied"    "$(pv 'rm -rf .claude/reviews')" "2"
+ok "touching the gate marker is denied"       "$(pv 'touch .claude/exloom-gate.enabled')" "2"
 
 cd "$WORK" || exit 1
 

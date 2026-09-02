@@ -589,33 +589,60 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   sec_base="$(exloom_fork_point "$tip" 2>/dev/null || true)"
   [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$tip" && sec_extra="security"
 
-  echo "exloom: gate status for ${branch}" >&2
+  # THE BLOCK'S APPEARANCE IS THE SIGNAL. Printing the same shape whether or not
+  # anything is wrong puts "your branch cannot ship" on the same channel, with the
+  # same prefix, as "receipt recorded" - three times a round, mostly unchanged.
+  # That is how a status line gets tuned out, which would rebuild the problem it
+  # was written to fix, with more output.
+  #
+  # So the detail prints only when something is ACTIONABLE, and a satisfied gate
+  # is one line. Then a reader does not have to read the block to know there is
+  # something to read.
+  local -a lines=()
+  local actionable=0 covered=0 required=0
+
   if [[ -n "$derived" && "$derived" =~ ^[0-3]$ && "$tier" -lt "$derived" ]]; then
-    echo "  tier          declared ${tier}, but this diff derives to ${derived} - the push will be refused until it is raised" >&2
-  else
-    echo "  tier          ${tier} (${lane} lane$( [[ "$eff" != "$tier" ]] && printf ', reviewer set capped at Tier %s' "$eff" ))" >&2
+    lines+=("  tier          declared ${tier}, but this diff derives to ${derived} - the push will be refused until it is raised")
+    actionable=1
   fi
 
   local agent file
   for agent in $(exloom_required_reviewers "$eff" "$sec_extra"); do
+    required=$((required + 1))
     file="${vdir}/${agent}.json"
     if [[ ! -s "$file" ]]; then
-      echo "  ${agent}  NOT DISPATCHED" >&2
+      lines+=("  ${agent}  NOT DISPATCHED")
+      actionable=1
     elif grep -q "\"head\":\"${tip}\"" "$file" 2>/dev/null; then
-      echo "  ${agent}  covers this commit" >&2
+      covered=$((covered + 1))
     else
-      echo "  ${agent}  covers an earlier commit - re-run it if code changed since" >&2
+      lines+=("  ${agent}  covers an earlier commit - re-run it if code changed since")
+      actionable=1
     fi
   done
 
-  if [[ -n "$content" ]]; then
-    local unfilled
-    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date)' || true)"
-    [[ "${unfilled:-0}" -gt 0 ]] && echo "  checklist     ${unfilled} placeholder line(s) still unfilled" >&2
+  if [[ -z "$content" ]]; then
+    lines+=("  checklist     none yet - run /review-init")
+    actionable=1
   else
-    echo "  checklist     none yet - run /review-init" >&2
+    local unfilled
+    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|rows rewritten|restore from the backup)' || true)"
+    if [[ "${unfilled:-0}" -gt 0 ]]; then
+      lines+=("  checklist     ${unfilled} placeholder line(s) still unfilled")
+      actionable=1
+    fi
   fi
-  echo "  next          /review-complete records this and is what the gate reads; dispatching reviewers by hand does none of the bookkeeping above" >&2
+
+  if [[ "$actionable" -eq 0 ]]; then
+    echo "exloom: gate satisfied at ${tip:0:12} - ${covered}/${required} receipts current, Tier ${tier}, ${lane} lane" >&2
+    return 0
+  fi
+
+  local cap=""
+  [[ "$eff" != "$tier" ]] && cap=", reviewer set capped at Tier ${eff}"
+  echo "exloom: ACTION NEEDED - ${branch} cannot ship as it stands (Tier ${tier}, ${lane} lane${cap})" >&2
+  printf '%s\n' "${lines[@]}" >&2
+  echo "  next          /review-complete does this bookkeeping and records it; dispatching reviewers by hand does none of it" >&2
   return 0
 }
 
