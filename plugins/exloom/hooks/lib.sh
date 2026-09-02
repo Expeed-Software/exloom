@@ -1390,7 +1390,7 @@ line each, in <agent>.findings.jsonl."
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0
 
   vdir="$(exloom_verdict_dir "$checklist")"
   file="${vdir}/proof.json"
@@ -1426,12 +1426,26 @@ exloom_check_proof() {
         # compile at base. Mutation asks the same question without needing the
         # code to be absent.
         *'"result":"PROVED_BY_MUTATION"'*) ok=1; break ;;
+        # The tests could not compile without the change, so the question could
+        # not be asked. That is a property of additive code, not a weak test, and
+        # it must not read as the same failure. Accepted and reported, because
+        # the alternative was a bypass - which lets the same push through while
+        # recording less about why.
+        *'"result":"NOT_APPLICABLE"'*) ok=1; seen_notapplicable=1 ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
   fi
 
-  [[ $ok -eq 1 ]] && return 0
+  if [[ $ok -eq 1 ]]; then
+    # Stated every time, because the whole value of accepting this result is that
+    # the reader knows which of the three they got. A silent pass would make the
+    # weakest evidence look like the strongest.
+    if [[ $seen_notapplicable -eq 1 ]]; then
+      echo "exloom: proof recorded NOT_APPLICABLE - the tests do not compile without the change, so it could not be run. The receipt says so; it is the weakest of the three results." >&2
+    fi
+    return 0
+  fi
 
   local detail
   if [[ $seen_cmdswap -eq 1 ]]; then

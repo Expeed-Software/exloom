@@ -345,6 +345,34 @@ printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$RP" > "$
 git add -A; git commit -qm p3
 ok "PROVED receipt covering the commit -> allowed" "$(pchk)" "0"
 
+# A build failure at base is not the same finding as a test that passed without
+# the change, and must not produce the same outcome. The first says the question
+# cannot be asked here - the tests reference code the branch introduces, so they
+# do not compile without it. The second says the tests are weak. Collapsing them
+# left an author with a new class or a new endpoint holding a blocking result
+# they could not clear except by bypassing, which records less than this does.
+printf '{"check":"change-is-tested","result":"NOT_APPLICABLE","method":"not-applicable","head":"%s"}
+' "$RP" > "$CPD/proof.json"
+git add -A; git commit -qm pna
+ok "NOT_APPLICABLE receipt -> allowed" "$(pchk)" "0"
+ok "...and says so rather than passing silently"    "$(exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null | grep -c 'NOT_APPLICABLE')" "1"
+
+# The weak result is still bound to the commit. Accepting it must not also mean
+# accepting it forever - that would make it a waiver rather than a record.
+printf 'na
+' > src/p.go; git add -A; git commit -qm pna2
+ok "NOT_APPLICABLE goes stale on a code commit" "$(pchk)" "2"
+
+# NOT_PROVED keeps its meaning: the tests ran at base and passed anyway.
+printf '{"check":"change-is-tested","result":"NOT_PROVED","method":"three-run","head":"%s"}
+' "$(git rev-parse HEAD)" > "$CPD/proof.json"
+git add -A; git commit -qm pnp
+ok "NOT_PROVED still blocks" "$(pchk)" "2"
+
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}
+' "$(git rev-parse HEAD)" > "$CPD/proof.json"
+git add -A; git commit -qm pback
+
 # A proof from before the last code change must not vouch for the new code.
 printf 'b\n' > src/p.go; git add -A; git commit -qm p4
 ok "PROVED receipt goes stale on a code commit" "$(pchk)" "2"
@@ -1630,8 +1658,12 @@ git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
 
 MJ=".claude/reviews/feat/plan.verdicts/proof.json"
 out="$(bash "$PROVE" 2>&1)"
-ok "with no mutation command -> still NOT PROVED, as before" \
-   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$MJ" | tail -1)" "NOT_PROVED"
+ok "with no mutation command -> NOT_APPLICABLE, not NOT_PROVED" \
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$MJ" | tail -1)" "NOT_APPLICABLE"
+# The result is only half the record. Without the method a reader cannot tell the
+# weakest of the three claims from the strongest.
+ok "...and the receipt names the method that produced it" \
+   "$(sed -n 's/.*"method":"\([a-z-]*\)".*/\1/p' "$MJ" | tail -1)" "not-applicable"
 ok "...and the message names the additive case and the way out" \
    "$(printf '%s' "$out" | grep -c 'PURELY ADDITIVE' | head -1)" "1"
 
@@ -1677,8 +1709,15 @@ git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
 printf 'true\n' > .claude/exloom-mutation-command      # never committed
 UJ=".claude/reviews/feat/plan.verdicts/proof.json"
 bash "$PROVE" >/dev/null 2>&1
+# An untracked mutation command is eval'd code that appears in no diff, so it is
+# never honoured. What proves it was not honoured is the METHOD: had it run and
+# exited 0 this would read PROVED_BY_MUTATION. Falling through to the additive
+# case is the correct outcome, and asserting the method is what makes the
+# security property observable rather than incidental.
 ok "an uncommitted mutation command is ignored" \
-   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$UJ" | tail -1)" "NOT_PROVED"
+   "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$UJ" | tail -1)" "NOT_APPLICABLE"
+ok "...and it is not recorded as a mutation result" \
+   "$(sed -n 's/.*"method":"\([a-z-]*\)".*/\1/p' "$UJ" | tail -1)" "not-applicable"
 
 cd "$WORK" || exit 1
 

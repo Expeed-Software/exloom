@@ -32,8 +32,21 @@
 #                                    three-run proof cannot. Must exit 0 when your
 #                                    mutation threshold is met.
 #
+# Three results, and they are not the same claim:
+#
+#   PROVED              removing the change makes the tests fail. Strongest.
+#   PROVED_BY_MUTATION  the tests kill the mutants the repo's threshold requires.
+#   NOT_APPLICABLE      the tests do not compile without the change, so the
+#                       question cannot be asked. Recorded, not waived - the
+#                       receipt carries method=not-applicable and the gate says
+#                       so on every push. Weakest of the three.
+#
+# NOT_PROVED is reserved for the actual finding: the tests ran without the change
+# and passed anyway. Reporting an additive change as NOT_PROVED made a new class
+# indistinguishable from a vacuous test, and left the author no exit but a bypass.
+#
 # Exit codes:
-#   0  proved: removing the source change makes the tests fail
+#   0  proved, proved by mutation, or not applicable (all recorded on the receipt)
 #   1  NOT proved: tests still pass without the change  <-- the finding
 #   2  could not run (no test command, no changed sources, worktree failure)
 
@@ -246,8 +259,17 @@ print(" ".join(sorted(found)))
   fi
 }
 
+# The receipt records HOW the result was reached, not only what it was. The three
+# outcomes are not equally strong claims, and a reader who cannot tell them apart
+# has a number without its units:
+#
+#   three-run       the tests ran without the change and failed. Strongest.
+#   mutation        the tests killed the mutants the repo's threshold requires.
+#   not-applicable  the tests cannot compile without the change, so the question
+#                   cannot be asked. Weakest: it shows the tests depend on the
+#                   change, not that they would notice it being wrong.
 _receipt() {
-  local result="$1" branch vdir head
+  local result="$1" method="${2:-three-run}" branch vdir head
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
   [[ -f ".claude/exloom-gate.enabled" ]] || return 0
@@ -256,14 +278,14 @@ _receipt() {
   mkdir -p "$vdir" 2>/dev/null || return 0
   local cmdhash="none"
   [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
-  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","at":"%s"}\n' \
-    "$result" "$BASE" "$head" \
+  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","at":"%s"}\n' \
+    "$result" "$method" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
     "$cmdhash" \
     "${CRITERIA_RAN:-}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
-  echo "exloom: recorded proof receipt (${result}) at ${vdir}/proof.json — commit it with the checklist" >&2
+  echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
 }
 
 # ---------- RUN 1: base source + base tests. MUST PASS. ----------
@@ -390,7 +412,7 @@ if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not e
     mut_rc=$?
     if [[ $mut_rc -eq 0 ]]; then
       CRITERIA_RAN="$(_criteria_from_reports "$WT")"
-      _receipt PROVED_BY_MUTATION
+      _receipt PROVED_BY_MUTATION mutation
       echo
       echo "PROVED BY MUTATION — the tests kill the mutants your repo's threshold requires."
       echo "The three-run proof does not apply to a purely additive change; this answers"
@@ -409,24 +431,36 @@ if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not e
     exit 1
   fi
 
-  _receipt NOT_PROVED
+  # NOT the same finding as "the tests passed without the change", and it must not
+  # produce the same result. That one says the tests are weak and is the author's
+  # to fix. This one says the question cannot be asked here, which is a property
+  # of additive code and not a defect. Reporting both as NOT_PROVED made a new
+  # class or a new endpoint indistinguishable from a vacuous test, and left the
+  # author with no exit but a bypass - which records less than this does.
+  CRITERIA_RAN="$(_criteria_from_reports "$WT")"
+  _receipt NOT_APPLICABLE not-applicable
   echo
-  echo "NOT PROVED — the base run failed to BUILD, not to assert (exit $rc)."
+  echo "NOT APPLICABLE — the base run failed to BUILD, not to assert (exit $rc)."
   echo "Your tests reference code the change introduces, so they cannot compile"
   echo "without it. That shows the tests depend on the change; it does not show"
   echo "they would notice the change being WRONG."
   echo
-  echo "Two ways forward:"
+  echo "This is recorded, not waived. The receipt carries method=not-applicable,"
+  echo "which is the weakest of the three and says so to anyone reading the branch."
+  echo
+  echo "To make the claim a strong one:"
   echo "  1. If the change extends existing behaviour, exercise it through an"
   echo "     interface that exists at base and assert on an observable output."
+  echo "     That earns the three-run proof, which is the strongest evidence here."
   echo "  2. If the change is PURELY ADDITIVE — a new API, a new control — then"
   echo "     no such interface exists and this proof cannot apply, however the"
   echo "     test is written. Pin a mutation command in"
   echo "     .claude/exloom-mutation-command (committed) that exits 0 when your"
   echo "     threshold is met, and re-run: PIT, Stryker, mutmut, go-mutesting."
+  echo "     Mutation is slow, so it is a repo's choice and not a requirement."
   echo
   echo "--- last 25 lines ---"; tail -25 "$WT/.exloom-out" 2>/dev/null
-  exit 1
+  exit 0
 fi
 
 

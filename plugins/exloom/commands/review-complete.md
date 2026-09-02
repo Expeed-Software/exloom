@@ -69,7 +69,11 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
   bash "$PROVE"
   ```
 
-  It runs the suite three times — at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass). A `NOT_PROVED` receipt does not satisfy the gate; fix the tests rather than re-running.
+  It runs the suite three times - at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass).
+
+  Three results satisfy the gate, and they are not equal evidence. `PROVED` is the three-run result. `PROVED_BY_MUTATION` comes from a repo-pinned mutation command. `NOT_APPLICABLE` means the tests could not compile without the change - true of a purely additive change - so the question could not be asked; it is accepted and reported, never silent, and the receipt's `method` field records which one you have.
+
+  `NOT_PROVED` is the finding and still blocks: the tests ran without the change and passed anyway. Fix the tests rather than re-running.
 
   This applies to **every tier from 1 up**, including Tiers 2 and 3.
 
