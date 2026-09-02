@@ -52,11 +52,31 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not a git repo" >
 cd "$ROOT" || exit 2
 
 # ---------- base ----------
+# THE NEAREST CANDIDATE, not the first that resolves. Same rule as the gate's
+# exloom_fork_point, and the same reason: where main is a release branch and dev
+# the branch work merges into, taking main puts the whole release gap in the diff
+# and the "base" becomes a commit from months ago.
+#
+# Duplicated here rather than sourced, because this script runs standalone and
+# from a repo that has no exloom hooks installed. Keep the two in step.
+#
+# What it cost while it was wrong, on a real branch: the base was 1118 commits
+# back, the test class under review did not exist there, and the control run
+# reported "No tests found" -- so the proof was VOID and the message blamed the
+# test filter. The tier derivation had already been fixed for exactly this; this
+# copy was missed.
 if [[ -z "$BASE" ]]; then
-  for r in origin/main origin/master origin/dev origin/develop; do
-    BASE="$(git merge-base HEAD "$r" 2>/dev/null)" && [[ -n "$BASE" ]] && break
-    BASE=""
+  _best=""; _best_dist=""
+  for r in origin/main origin/master origin/dev origin/develop \
+           origin/development origin/trunk main master dev develop; do
+    git rev-parse --verify --quiet "$r" >/dev/null 2>&1 || continue
+    _mb="$(git merge-base HEAD "$r" 2>/dev/null)" || continue
+    [[ -n "$_mb" ]] || continue
+    _d="$(git rev-list --count "${_mb}..HEAD" 2>/dev/null)" || continue
+    [[ "$_d" =~ ^[0-9]+$ ]] || continue
+    if [[ -z "$_best_dist" || "$_d" -lt "$_best_dist" ]]; then _best="$_mb"; _best_dist="$_d"; fi
   done
+  BASE="$_best"
   [[ -n "$BASE" ]] || BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
 fi
 [[ -n "$BASE" ]] || { echo "cannot determine a base commit; pass --base" >&2; exit 2; }
