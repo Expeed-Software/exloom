@@ -119,7 +119,7 @@ For each missing section:
 - Security receipt missing or stale → dispatch the `exloom:security-auditor` agent now.
 - Runbook missing → ask the user for the path or tell them to write it.
 
-Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
+Then dispatch the reviewers rather than asking whether to — a missing review is not a decision the user needs to make, and asking is how a required gate turns into a skipped one. Use the `Agent`/`Task` tool with the agent type named above; that is what causes the receipt to be written. **Dispatch it without a name.** A named subagent reports through the mailbox rather than the tool result the hook reads, so its receipt records the launch and never a verdict - and a launch is not a review. If the receipt under `.claude/reviews/<branch>.verdicts/` carries no `"verdict"` field after the reviewer finishes, that is the cause: dispatch it again, unnamed. Reading the agent's instructions and performing the review yourself produces no receipt and does not satisfy the gate.
 
 ### The dispatch prompt — use this, do not write your own
 

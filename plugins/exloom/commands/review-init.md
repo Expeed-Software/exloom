@@ -144,7 +144,7 @@ Print:
 > Required remaining steps for Tier <N>:
 > - <list based on tier>
 > Next commands: `/smoke-test` to fill the smoke-test section, then `/review-complete` when ready to ship.
-> Tier <N> requires a real dispatch of: <reviewers for the tier>. exloom records a receipt under `.claude/reviews/<branch>.verdicts/` when each one completes; the gate requires those receipts and does not read any checkbox for them.
+> Tier <N> requires a real dispatch of: <reviewers for the tier>. exloom records a receipt under `.claude/reviews/<branch>.verdicts/` when each one completes; the gate requires those receipts and does not read any checkbox for them. Dispatch each reviewer **without a name** - a named subagent's report never reaches the hook, so its receipt records only the launch.
 
 ## Refusals
 
