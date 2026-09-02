@@ -34,7 +34,7 @@ Tiers scale *review depth* and are derived from the diff. They do not scale *cer
 
 - **`sprint`** — no spec, no plan, no fidelity audit; the reviewer set is capped at Tier 1. Branch, build, prove, smoke, L1, push.
 - **`standard`** — the full flow, and the default.
-- **`certified`** — standard, with **no escape hatches** and a signed checklist commit.
+- **`certified`** — standard, with **no workflow-step escape hatches** and a signed checklist commit. A skip recorded under `## Escape hatches used` blocks the push here, where other lanes accept it as documented. The `EXLOOM_REVIEW_SKIP=1` override is unaffected — it works on every lane and always writes a bypass receipt.
 
 **A lane may not weaken a safety check.** The proof receipt, the smoke test, the tier derived from the diff, receipt forgery-resistance, and the security auditor when the *surface* demands it are identical in all three.
 

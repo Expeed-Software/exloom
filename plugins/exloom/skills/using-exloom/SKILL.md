@@ -43,7 +43,7 @@ Rigour is earned by stakes, not imposed by process. Running all ten steps on a n
 |---|---|---|---|
 | **Sprint** | 3, 4, 5, 6, 8, 9, 10 | nothing before the code — L1, smoke and proof after it | `**Lane:** sprint` |
 | **Standard** | all ten | a spec and a plan, and the reviewers the tier asks for | the default |
-| **Certified** | all ten | standard, plus no escape hatches and signed commits | `**Lane:** certified` |
+| **Certified** | all ten | standard, plus no workflow-step escape hatches and signed commits | `**Lane:** certified` |
 
 `/review-init` asks. The repo default lives in a committed `.claude/exloom-lane`; absent, it is `standard`.
 

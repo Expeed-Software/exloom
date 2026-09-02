@@ -31,7 +31,7 @@ Three things Sprint does **not** change, because they are safety and not ceremon
 
 **Sprint at Tier 3 is refused by the gate.** Do not work around it by lowering the tier — that blocks too. Tell the user the change earns the full flow and offer `/harden`.
 
-**On the Certified lane** there are no escape hatches at all, and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch and is still accepted.
+**On the Certified lane** no workflow-step escape hatch is accepted — anything recorded under `## Escape hatches used` blocks the push, so a skipped step has to be resolved rather than justified — and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch and is still accepted. `EXLOOM_REVIEW_SKIP=1` is a different mechanism: it overrides the hooks on any lane, Certified included, and always leaves a bypass receipt.
 
 ## Step 2 — Check required sections for the tier
 

@@ -11,7 +11,7 @@
 > **Tier and Lane are different axes.** The tier is derived from the diff and
 > decides how deep the review goes. The lane is your choice and decides how much
 > happens *before* the code: `sprint` (no spec, no plan, L1 + smoke + proof),
-> `standard` (the full flow), `certified` (standard, no escape hatches, signed
+> `standard` (the full flow), `certified` (standard, no workflow-step escape hatches, signed
 > provenance). Sprint is not available at Tier 3. Omit the field and the repo
 > default applies — `standard` unless `.claude/exloom-lane` says otherwise.
 

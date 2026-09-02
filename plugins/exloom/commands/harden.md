@@ -10,7 +10,7 @@ Open `.claude/reviews/<current-branch>.md` and read `**Lane:**`. If it is absent
 
 - Already `certified` → nothing to promote. Say so and stop.
 - `sprint` → the target is `standard`.
-- `standard` → the target is `certified`. Confirm with the user first; Certified means no escape hatches and mandatory signed commits, which needs git signing configured.
+- `standard` → the target is `certified`. Confirm with the user first; Certified means no workflow-step escape hatches — a skipped step recorded in the checklist blocks the push instead of being waved through — and mandatory signed commits, which needs git signing configured. It does not disable `EXLOOM_REVIEW_SKIP=1`; that overrides the hooks on every lane and leaves a bypass receipt.
 
 ## Step 2 — Write the spec that was never written
 
