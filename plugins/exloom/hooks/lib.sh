@@ -333,6 +333,54 @@ exloom_derive_tier() {
 # committed with the checklist — the same rule the checklist itself lives under.
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
+# ---------- the bypass leaves a trace ----------
+# exloom_bypass_receipt <action>
+#
+# EXLOOM_REVIEW_SKIP=1 turns the gate off unconditionally, and that is the right
+# behaviour: a gate with no exit gets removed rather than bypassed, and the one
+# thing worse than a skipped review is a team that uninstalled the plugin.
+#
+# What was wrong was that it left nothing behind. The skip was announced on
+# stderr, which scrolls past and is gone, so afterwards there was no way to ask
+# which changes had shipped around the gate — not by a person reading the repo,
+# and not by anything running in CI.
+#
+# So the bypass now writes a file, committed alongside the change like every
+# other piece of evidence. It records what the hook can observe: the branch, the
+# commit, the action let through, the git identity, the time. It does NOT record
+# a reason, because nothing here can verify one, and a field that invites a
+# sentence nobody checks is worse than an absent field — the reason belongs in
+# the checklist's escape-hatch section, in the diff, where a reviewer reads it.
+#
+# NEVER blocks and never changes the exit code. A bypass that failed because its
+# receipt could not be written would be a gate that turns back on at the worst
+# moment.
+exloom_bypass_receipt() {
+  local action="${1:-unknown}" root branch sha who when file
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ -n "$root" && -f "$root/.claude/exloom-gate.enabled" ]] || return 0
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
+  sha="$(git rev-parse HEAD 2>/dev/null || true)"
+  who="$(git config user.email 2>/dev/null || true)"
+  [[ -n "$who" ]] || who="$(git config user.name 2>/dev/null || true)"
+  when="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+
+  # Same sanitising rule as the verdict receipts: strip anything that could
+  # close a JSON field, rather than escaping it. A value that cannot change the
+  # line's shape cannot forge a neighbouring key however it is later parsed.
+  action="$(printf '%s' "$action" | tr -cd 'A-Za-z0-9:._ -' | cut -c1-120)"
+  who="$(printf '%s' "$who" | tr -cd 'A-Za-z0-9@:._ -' | cut -c1-200)"
+
+  file="${root}/.claude/reviews/${branch}.bypass.json"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  printf '{"bypass":"EXLOOM_REVIEW_SKIP","action":"%s","branch":"%s","head":"%s","by":"%s","at":"%s"}\n' \
+    "$action" "$branch" "$sha" "$who" "$when" >> "$file" 2>/dev/null || return 0
+
+  echo "exloom: bypass recorded in .claude/reviews/${branch}.bypass.json — commit it with the change, and write the reason in the checklist's 'Escape hatches used' section. Nothing verifies either; both exist so the next reader can see this happened." >&2
+  return 0
+}
+
 # Does this diff touch a security surface that does NOT derive to Tier 3?
 # Dependency and deserialization changes derive to Tier 1 or 2, so without this
 # they would never require the security auditor the skill promises for them.
@@ -606,19 +654,45 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     actionable=1
   fi
 
-  local agent file
+  # Coverage is judged the way the GATE judges it, not by an exact match on the
+  # tip. A status line that is stricter than the check it reports on tells people
+  # to re-run a reviewer the gate is content with — and once its demands are
+  # known to be inflated, the ones that are real stop being read either.
+  #
+  # So: an APPROVED verdict at any commit whose diff to the tip cannot change
+  # behaviour is current. A line carrying no verdict is a launch, never coverage.
+  local agent file sha rline state
   for agent in $(exloom_required_reviewers "$eff" "$sec_extra"); do
     required=$((required + 1))
     file="${vdir}/${agent}.json"
     if [[ ! -s "$file" ]]; then
       lines+=("  ${agent}  NOT DISPATCHED")
       actionable=1
-    elif grep -q "\"head\":\"${tip}\"" "$file" 2>/dev/null; then
-      covered=$((covered + 1))
-    else
-      lines+=("  ${agent}  covers an earlier commit - re-run it if code changed since")
-      actionable=1
+      continue
     fi
+    state="stale"
+    while IFS= read -r rline || [[ -n "$rline" ]]; do
+      [[ -n "$rline" ]] || continue
+      sha="$(printf '%s' "$rline" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
+      [[ -n "$sha" ]] || continue
+      git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
+      # Only l1-reviewer has to cover the shipped commit; the others count as
+      # covered once they have approved anywhere on the branch. Same rule as the
+      # gate — see exloom_check_verdicts.
+      if [[ "$agent" == "l1-reviewer" && "$sha" != "$tip" ]] \
+         && exloom_diff_is_behavioural "$sha" "$tip"; then continue; fi
+      case "$rline" in
+        *'"verdict":"APPROVED"'*) state="ok"; break ;;
+        *'"verdict":"'*)          state="unapproved" ;;
+        *'"dispatch":true'*)      [[ "$state" == "stale" ]] && state="launched" ;;
+      esac
+    done < "$file"
+    case "$state" in
+      ok)         covered=$((covered + 1)) ;;
+      unapproved) lines+=("  ${agent}  reviewed this code and did NOT approve it"); actionable=1 ;;
+      launched)   lines+=("  ${agent}  launched, but its report never reached exloom - re-dispatch it without a name"); actionable=1 ;;
+      *)          lines+=("  ${agent}  covers an earlier commit - re-run it if code changed since"); actionable=1 ;;
+    esac
   done
 
   if [[ -z "$content" ]]; then
@@ -659,8 +733,8 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
 # that a hostile and a security pass happened and their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
-  local vdir agent file content sha ok approved_at behind seen_verdict legacy_at
-  local -a missing=() stale=() unapproved=()
+  local vdir agent file content sha ok approved_at behind seen_verdict legacy_at dispatch_only
+  local -a missing=() stale=() unapproved=() launched=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
   # Security review is triggered by SURFACE as well as by tier — see
@@ -680,7 +754,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""; seen_verdict=0; legacy_at=""
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; legacy_at=""; dispatch_only=""
     # Read whole receipt LINES, so the commit and the verdict on one line are
     # evaluated together. Reading them separately would let an APPROVED verdict
     # from an old commit vouch for a REJECTED review of the current one.
@@ -710,17 +784,26 @@ exloom_check_verdicts() {
       # the real one. Breaking on the first verdict-less line would grandfather a
       # REJECTED review through, so the legacy path is only reachable when NO
       # covering line carries a verdict at all — i.e. genuinely old receipts.
+      #
+      # `"dispatch":true` says the line records a LAUNCH. It is never legacy: if
+      # a reviewer's report never reaches the hook, its dispatch line is the only
+      # line on file, and grandfathering it means an unread review satisfies the
+      # gate. Seen in the field — a named subagent reports through the mailbox
+      # rather than the tool result, so no completion line is ever written.
       case "$rline" in
         *'"verdict":"APPROVED"'*) seen_verdict=1; ok=1; approved_at="$sha"; break ;;
         *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) seen_verdict=1; rejected=1 ;;
-        *) legacy_at="$sha" ;;   # dispatch-only, or a pre-verdict receipt
+        *'"dispatch":true'*) dispatch_only="$sha" ;;
+        *) legacy_at="$sha" ;;   # a pre-verdict receipt
       esac
     done < <(printf '%s\n' "$content")
     if [[ $ok -ne 1 && $seen_verdict -eq 0 && -n "$legacy_at" ]]; then
       ok=1; approved_at="$legacy_at"
     fi
     if [[ $ok -ne 1 ]]; then
-      if [[ $rejected -eq 1 ]]; then unapproved+=( "$agent" ); else stale+=( "$agent" ); fi
+      if   [[ $rejected -eq 1 ]];        then unapproved+=( "$agent" )
+      elif [[ -n "$dispatch_only" ]];    then launched+=( "$agent" )
+      else                                    stale+=( "$agent" ); fi
     elif [[ "$agent" != "l1-reviewer" && -n "$approved_at" ]]; then
       # Decoupling means these reviewers approve code, then more code lands. That
       # gap is a real exposure — this branch's own round-1 fixes introduced six
@@ -758,6 +841,7 @@ exloom_check_verdicts() {
     local outstanding=""
     [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
     [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
+    [[ ${#launched[@]} -gt 0 ]]   && outstanding="${outstanding}$(printf '  %s — launched, but its report never reached exloom\n' "${launched[@]}")"
     [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
     [[ -n "$outstanding" ]] || outstanding="  every required reviewer is satisfied at this commit
 "
@@ -827,7 +911,7 @@ return here with the same findings."
     return 2
   fi
 
-  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 ]]; then return 0; fi
+  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 && ${#launched[@]} -eq 0 ]]; then return 0; fi
 
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
   # Say which lane set that bar. A Sprint branch asked for one reviewer where the
@@ -848,6 +932,14 @@ Dispatched, but only against code that has since changed (re-run them):
 $(printf '  - %s\n' "${stale[@]}")
 Only l1-reviewer has to cover the commit you ship; if it is listed here, re-run
 just that one. The others need to have run and approved anywhere on this branch."
+  [[ ${#launched[@]} -gt 0 ]] && detail="${detail}
+
+Launched, but their report never reached exloom (re-dispatch them):
+$(printf '  - %s\n' "${launched[@]}")
+The receipt records the launch and nothing else, so what the reviewer concluded
+is unknown — and an unknown conclusion is not an approval. The usual cause is a
+subagent dispatched with a NAME, which routes its report to the mailbox instead
+of the tool result exloom reads. Dispatch it again without a name."
   [[ ${#unapproved[@]} -gt 0 ]] && detail="${detail}
 
 Reviewed the current code, but did NOT approve it (fix the findings, then re-run):
@@ -1430,8 +1522,12 @@ exloom review gate: BLOCKED — cannot ${action}.
 
 ${detail}
 
-Emergency bypass (audited): set EXLOOM_REVIEW_SKIP=1 in your Claude Code session
-env (settings.json "env"), then retry. An inline "EXLOOM_REVIEW_SKIP=1 <cmd>"
-will NOT work — the hook reads its own environment, not the command's.
+Emergency bypass: set EXLOOM_REVIEW_SKIP=1 in your Claude Code session env
+(settings.json "env"), then retry. An inline "EXLOOM_REVIEW_SKIP=1 <cmd>" will
+NOT work — the hook reads its own environment, not the command's.
+
+It records itself in .claude/reviews/<branch>.bypass.json. Commit that with the
+change and write the reason in the checklist's "Escape hatches used" section.
+Nothing verifies either; they exist so the next reader can see this happened.
 EOF
 }

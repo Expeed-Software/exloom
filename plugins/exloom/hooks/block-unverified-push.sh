@@ -19,16 +19,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib.sh"
 
-# ---------- bypass ----------
-if [[ "${EXLOOM_REVIEW_SKIP:-0}" == "1" ]]; then
-  echo "exloom: push bypass via EXLOOM_REVIEW_SKIP=1 (audit)" >&2
-  exit 0
-fi
-
 # ---------- read hook input ----------
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
   HOOK_INPUT="$(cat 2>/dev/null || true)"
+fi
+
+# ---------- bypass ----------
+# Read the payload FIRST, so the receipt can name the tool that was let through.
+# A line saying only "a bypass happened" answers none of the questions a reader
+# of it will have.
+if [[ "${EXLOOM_REVIEW_SKIP:-0}" == "1" ]]; then
+  echo "exloom: push bypass via EXLOOM_REVIEW_SKIP=1" >&2
+  exloom_bypass_receipt "push:$(exloom_json_field "$HOOK_INPUT" tool_name)"
+  exit 0
 fi
 
 # ---------- which tool fired? ----------

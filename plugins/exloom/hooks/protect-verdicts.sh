@@ -10,20 +10,24 @@
 
 set -u
 
-if [[ "${EXLOOM_REVIEW_SKIP:-0}" == "1" ]]; then
-  echo "exloom: verdict-receipt protection bypassed via EXLOOM_REVIEW_SKIP=1 (audit)" >&2
-  exit 0
-fi
-
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
   HOOK_INPUT="$(cat 2>/dev/null || true)"
 fi
-[[ -n "$HOOK_INPUT" ]] || exit 0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib.sh"
+
+# The bypass here lifts the one protection that makes a receipt evidence, so it
+# is the bypass most worth leaving a trace of.
+if [[ "${EXLOOM_REVIEW_SKIP:-0}" == "1" ]]; then
+  echo "exloom: verdict-receipt protection bypassed via EXLOOM_REVIEW_SKIP=1" >&2
+  exloom_bypass_receipt "verdict-write:$(exloom_json_field "$HOOK_INPUT" tool_name)"
+  exit 0
+fi
+
+[[ -n "$HOOK_INPUT" ]] || exit 0
 
 TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 
@@ -117,7 +121,8 @@ To produce one, dispatch the reviewer for real:
 
 Then commit the receipt alongside the checklist (git add/commit are not blocked).
 
-Emergency bypass (audited): set EXLOOM_REVIEW_SKIP=1 in your Claude Code session
-env (settings.json "env"), then retry.
+Emergency bypass: set EXLOOM_REVIEW_SKIP=1 in your Claude Code session env
+(settings.json "env"), then retry. It records itself in
+.claude/reviews/<branch>.bypass.json — commit that with the change.
 EOF
 exit 2

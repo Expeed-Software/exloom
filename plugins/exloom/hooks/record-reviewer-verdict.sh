@@ -441,10 +441,16 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
   if _recorded_for_head "\"agent\":\"${AGENT}\""; then
     exit 0
   fi
-  printf '{"agent":"%s","subagent_type":"%s","head":"%s","at":"%s","session":"%s"}\n' \
+  # `"dispatch":true` marks the line as an observation of a LAUNCH, never of a
+  # conclusion. The gate must not let it vouch for anything: receipts written
+  # before exloom recorded verdicts also carry no verdict key, and without a
+  # marker separating the two, a launch line is indistinguishable from a genuinely
+  # old receipt and is grandfathered through as approval.
+  printf '{"agent":"%s","subagent_type":"%s","head":"%s","dispatch":true,"at":"%s","session":"%s"}\n' \
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
     >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
-  echo "exloom: recorded ${AGENT} DISPATCH receipt at ${HEAD_SHA:0:12} — the reviewer's report is not available at this event (async dispatch), so no verdict was recorded. Read the findings yourself before marking the checklist complete." >&2
+  echo "exloom: recorded ${AGENT} DISPATCH at ${HEAD_SHA:0:12} — a launch, not a review. No verdict was observable at this event, and this line does NOT satisfy the gate." >&2
+  echo "exloom: if no verdict line follows when the reviewer finishes, the usual cause is that the agent was given a name, which routes its report through the mailbox rather than the tool result this hook reads. Dispatch it without a name." >&2
   exit 0
 fi
 

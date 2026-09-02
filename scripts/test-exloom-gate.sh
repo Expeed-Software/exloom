@@ -812,11 +812,45 @@ ok "async launch -> NO verdict key (not UNKNOWN)" \
 ok "async launch -> the dispatch commit is recorded" \
    "$(grep -c "$(git rev-parse HEAD)" "$ADV/l1-reviewer.json" 2>/dev/null | head -1)" "1"
 
-# And the consequence that matters: it must not block.
+ok "async launch -> the line is marked as a dispatch, not a conclusion" \
+   "$(grep -c '"dispatch":true' "$ADV/l1-reviewer.json" 2>/dev/null | head -1)" "1"
+
+# And the consequence that matters. A launch is not a review: if the reviewer's
+# report never reaches exloom, this line is the only one on file, and letting it
+# through means an unread review satisfies the gate. It reached the field —
+# a subagent given a NAME reports through the mailbox rather than the tool
+# result, so no completion line is ever written and the launch stood alone.
 ACL=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$ACL")"
 printf '# c\n' > "$ACL"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+ACL_OUT="$(exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1)"; ACL_RC=$?
+ok "...and a dispatch-only receipt BLOCKS - a launch is not a review" "$ACL_RC" "2"
+ok "...and the block says the report never arrived" \
+   "$(printf '%s' "$ACL_OUT" | grep -c 'never reached exloom' | head -1)" "1"
+ok "...and it names the cause a session can act on" \
+   "$(printf '%s' "$ACL_OUT" | grep -c 'without a name' | head -1)" "1"
+
+# A pre-verdict receipt carries no dispatch marker, and is still grandfathered —
+# narrowing the legacy path must not break branches that were already in flight.
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" > "$ADV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm pre >/dev/null 2>&1
 exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
-ok "...and a dispatch-only receipt does NOT block the gate" "$?" "0"
+ok "...but an unmarked pre-verdict receipt is still grandfathered" "$?" "0"
+
+# The completion line lands after the launch line. The verdict wins; the marker
+# on the earlier line must not poison it.
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-01T00:00:00Z","session":"s"}\n{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-01T00:01:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" > "$ADV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm done >/dev/null 2>&1
+exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
+ok "...and a completion after the launch clears it" "$?" "0"
+
+# The direction that matters most: a launch line must never rescue a REJECTED one.
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T00:00:00Z","session":"s"}\n{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-01T00:01:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" > "$ADV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
+ok "...and a launch after a REJECTED does not rescue it" "$?" "2"
 
 # A report that IS present but states no verdict is still UNKNOWN, still blocks.
 rm -rf .claude/reviews
@@ -2029,6 +2063,85 @@ printf '5\n' > .claude/exloom-max-rounds
 ok "uncommitted config is ignored" "$(exloom_max_rounds)" "3"
 git add -A >/dev/null 2>&1; git commit -qm cap >/dev/null 2>&1
 ok "committed config is honoured" "$(exloom_max_rounds)" "5"
+
+echo "== the bypass leaves a trace =="
+
+# EXLOOM_REVIEW_SKIP turns the gate off unconditionally and should. What was
+# wrong is that it left nothing behind: the skip was announced on stderr, which
+# scrolls past, so afterwards nothing could say which changes shipped around the
+# gate — not a person reading the repo, and not CI.
+subrepo bypassreceipt
+printf 'x\n' > f.txt
+git add -A >/dev/null 2>&1; git commit -qm f >/dev/null 2>&1
+BP=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).bypass.json"
+
+PUSH_JSON='{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}'
+printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
+ok "the bypass still allows the push" "$?" "0"
+ok "...and writes a receipt" "$([[ -f "$BP" ]] && echo yes || echo no)" "yes"
+ok "...naming the commit it let through" \
+   "$(grep -c "$(git rev-parse HEAD)" "$BP" 2>/dev/null | head -1)" "1"
+ok "...and the action, not just that something happened" \
+   "$(grep -c '"action":"push:Bash"' "$BP" 2>/dev/null | head -1)" "1"
+ok "...and who did it" \
+   "$(grep -c '"by":"[^"]' "$BP" 2>/dev/null | head -1)" "1"
+
+# One line per bypass. Two skips on one branch is two facts, and collapsing them
+# would hide the second.
+printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
+ok "...appended, so a second bypass is not hidden by the first" \
+   "$(wc -l < "$BP" | tr -d ' ')" "2"
+
+# The verdict-write protection is the bypass most worth recording: it lifts the
+# one control that makes a receipt evidence rather than an author-written file.
+VJ='{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":".claude/reviews/x.verdicts/l1-reviewer.json","content":"{}"}}'
+printf '%s' "$VJ" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1
+ok "a bypassed verdict write is recorded too" \
+   "$(grep -c '"action":"verdict-write' "$BP" 2>/dev/null | head -1)" "1"
+
+# A repo that never opted in must stay untouched — exloom writes nothing into a
+# repo that did not ask for the gate, bypass or no bypass.
+rm -f .claude/exloom-gate.enabled "$BP"
+printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
+ok "no receipt in a repo with the gate off" "$([[ -f "$BP" ]] && echo yes || echo no)" "no"
+
+echo "== the status line judges coverage the way the GATE does =="
+
+# A status line stricter than the check it reports on sends people to re-run a
+# reviewer the gate is content with. Once its demands are known to be inflated,
+# the ones that are real stop being read too.
+subrepo statusline
+SVD=".claude/reviews/feat/s.verdicts"; SCL=".claude/reviews/feat/s.md"
+mkdir -p "$SVD"
+printf 'Tier: 1\n' > "$SCL"
+printf 'x\n' > code.txt
+git add -A >/dev/null 2>&1; git commit -qm code >/dev/null 2>&1
+REVIEWED="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
+  "$REVIEWED" > "$SVD/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+
+# The checklist commit moves the tip. Nothing the reviewer saw has changed, so an
+# exact-tip match reports a re-run the gate does not want.
+ok "an approval survives a checklist-only commit on top of it" \
+   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'covers an earlier commit')" "0"
+
+printf 'y\n' >> code.txt
+git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
+ok "...but real code landing after it does report stale" \
+   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'covers an earlier commit')" "1"
+
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-01T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" > "$SVD/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm launch >/dev/null 2>&1
+ok "a launch is reported as a launch, not as coverage" \
+   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'never reached exloom')" "1"
+
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" > "$SVD/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+ok "a rejection is reported as a rejection, not as a stale receipt" \
+   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'did NOT approve')" "1"
 
 cd "$WORK" || exit 1
 
