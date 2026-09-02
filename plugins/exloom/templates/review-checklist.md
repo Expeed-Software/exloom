@@ -2,6 +2,8 @@
 
 **Tier:** [0 | 1 | 2 | 3]
 **Tier rationale:** <one sentence>
+**Tier derived from:**
+<one line per rule that matched, as `path` → `rule` → source; or `built-in defaults only`>
 **Lane:** standard
 **Blast radius:** <N files changed, M modules touched, user-facing yes/no>
 **Started:** YYYY-MM-DD
@@ -104,6 +106,7 @@ who decided. Do not write that line unless they actually answered.
 - Directed by: <directed-by>
 - Base commit: <base-sha>
 - Attested: <attested-date>
+- Policy fingerprint: <policy-fingerprint>
 
 ## Final verdict
 - [ ] All required gates passed for declared tier

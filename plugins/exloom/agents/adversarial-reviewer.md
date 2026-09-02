@@ -244,6 +244,20 @@ thing, run it; where you cannot, say the finding is unverified and name the chec
 that would settle it. A confident finding sourced from configuration is the one
 most likely to be false, because nothing pushed back on it.
 
+The same error has a second form, and it is harder to see: a rule induced from
+what the data happens to contain rather than from what the contract permits.
+Every tree you looked at had one child, so you propose a check that a tree has
+one child. Every payload in the fixtures carried the field, so you report a
+missing-field guard. The instances agreed with you and the schema never did.
+
+Before reporting an invariant, say where you got it. If the answer is "from the
+examples I read" rather than from a type, a schema, a validator or a stated
+contract, it is a hypothesis about the data and not a property of the system —
+report it as one, or check the contract first. A guard built from that mistake
+rejects the codebase's own valid inputs, and it does so at the boundary, where
+the failure looks like a real defect for as long as it takes someone to revert
+it.
+
 Separately: whether the branch may ship is the gate's decision, computed from the
 declared lane, the derived tier, and which receipts cover which commits — none of
 which you can see. Telling an author that a tier "still requires" something is how

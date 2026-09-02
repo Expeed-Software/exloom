@@ -153,6 +153,15 @@ The gate prints how far behind they are (`approved 9e1d992 — 3 commit(s) have 
 
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
+**A finding is a defect report, not a work order.** When a reviewer comes back, you decide what the fix is — the reviewer states what is wrong and where. Anything it proposes that is a *design*, not a defect, is advisory: a new check, a new abstraction, a validator, a helper, a piece of test infrastructure, or a fix quantified over a whole class. The agent files say reviewers must not ask for those; they still sometimes do, and the failure happens here, at the point where you read one and start building it.
+
+Two questions before implementing anything a reviewer proposed:
+
+- **Is this a defect, or a suggestion?** "This dereferences null when X" is a defect. "Add a check that trees have one child" is a design. Implement defects; take suggestions to the ticket owner.
+- **Where did its rule come from?** A reviewer that induced an invariant from the examples it read, rather than from a type, schema or stated contract, will propose a guard that rejects your own valid inputs. If you cannot point at the contract the rule comes from, do not build the check.
+
+Getting this wrong costs two rounds and lands back where it started: the suggestion is built, it refuses real inputs, it is reverted. When that happens, pin the case with a test rather than a comment — a comment is not read by the reviewer that proposes the same thing in round six.
+
 **Cost discipline.** `l1-reviewer` runs at low effort and is cheap enough to re-run per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push — not after every fix. Re-running the full panel on each fix commit is what turns a two-round change into a nine-round one.
 
 ## How to respond to a finding
@@ -218,6 +227,7 @@ Then fill the **Provenance** section — who and what produced this change:
   `origin/main`, then `origin/master`, then `origin/dev`); if there is no base, use
   the repository's first commit.
 - **Attested:** today's date.
+- **Policy fingerprint:** the output of `exloom_policy_fingerprint` (source the plugin's `hooks/lib.sh` first), or `none` if the repo has no `.exloom.yml`. This binds the review to the *policy* that was in force, not only to the code — so a later reader can tell that a change was reviewed under a policy the repo has since changed.
 
 ```
 ## Provenance
@@ -226,6 +236,7 @@ Then fill the **Provenance** section — who and what produced this change:
 - Directed by: Jane Dev <jane@example.com>
 - Base commit: <merge-base output>
 - Attested: <YYYY-MM-DD>
+- Policy fingerprint: 2bc91f... (or `none`)
 ```
 
 Then stage the checklist **and the verdict receipts** and commit them together — the gate reads receipts from the committed ref, so an uncommitted receipt does not exist as far as the hooks are concerned:

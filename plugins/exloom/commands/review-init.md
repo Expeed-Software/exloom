@@ -87,6 +87,15 @@ Substitute:
 - `<branch-name>` → actual branch.
 - `[0 | 1 | 2 | 3]` → the confirmed tier.
 - Tier rationale line → the user's confirmed rationale.
+- **Tier derived from** → the output of `exloom_tier_reasons`, one line per rule, as `` `path` → `rule` → source ``. If the tier came from the built-in rules with no repository policy in play, write `built-in defaults only`. Get it by sourcing the hook library and running the derivation:
+
+  ```bash
+  . "$(dirname "$(git rev-parse --git-common-dir)")/.claude/plugins/exloom/hooks/lib.sh" 2>/dev/null \
+    || . "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+  exloom_derive_tier HEAD >/dev/null; exloom_tier_reasons
+  ```
+
+  Write the reasons down even when they are obvious. This is the line a PR reviewer reads when they want to know why a two-file change is Tier 3, and the line CI reads when it re-derives the tier and wants to compare.
 - Blast radius line → "N files changed, M modules touched, user-facing: yes/no" from the diff analysis.
 - Started date → today's date.
 

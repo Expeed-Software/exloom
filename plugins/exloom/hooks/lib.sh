@@ -16,6 +16,13 @@
 # only reachable option.
 EXLOOM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
+# Repository policy (.exloom.yml). Loaded here, once, so every hook reasons
+# about it through the same functions — a push gate and a /review-init that each
+# parsed the file their own way would eventually disagree about which tier a
+# change is, and the disagreement would surface as a mysterious block.
+# shellcheck source=/dev/null
+[[ -r "$EXLOOM_LIB_DIR/policy.sh" ]] && . "$EXLOOM_LIB_DIR/policy.sh"
+
 # ---------- JSON field extraction (jq -> python3 -> sed) ----------
 # Extract a top-level string field from hook input. Args: <json> <field>.
 # The sed fallback truncates at the first quote, so callers that need a value
@@ -273,13 +280,39 @@ ${cand}
   printf '%s' "$best"
 }
 
+# Records why a tier was chosen: one line per matched rule,
+#     <path>\t<rule>\t<source>
+# A tier with no stated cause is a number people argue with. With one, the
+# checklist, the PR reader and anything re-deriving it in CI all see the same
+# reasoning, and a rule that matched the wrong file is visible instead of
+# mysterious.
+_exloom_tier_reason() {   # _exloom_tier_reason <files> <ere> <rule-label>
+  local hit
+  hit="$(printf '%s\n' "$1" | grep -Em1 "$2" 2>/dev/null || true)"
+  [[ -n "$hit" ]] || hit='(no file)'
+  _EXLOOM_TIER_REASONS="${_EXLOOM_TIER_REASONS}${hit}	${3}	built-in"$'\n'
+}
+
+exloom_tier_reasons() { printf '%s' "${_EXLOOM_TIER_REASONS:-}"; }
+
 exloom_derive_tier() {
-  local tip="$1" base files f n docs_only=1
+  local tip="$1" base files f n docs_only=1 pol_tier=""
+  _EXLOOM_TIER_REASONS=""
   base="$(exloom_fork_point "$tip")"
   [[ -n "$base" ]] || return 1
   # Review artifacts are not the change under review.
   files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
   [[ -n "$files" ]] || return 1
+
+  # Repository policy runs alongside the built-in rules, never instead of them.
+  # The effective tier is the highest anything matched, so a repo can teach the
+  # gate its own vocabulary — `identity`, `iam`, `rbac` — and cannot use the same
+  # file to lower a protection the built-ins already applied.
+  # Called plainly, NOT in a command substitution: the reasons live in a global
+  # and a subshell would throw them away, leaving a tier nobody can explain.
+  exloom_policy_tier "$files" >/dev/null 2>&1 || true
+  pol_tier="${_EXLOOM_POL_TIER:-}"
+  _EXLOOM_TIER_REASONS="${_EXLOOM_POL_REASONS:-}"
 
   # Docs-only is checked FIRST so a markdown file under an `auth/` path does not
   # score Tier 3 on a path match.
@@ -290,7 +323,17 @@ exloom_derive_tier() {
       *) docs_only=0; break ;;
     esac
   done <<< "$files"
-  if [[ $docs_only -eq 1 ]]; then printf '0'; return 0; fi
+  # Docs-only is the one place a repository rule does NOT escalate on its own
+  # evidence: a markdown file under `identity/` is documentation, and matching a
+  # path glob does not make it code. The built-in check runs first for exactly
+  # this reason, and the repo rules inherit that ordering rather than working
+  # around it.
+  if [[ $docs_only -eq 1 ]]; then _EXLOOM_TIER_REASONS=""; printf '0'; return 0; fi
+
+  _exloom_max_tier() {   # _exloom_max_tier <built-in>
+    if [[ -n "$pol_tier" && "$pol_tier" -gt "$1" ]]; then printf '%s' "$pol_tier"
+    else printf '%s' "$1"; fi
+  }
 
   # Tier 3 — data migration, or the security surface /review-init enumerates.
   #
@@ -300,26 +343,35 @@ exloom_derive_tier() {
   # Matches: auth/ auth- authentication authorization authz authn oauth
   # Does not match: authoring author authors
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
+    _exloom_tier_reason "$files" '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog' 'data migration'
     printf '3'; return 0
   fi
   if printf '%s\n' "$files" | grep -Eq '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey'; then
+    _exloom_tier_reason "$files" '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey' 'auth / tenancy / secrets / crypto'
     printf '3'; return 0
   fi
+  # Below Tier 3 the repository rules can still be the higher of the two, so
+  # every remaining exit takes the maximum rather than returning its own answer.
 
   # Tier 2 — deployment surface, an API/route surface, or a five-file blast
   # radius. Deployment paths floor at 2 rather than 3 because /review-init's rule
   # is conditional on the change being flag/prod-related, which a file list
   # cannot decide; the skill still says go to 3 when it is.
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(deployment|deploy|k8s|kubernetes|helm|docker)(/|$)|docker-compose|Dockerfile'; then
-    printf '2'; return 0
+    _exloom_tier_reason "$files" '(^|/)(deployment|deploy|k8s|kubernetes|helm|docker)(/|$)|docker-compose|Dockerfile' 'deployment surface'
+    _exloom_max_tier 2; return 0
   fi
   if printf '%s\n' "$files" | grep -Eqi 'controller|(^|/)routes?[/.]|(^|/)api[/.]|endpoint|resolver'; then
-    printf '2'; return 0
+    _exloom_tier_reason "$files" 'controller|(^|/)routes?[/.]|(^|/)api[/.]|endpoint|resolver' 'API or route surface'
+    _exloom_max_tier 2; return 0
   fi
   n="$(printf '%s\n' "$files" | grep -c . || true)"
-  if [[ "${n:-0}" -ge 5 ]]; then printf '2'; return 0; fi
+  if [[ "${n:-0}" -ge 5 ]]; then
+    _exloom_tier_reason "$files" '.' "${n} files changed"
+    _exloom_max_tier 2; return 0
+  fi
 
-  printf '1'
+  _exloom_max_tier 1
 }
 
 # ---------- reviewer verdict receipts ----------
@@ -447,7 +499,24 @@ exloom_required_reviewers() {
   if [[ "$extra" == "security" && "$list" != *security-auditor* ]]; then
     list="$list security-auditor"
   fi
+  # Reviewers the repository's own policy demands for the paths in this diff.
+  # ADDITIVE, exactly like the tier: there is no key that removes a reviewer the
+  # tier already requires, because a config able to subtract a reviewer is an
+  # escape hatch on the check that decides whether anything was reviewed.
+  local repo a
+  repo="${3:-}"
+  for a in $repo; do
+    case " $list " in *" $a "*) ;; *) list="$list $a" ;; esac
+  done
   printf '%s' "$list"
+}
+
+# The reviewers repository policy adds for the files in this diff.
+exloom_policy_required_reviewers() {   # exloom_policy_required_reviewers <base> <tip>
+  local files
+  files="$(git diff --name-only "$1" "$2" -- . ':(exclude).claude/reviews' 2>/dev/null)"
+  [[ -n "$files" ]] || return 0
+  exloom_policy_reviewers "$files" 2>/dev/null || true
 }
 
 # How many review rounds has this branch had? Distinct commits appearing in the
@@ -700,7 +769,7 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     actionable=1
   else
     local unfilled
-    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*)' || true)"
+    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*|one line per rule[^>]*|policy-fingerprint)' || true)"
     if [[ "${unfilled:-0}" -gt 0 ]]; then
       lines+=("  checklist     ${unfilled} placeholder line(s) still unfilled")
       actionable=1
@@ -1252,6 +1321,16 @@ exloom_validate_checklist() {
   local checklist="$1" tip="$2" worktree="$3" action="$4"
   local content
 
+  # FAIL CLOSED on a policy exloom cannot read. Falling back to the built-in
+  # rules would be the worst available outcome: an author writes a Tier 3 rule
+  # for their identity module, a typo means it never loads, the built-ins score
+  # the change Tier 1, and everyone believes a rule is in force that never ran.
+  # Three outcomes only — valid: enforce; absent: built-ins; invalid: stop.
+  if ! exloom_policy_load 2>/dev/null; then
+    _exloom_block "$action" "$(exloom_policy_error)"
+    return 2
+  fi
+
   if [[ "$worktree" == "1" ]]; then
     [[ -f "$checklist" ]] || { _exloom_block "$action" "Branch has no review checklist at $checklist.
 The review gate has not run. Run /review-init, /smoke-test, /review-complete, then retry."; return 2; }
@@ -1341,7 +1420,7 @@ Run /review-complete — it names each tier-required section still missing."
 
   # Placeholder scan, scoped to the sections that apply to the declared tier.
   local placeholder_re drop scan
-  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*)>'
+  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*|one line per rule[^>]*|policy-fingerprint)>'
   drop=''
   if   [[ "$eff_tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'

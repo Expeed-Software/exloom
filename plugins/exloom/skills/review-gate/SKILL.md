@@ -114,6 +114,8 @@ Change the cap by committing `.claude/exloom-max-rounds` with a number. Committe
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight — the gate derives the minimum from the diff and blocks a downgrade, so this is enforced, not advised. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
 
+**The tier can be taught your repository's vocabulary.** The built-in rules match `auth`, `tenant`, `secret`, `crypto`, `migrations/`. A codebase that calls the same thing `identity`, `iam`, `rbac` or `access-control` derives a lower tier for a change that should be the highest one — so commit an `.exloom.yml` naming those paths. Repository rules are **additive only**: they raise a tier and add a reviewer, never the reverse, and an invalid policy blocks the gate rather than falling back to the defaults. See [repository-policy.md](repository-policy.md).
+
 **Security review is triggered by surface, not only by tier.** Any change — at any tier — that touches user input, authentication/authorization, tenancy, secrets, deserialization, server-side outbound requests, cryptography, or dependencies also runs the security review. This matters most for AI-generated code, which introduces exactly those flaws.
 
 ## Per-step procedure
@@ -212,6 +214,7 @@ Write the reason into the checklist's "Escape hatches used" section as well, so 
 - `/review-init` — create the checklist for the current branch.
 - `/smoke-test` — fill the smoke-test section with real commands and observed output.
 - `/review-complete` — verify all required sections populated for the tier, run any missing reviewer agents, mark ready to ship.
+- `/exloom-config` — print the effective configuration, and why the current diff derives the tier it does.
 
 **Invoke these yourself, with the Skill tool.** They are not instructions for the user to type. Reading them and performing the steps by hand produces the same checklist file but none of the receipts, so the gate will block the push — the commands exist to cause events, not to describe them.
 
@@ -220,4 +223,5 @@ The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub 
 ## Further reading
 
 - [rationale.md](rationale.md) — why the gate is shaped this way: the blind spot it exists for, why each of the four non-rules is wrong, why lane and tier are separate axes, provenance.
+- [repository-policy.md](repository-policy.md) — `.exloom.yml`: teaching the tier your repository's risk vocabulary, the escalate-only rule, the glob semantics, and why an invalid policy blocks.
 - [failure-modes.md](failure-modes.md) — what it catches, and the limits it does not: the reviewers share the implementer's model, and the gate binds this session rather than the repository.
