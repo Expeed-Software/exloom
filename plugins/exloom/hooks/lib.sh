@@ -852,6 +852,7 @@ exloom_diff_is_behavioural() {
         '//') case "$stripped" in
                 '//go:'*) return 0 ;;            # build/generate directive: code
                 '//'*|'/*'*|'*/'*) continue ;;
+                '*') continue ;;                 # a BARE star is a javadoc paragraph break
                 '* '*) continue ;;               # javadoc continuation: star SPACE
                 '*'*) return 0 ;;                # `*p = x` is a dereference, not a comment
               esac ;;
@@ -1160,7 +1161,8 @@ Run /review-complete — it names each tier-required section still missing."
     # under, since a bare line is not always enough to place it.
     local unfilled
     unfilled="$(printf '%s\n' "$scan" \
-      | awk -v re="$placeholder_re" '
+      | EXLOOM_PH_RE="$placeholder_re" awk '
+          BEGIN{ re = ENVIRON["EXLOOM_PH_RE"] }
           /^## /{sec=$0}
           $0 ~ re || /^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$/ {
             printf "  %s\n      %s\n", (sec==""?"(header)":sec), $0

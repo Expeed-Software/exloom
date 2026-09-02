@@ -1213,6 +1213,43 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
+echo "== a javadoc paragraph break is not a pointer dereference =="
+
+# A bare `*` line is how every javadoc block separates paragraphs. It stripped to
+# `*`, missed the `'* '*` case (which requires a trailing space) and hit the
+# `'*'*` guard that exists so `*p = x` is treated as code. So ANY javadoc edit
+# containing a paragraph break was classified behavioural, which invalidates every
+# reviewer receipt on the branch and mandates another round for a comment.
+subrepo javadoc noorigin
+cat > src/A.java <<'JAVA'
+/**
+ * A thing.
+ */
+class A { int x = 1; }
+JAVA
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+cat > src/A.java <<'JAVA'
+/**
+ * A thing.
+ *
+ * <p>And a second paragraph, which needs a bare star between them.
+ */
+class A { int x = 1; }
+JAVA
+git add -A >/dev/null 2>&1; git commit -qm doc >/dev/null 2>&1
+ok "a javadoc paragraph break is inert" \
+   "$(exloom_diff_is_behavioural HEAD~1 HEAD && echo behavioural || echo inert)" "inert"
+
+# The guard it sits behind still has to work: a dereference is code.
+printf 'int f(int *p){\n  return 1;\n}\n' > src/b.c
+git add -A >/dev/null 2>&1; git commit -qm cbase >/dev/null 2>&1
+printf 'int f(int *p){\n  *p = 3;\n  return 1;\n}\n' > src/b.c
+git add -A >/dev/null 2>&1; git commit -qm deref >/dev/null 2>&1
+ok "...and a pointer dereference is still code" \
+   "$(exloom_diff_is_behavioural HEAD~1 HEAD && echo behavioural || echo inert)" "behavioural"
+
+cd "$WORK" || exit 1
+
 echo "== a receipt goes to the repo the REVIEW is about, not the session's cwd =="
 
 # Found by dispatching a real reviewer at a worktree while the session sat in a
