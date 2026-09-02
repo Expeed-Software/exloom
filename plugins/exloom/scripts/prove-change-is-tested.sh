@@ -266,10 +266,24 @@ if [[ $base_rc -ne 0 ]]; then
   echo "Nothing can be concluded: a failure with your tests added would be"
   echo "indistinguishable from the environment simply not working here."
   echo
-  echo "Most common cause: the throwaway worktree has no gitignored dependencies"
-  echo "(node_modules/, .venv/, vendor/, target/). Install them there, pin a"
-  echo "self-contained command in .claude/exloom-test-command, or run this from a"
-  echo "checkout where the suite passes."
+  # A pinned command whose filter selects nothing at the base is a different
+  # problem from a missing dependency, and pointing at node_modules sends the
+  # reader to the wrong place. Seen on a real branch: the committed command named
+  # three test classes added by ANOTHER branch, so it matched nothing here and
+  # voided the proof for every branch that did not contain them.
+  if grep -qiE 'No tests found for given includes|no tests (were )?found|matched no tests|ERROR: not found: |No test files found|no tests ran' \
+       "$WT/.base-out" 2>/dev/null; then
+    echo "The command's test FILTER matched nothing at the base commit — see below."
+    echo "A pinned .claude/exloom-test-command that names specific test classes is"
+    echo "branch-specific: classes another branch added do not exist here, so the"
+    echo "control run selects nothing and fails. Pin a command that is valid at any"
+    echo "base, or pass this branch's own with --cmd."
+  else
+    echo "Most common cause: the throwaway worktree has no gitignored dependencies"
+    echo "(node_modules/, .venv/, vendor/, target/). Install them there, pin a"
+    echo "self-contained command in .claude/exloom-test-command, or run this from a"
+    echo "checkout where the suite passes."
+  fi
   echo
   echo "--- last 25 lines ---"; tail -25 "$WT/.base-out" 2>/dev/null
   exit 2                      # deliberately NO receipt: not proved, not disproved

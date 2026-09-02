@@ -1213,6 +1213,55 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
+echo "== a receipt goes to the repo the REVIEW is about, not the session's cwd =="
+
+# Found by dispatching a real reviewer at a worktree while the session sat in a
+# different repo. The hook resolved the repo from cwd, found no gate marker
+# there, and exited 0 in silence - so no receipt, no findings, and a gate that
+# reported "never dispatched" forever. Re-dispatching could not fix it, because
+# every dispatch wrote to the wrong repo. exloom:isolating-execution recommends a
+# worktree, so exloom's own advice produced the failure.
+subrepo receiptrepo noorigin
+printf 'x\n' > src/a.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+GATED="$PWD"
+
+# A second repo with NO gate marker, standing in for the session's cwd.
+mkdir -p "$REG/elsewhere" && cd "$REG/elsewhere"
+git init -q -b main . >/dev/null 2>&1
+git config user.email t@e.com; git config user.name t
+printf 'y\n' > f.txt; git add -A >/dev/null 2>&1; git commit -qm x >/dev/null 2>&1
+
+CITE="$GATED/src/a.java"
+python3 -c "
+import json, sys
+msg = '## Critical\n- ' + sys.argv[1] + ':1 - a real defect\n\nVERDICT: REJECTED (1 items)\n\nROUND NEEDED AFTER FIX: YES'
+print(json.dumps({'hook_event_name':'SubagentStop','session_id':'s',
+                  'agent_type':'exloom:l1-reviewer','last_assistant_message':msg}))" "$CITE" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>/dev/null
+
+ok "the receipt lands in the gate-enabled repo the report cites" \
+   "$([ -f "$GATED/.claude/reviews/feat/plan.verdicts/l1-reviewer.json" ] && echo found || echo missing)" "found"
+ok "...carrying the verdict, not just a dispatch line" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$GATED/.claude/reviews/feat/plan.verdicts/l1-reviewer.json" | tail -1)" "REJECTED"
+ok "...and nothing was written into the session's own repo" \
+   "$([ -d .claude/reviews ] && echo wrote || echo clean)" "clean"
+
+# When no cited path lands in a gated repo, it must SAY SO. A silent exit here is
+# what made the original failure undiagnosable: the gate blocks and nothing
+# anywhere explains why.
+python3 -c "
+import json
+msg = '## Critical\n- nowhere/at/all.java:1 - a defect\n\nVERDICT: REJECTED (1 items)'
+print(json.dumps({'hook_event_name':'SubagentStop','session_id':'s',
+                  'agent_type':'exloom:l1-reviewer','last_assistant_message':msg}))" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>"$REG/quiet.err"
+ok "no gated repo anywhere -> says so on stderr, never silent" \
+   "$(grep -c 'no receipt was written' "$REG/quiet.err")" "1"
+ok "...and names what to do about it" \
+   "$(grep -c 'never dispatched' "$REG/quiet.err")" "1"
+
+cd "$WORK" || exit 1
+
 echo "== the round a finding belongs to is derived, never read from a state file =="
 
 # `.claude/reviews/<branch>.state` was read here and written by nothing in exloom,

@@ -93,11 +93,71 @@ case "$SUBAGENT" in
   *) exit 0 ;;
 esac
 
-# ---------- repo + opt-in ----------
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[[ -n "$REPO_ROOT" ]] || exit 0
+# ---------- which repo is this review ABOUT? ----------
+# NOT necessarily the one the session is sitting in. A reviewer dispatched at a
+# worktree, or at a second repo in a multi-repo session, completes while the
+# session's cwd is somewhere else entirely - and this used to resolve the repo
+# from cwd, find no gate marker there, and exit 0 in silence.
+#
+# The result was a deadlock with no diagnosis: the gate reported "never
+# dispatched" and re-dispatching could not help, because every dispatch wrote to
+# the wrong repo. exloom:isolating-execution recommends a worktree for isolation,
+# so exloom's own advice put people in the state where its receipts stopped
+# working. Found by reviewing a real branch in a worktree.
+#
+# Resolution order, first gate-enabled repo wins:
+#   1. the session's cwd, which is right for the ordinary single-repo case;
+#   2. any absolute path the REPORT cites, mapped back to its repo root.
+# The reviewer cites file:line for every finding, so (2) is the review's own
+# evidence about what it read. It cannot manufacture a receipt for a review that
+# did not happen - this hook only runs on a real completion - it only says where
+# the review it just observed belongs.
+_repo_is_gated() { [[ -n "$1" && -d "$1" && -f "$1/.claude/exloom-gate.enabled" ]]; }
+
+_repo_of_path() {
+  # Reduce to a DIRECTORY. A cite names a file, and the first version kept the
+  # path whenever it existed and then required a directory — so every real cite,
+  # which is exactly the case that matters, failed the check.
+  local d="$1"
+  [[ -d "$d" ]] || d="$(dirname "$d")"
+  [[ -d "$d" ]] || return 1
+  git -C "$d" rev-parse --show-toplevel 2>/dev/null
+}
+
+# Absolute paths named anywhere in the payload, Windows or POSIX. `tr`, not sed:
+# the payload's backslashes are JSON-escaped, and every sed form that survives
+# both this script's quoting and the shell's got the escape count wrong.
+_cited_paths() {
+  # Squeeze BEFORE matching: a JSON payload escapes each backslash, so a Windows
+  # path arrives as `E:\\Projects` and becomes `E://Projects` here — at which
+  # point `[A-Za-z]:/` no longer matches and the drive letter is silently lost,
+  # leaving `/Projects/...` that resolves to nothing. `\134` rather than a
+  # literal backslash, which tr warns about.
+  printf '%s' "$HOOK_INPUT" \
+    | tr '\134' '/' | tr -s '/' \
+    | grep -oE '([A-Za-z]:)?/[A-Za-z0-9_.@+-][A-Za-z0-9_./@+-]{3,240}' \
+    | sort -u | head -40
+}
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if ! _repo_is_gated "$REPO_ROOT"; then
+  SESSION_REPO="$REPO_ROOT"
+  REPO_ROOT=""
+  while IFS= read -r cand; do
+    [[ -n "$cand" ]] || continue
+    r="$(_repo_of_path "$cand" || true)"
+    if _repo_is_gated "$r"; then REPO_ROOT="$r"; break; fi
+  done < <(_cited_paths)
+  if [[ -z "$REPO_ROOT" ]]; then
+    # LOUD, not silent. Without a receipt the gate blocks forever, so the one
+    # thing that must never happen here is saying nothing.
+    echo "exloom: ${AGENT} completed, but no receipt was written - this session's repo (${SESSION_REPO:-none}) has no .claude/exloom-gate.enabled, and no gate-enabled repo was found among the paths the report cites." >&2
+    echo "exloom: if the review was of another repo or a worktree, run the reviewer from a session rooted there, or the gate will report it as never dispatched." >&2
+    exit 0
+  fi
+  echo "exloom: recording ${AGENT}'s receipt in ${REPO_ROOT} - the repo the report cites, not this session's cwd." >&2
+fi
 cd "$REPO_ROOT" || exit 0
-[[ -f ".claude/exloom-gate.enabled" ]] || exit 0
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || exit 0
 [[ -n "$BRANCH" && "$BRANCH" != "HEAD" ]] || exit 0
