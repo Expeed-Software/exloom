@@ -4,7 +4,7 @@ Turns an Azure DevOps user story into reviewed, traceable, **human-executable** 
 
 The QA-side sibling of [exloom](../exloom/README.md).
 
-> **Status: 0.1.0 — pre-pilot.** Skills, coverage auditor, and the approval gate are built and tested. Not yet exercised against real stories; see the build plan for the pilot.
+> **Status: 0.1.0 — pre-pilot.** The skills, the coverage auditor and the approval gate are built, and the gate's behaviour is covered by `scripts/test-qa-gate.sh`. It has not yet been exercised against a real board.
 
 ## Install
 

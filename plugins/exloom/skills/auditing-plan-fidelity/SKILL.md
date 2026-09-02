@@ -226,7 +226,7 @@ Use exactly one verdict line, not all three. The three options above are the pos
 | Plan was clearly wrong but executor fixed it | Good judgment by the executor — but was it logged? Fixing a bad plan step without recording it is still silent improvisation. The deviation log exists for exactly this case. |
 | Multiple small drifts that individually seem harmless | Evaluate in aggregate. Five "harmless" unlogged changes suggest a pattern of not logging, which is a process failure even if the code is fine. |
 | Plan has no "Files to Touch" section | You cannot run Step 1. Note this in the report. Audit what you can (acceptance criteria, deviation log). Recommend the plan template be updated to require file lists. |
-| Executor says "I updated the plan as I went" | Check git history of the plan file. If the plan was modified after execution started without being re-agreed with its authoring-plans` again, the plan no longer represents what the team agreed to. Flag it. |
+| Executor says "I updated the plan as I went" | Check the git history of the plan file. If it was modified after execution started, without the author agreeing to the change, the plan no longer represents what the team approved — and auditing against it audits the executor's own homework. Flag it. |
 | Test files were added that are not in the plan | Test files that directly correspond to planned source files are expected even if not explicitly listed. Test files for unplanned source files are drift — they indicate scope expansion. |
 | Plan is split across a stack of PRs (PR 2 of 3) | Audit only the tasks the current PR claims to implement, not the whole plan. Use the diff range for THIS PR (`gh pr diff <N>`), not the cumulative branch diff. State in the report which plan tasks are in scope for this PR and which remain for later PRs. Acceptance criteria that span PRs are marked "Unverified — completes in PR 3." |
 | Auditing the final PR of a multi-PR plan | Now audit cumulative fidelity. Use the full diff range across all merged PRs (`git diff <base-before-PR1>...HEAD`) to confirm every planned file was eventually touched and every acceptance criterion is met across the combined work. The last audit is where you catch a task that fell through the cracks between PRs. |
@@ -234,9 +234,11 @@ Use exactly one verdict line, not all three. The three options above are the pos
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 See [worked-example.md](worked-example.md).
+
 ## Integration
 
 **Timing.** Run this audit after the executor marks execution complete and before any code review begins. The audit is a gate — it determines whether the PR is ready for review or needs corrections first.
@@ -261,9 +263,9 @@ See [worked-example.md](worked-example.md).
 
 **Workflow sequence:**
 ```
-reviewing-plans → executing-handoff-plans → auditing-plan-fidelity → reviewing-code
-                                          ↓ (on fail)
-                                    executor fixes → re-audit
-                                          ↓ (if plan was wrong)
-                                    capturing-learnings
+planning-for-handoff → executing-handoff-plans → auditing-plan-fidelity → /review-complete
+                                               ↓ (on fail)
+                                         executor fixes → re-audit
+                                               ↓ (if the plan was wrong)
+                                         capturing-learnings
 ```

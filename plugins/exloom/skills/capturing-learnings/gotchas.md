@@ -1,13 +1,22 @@
-# Gotchas — capturing-learnings
+# Routing a learning — the rest of the decision tree
 
-The shape of a gotcha entry in a repo's CLAUDE.md.
+Question 1 (is this specific to one repo?) is answered in
+[SKILL.md](SKILL.md). This file carries the entry shape it routes to, and
+Questions 2 through 4.
 
+## The gotcha entry shape
+
+A gotcha in a repo's CLAUDE.md is one line under the most specific applicable
+heading:
+
+```markdown
 - **[Topic]:** [Concise description of the gotcha and how to avoid it]
 ```
 
-Commit the change: `docs: add [topic] gotcha to CLAUDE.md`.
+Commit it: `docs: add [topic] gotcha to CLAUDE.md`.
 
-No PR required for CLAUDE.md updates to a repo you own. If it's a shared or client repo, PR it with a one-line description.
+No PR is required for a CLAUDE.md update to a repo you own. On a shared or client
+repo, open one with a one-line description.
 
 ---
 

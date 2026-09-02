@@ -4,8 +4,9 @@
 # OPT-IN: does nothing unless the repo created `.claude/exloom-gate.enabled`.
 # When enabled, intercepts `git push`, `gh pr create`, and the GitHub MCP
 # publish/PR tools; blocks (exit 2) if the review checklist for the branch being
-# pushed is missing, incomplete, or not bound to the code. Shared validation
-# logic lives in lib.sh (identical to the Stop hook — no drift).
+# pushed is missing, incomplete, or not bound to the code. The validation itself
+# lives in lib.sh, so every caller answers "is this branch reviewed?" the same
+# way.
 #
 # Exit codes:
 #   0  — allow (gate off, not a publish action, checklist complete, protected/skip
@@ -114,11 +115,10 @@ for br in "${VBRANCHES[@]}"; do
     # checklist against ITS tip, from the ref (its working tree isn't present).
     exloom_validate_checklist ".claude/reviews/${br}.md" "refs/heads/${br}" 0 "push / open a PR for '$br'"
   fi
-  # The round cap used to return 3 here, meaning "an approve/cancel decision was
-  # printed to stdout — exit 0 so the harness prompts". It no longer does: cancel
-  # on that prompt is a tool refusal, not an answer, so the push died and the
-  # person had to retype their intent. The cap now blocks like everything else
-  # and hands the session a question to put to the user.
+  # Any non-zero result is a block, the round cap included. The cap does not get
+  # a softer exit code: an approve/cancel prompt cannot express two of its three
+  # answers, so it blocks like everything else and hands the session a question
+  # to put to the user.
   case "$?" in 0) ;; *) exit 2 ;; esac
 done
 

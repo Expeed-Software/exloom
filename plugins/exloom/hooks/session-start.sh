@@ -4,13 +4,12 @@
 # Says exloom exists, names the flow, and reports whether the gate is on HERE.
 # Orientation only: it adds context, never blocks.
 #
-# The version this replaces injected the entire using-exloom skill — about 13 KB
-# every session — and was removed for that. Removing it entirely was the wrong
-# correction: nothing then announced exloom at all, so a session only found it if
-# it happened to load a skill whose trigger description matched what the user
-# typed. "Add a field to the order form" matches nothing, and the whole workflow
-# stayed invisible. This is ~15 lines, and it tells a session the one thing it
-# cannot infer: that this repo has a gate and what the sequence is.
+# Kept deliberately short. Injecting a whole skill here would cost kilobytes of
+# context in every session, and injecting nothing leaves the workflow invisible —
+# a session would only find it by loading a skill whose trigger description
+# happened to match what the user typed, and "add a field to the order form"
+# matches none of them. These few lines carry the one thing a session cannot
+# infer: that this repo has a gate, and what the sequence is.
 
 set -u
 

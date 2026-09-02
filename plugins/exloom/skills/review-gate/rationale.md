@@ -87,11 +87,16 @@ the two, not a salvage operation.
 ## Provenance attestation
 
 When the gate is on, `/review-complete` records a Provenance block — whether AI
-assisted, the model id, the human who directed the work, and the base commit —
-and the hooks refuse to ship without it. Bound to the reviewed commit, it is a
-committed audit trail of *how* the change was produced. That is the evidence
-ISO 42001 and SOC 2 auditors and cyber-insurers ask for; position it there and
-not on the EU AI Act, which governs synthetic media rather than source code.
+assisted, the model id, the human who directed the work, the base commit, the
+date, and the fingerprint of the repository policy in force — and the hooks
+refuse to ship without it. Bound to the reviewed commit, it is a committed audit
+trail of *how* the change was produced. That is the evidence ISO 42001 and SOC 2
+auditors and cyber-insurers ask for; position it there and not on the EU AI Act,
+which governs synthetic media rather than source code.
+
+The policy fingerprint is what lets a later reader tell that a change was
+reviewed under a policy the repo has since changed — the code commit alone
+cannot say that.
 
 - **v1 (default).** The record is committed and commit-bound. Tamper-evident
   through git history; the model id is self-reported, which is cooperating-team

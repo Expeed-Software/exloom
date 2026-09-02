@@ -32,9 +32,8 @@ fi
 LIB_ABS="$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")"
 HOOKS_ABS="$(cd "$HOOKS" && pwd)"
 WORK="${TMPDIR:-/tmp}/exloom-gate-fixture.$$"
-# Scratch root for the per-section throwaway repos. Previously declared inside
-# the plan-gate section; that section is gone, and every later section that
-# builds a fixture repo needs it, so it lives here now.
+# Scratch root for the per-section throwaway repos. Declared here rather than in
+# a section, because most sections build one.
 REG="${TMPDIR:-/tmp}/exloom-gate-repos.$$"
 mkdir -p "$REG"
 
@@ -110,10 +109,9 @@ mkdir -p src/auth; printf 'z\n' > src/auth/NOTES.md; git add -A; git commit -qm 
 ok "markdown under auth/ -> 0, not 3" "$(exloom_derive_tier HEAD)" "0"
 git checkout -q feat/x
 
-# `auth` must match as a WORD, not a substring. A bare `auth` matched
-# `authoring-claude-md`, so three markdown docs forced Tier 3 — and tier has no
-# escape hatch, making the gate unsatisfiable. Found by running exloom's own
-# /review-init against this branch.
+# `auth` must match as a WORD, not a substring. A bare substring match puts any
+# path containing `authoring` or `author` at Tier 3 — and the tier has no escape
+# hatch, so the gate becomes unsatisfiable for a docs change.
 git checkout -q -b docs/authoring main
 mkdir -p skills/authoring-claude-md
 printf 'z
@@ -148,16 +146,23 @@ exloom_check_verdicts "$CHECK" 1 HEAD "$REVIEWED" "test" 2>/dev/null
 ok "no receipt -> blocked" "$?" "2"
 
 mkdir -p "$VD"
+# A receipt with no verdict records a LAUNCH. It says a reviewer started, never
+# what it concluded, and "we do not know what it concluded" is not approval.
 printf '{"agent":"l1-reviewer","head":"%s","at":"now","session":"s"}\n' "$REVIEWED" > "$VD/l1-reviewer.json"
 git add -A; git commit -qm receipt
 exloom_check_verdicts "$CHECK" 1 HEAD "$REVIEWED" "test" 2>/dev/null
-ok "receipt covering the reviewed commit -> allowed" "$?" "0"
+ok "a receipt with no verdict -> blocked" "$?" "2"
+
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"now","session":"s"}\n' "$REVIEWED" > "$VD/l1-reviewer.json"
+git add -A; git commit -qm verdict
+exloom_check_verdicts "$CHECK" 1 HEAD "$REVIEWED" "test" 2>/dev/null
+ok "receipt with a verdict covering the reviewed commit -> allowed" "$?" "0"
 
 exloom_check_verdicts "$CHECK" 2 HEAD "$REVIEWED" "test" 2>/dev/null
 ok "tier 2 with only the L1 receipt -> blocked" "$?" "2"
 
 # A checklist-only commit must not invalidate a real review...
-printf 'note\n' >> "$CHECK"; git add -A; git commit -qm checklist-only
+printf 'note\n' >> "$CHECK"; git add -A; git commit -qm checklist-only-commit
 exloom_check_verdicts "$CHECK" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null
 ok "checklist-only commit after review -> still allowed" "$?" "0"
 
@@ -179,10 +184,9 @@ git checkout -q feat/x
 
 echo "== staleness by change class (a typo fix must not demand another round) =="
 
-# The gate invalidated a review on ANY code change. Combined with fixing findings
-# that guarantees another round after every round — no terminating state. One real
-# branch reached round 9 with nothing outstanding but stale comments and test
-# parameter names, and the gate would still have demanded a codepoint sweep.
+# Invalidating a review on ANY code change, combined with fixing findings,
+# guarantees another round after every round — the loop has no terminating state.
+# A comment or a test-name fix must therefore leave a review standing.
 git checkout -q -b feat/class main
 printf 'package x\nfunc F() int { return 1 }\n' > src/c.go
 git add -A; git commit -qm base-code
@@ -205,11 +209,11 @@ git add -A; git commit -qm whitespace
 ok "whitespace/blank-line churn -> not behavioural" \
    "$(exloom_diff_is_behavioural "$CB2" HEAD && echo yes || echo no)" "no"
 
-# ...but only where indentation is not syntax. The blank-line fixture above was
-# the ONLY case exercising the -w rule, so it pinned "any change `git diff -w`
-# cannot see" as the spec. In Python a de-indent moves a statement out of an `if`
-# branch; in YAML it re-parents a key. Both are behavioural, both are invisible
-# to -w, and both would have left a stale receipt valid over changed behaviour.
+# ...but only where indentation is not syntax. Reading the blank-line case alone
+# would pin "any change `git diff -w` cannot see" as the rule. In Python a
+# de-indent moves a statement out of an `if` branch; in YAML it re-parents a key.
+# Both are behavioural, both are invisible to -w, and both would otherwise leave
+# a stale receipt valid over changed behaviour.
 CB3="$(git rev-parse HEAD)"
 printf 'def pay(o):\n    if o.ok:\n        charge(o)\n        refund(o)\n' > src/p.py
 git add -A; git commit -qm pybase
@@ -258,20 +262,19 @@ git checkout -q feat/x
 
 echo "== code-reviewer verdicts (a REJECTED review does not satisfy the gate) =="
 
-# Same rule as the plan gate, applied to the push/done gate. The migration risk
-# here is real: receipts written before verdicts existed have no "verdict" key,
-# and refusing those would block every in-flight branch the moment this version
-# lands. Legacy receipts are therefore grandfathered, and that is tested.
+# A receipt states a conclusion or it states nothing. REJECTED and UNKNOWN both
+# fail the gate, and a line with no verdict key at all records a launch rather
+# than a review — none of the three is an approval.
 git checkout -q -b feat/verd main
 CV=".claude/reviews/feat/verd.md"; mkdir -p "$(dirname "$CV")"
 CVD="$(exloom_verdict_dir "$CV")"; mkdir -p "$CVD"
 printf 'a\n' > src/v.go; git add -A; git commit -qm v
 RV="$(git rev-parse HEAD)"
-# Receipts reach the consumer the way they reach it in production: minted by the
-# PRODUCER from a reviewer report. Hand-writing them here meant
-# exloom_check_verdicts was only ever shown receipts record-reviewer-verdict.sh
-# does not write, so receipt-shape drift between the two was invisible — and the
-# suite performed the exact forgery this branch exists to prevent.
+# Receipts reach the consumer the way they do in production: minted by the
+# PRODUCER from a reviewer report. Hand-writing them here would only ever show
+# exloom_check_verdicts a shape record-reviewer-verdict.sh does not write, so
+# drift between the two would be invisible — and the suite would be performing
+# the exact forgery the gate exists to prevent.
 mint() {   # mint <report-text>
   rm -f "$CVD/l1-reviewer.json"
   python3 -c "
@@ -282,9 +285,9 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
     | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
   git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
 }
-# Only for receipts the CURRENT producer cannot write: the 2.0.0 shape, which is
-# the whole point of the grandfather clause. Anything the producer can emit must
-# go through mint().
+# Only for receipts the CURRENT producer cannot write — an older on-disk shape.
+# Anything the producer can emit must go through mint(), or the suite is testing
+# a receipt shape that never reaches the gate in production.
 put_legacy() { printf '%s\n' "$1" > "$CVD/l1-reviewer.json"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1; }
 chk() { exloom_check_verdicts "$CV" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; echo $?; }
 
@@ -304,11 +307,14 @@ ok "REJECTED code review -> blocked" "$(chk)" "2"
 mint 'I looked at the diff and it seems fine to me.'
 ok "UNKNOWN code review -> blocked" "$(chk)" "2"
 
-# Byte-for-byte the shape exloom 2.0.0 actually wrote — every key, in order,
-# copied from a real receipt. A simplified stand-in would pass
-# while the real thing failed on a key the parser did not expect.
-put_legacy "{\"agent\":\"l1-reviewer\",\"subagent_type\":\"exloom:l1-reviewer\",\"head\":\"$RV\",\"at\":\"2026-08-28T18:24:11Z\",\"session\":\"7bc2e35f-7c0f-4f69-b7f2-bbea28ffe7a5\"}"
-ok "legacy 2.0.0 receipt (real shape, no verdict key) -> still allowed" "$(chk)" "0"
+# The exact key set and order exloom 2.0.0 wrote. A simplified stand-in would
+# pass while the real shape failed on a key the parser did not expect.
+put_legacy "{\"agent\":\"l1-reviewer\",\"subagent_type\":\"exloom:l1-reviewer\",\"head\":\"$RV\",\"at\":\"2026-08-28T18:24:11Z\",\"session\":\"00000000-0000-0000-0000-000000000000\"}"
+# Byte-for-byte an older shape, and it is not accepted. An exemption for these
+# would admit receipts whose review outcome was never captured — refusing one
+# costs a single re-dispatch, accepting one ships code nobody has been shown to
+# have reviewed.
+ok "legacy 2.0.0 receipt (no verdict key) -> blocked, not grandfathered" "$(chk)" "2"
 
 # An APPROVED receipt from an EARLIER commit must not vouch for a REJECTED
 # review of the current one. Verdict and commit are read from the same line.
@@ -377,10 +383,9 @@ ok "unrelated command -> allowed" \
 
 echo "== protection: state file and wholesale deletion =="
 
-# The freeze was liftable by writing one JSON file: `.claude/*` was exempt in the
-# execution gate and protect-verdicts matched only `.verdicts/`. And `rm -rf
-# .claude/reviews` / `git clean -fdx` name neither, so both destroyed every
-# receipt, the round counter and the findings ledger unopposed.
+# Guarding `.verdicts/` alone is not enough: `rm -rf .claude/reviews` and
+# `git clean -fdx` name neither the directory nor the state file, and either one
+# destroys every receipt, the round counter and the findings ledger.
 ok "writing the review STATE file -> denied"   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.state"}}')" "2"
 ok "editing the CHECKLIST is still allowed"   "$(deny '{"tool_name":"Edit","tool_input":{"file_path":".claude/reviews/feat/x.md"}}')" "0"
 ok "rm -rf of the reviews tree -> denied"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"rm -rf .claude/reviews"}}')" "2"
@@ -389,16 +394,42 @@ ok "reading the state file -> allowed"   "$(deny '{"tool_name":"Bash","tool_inpu
 
 echo "== remediation commands in block messages must actually run =="
 
-# ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is NOT
-# set in the Bash environment, so every sanctioned escape printed to a blocked
-# session failed with "No such file or directory" — leaving EXLOOM_REVIEW_SKIP,
-# which the same message advertises, as the only reachable option.
-# Scoped to EVERY hook and command, not just the files already fixed — the first
-# version of this test grepped only the two files the fix touched, so it could
-# never have caught a third. That is the same "fix the instance" defect the whole
-# branch is about, committed inside the regression test for it.
-ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}"   "$(grep -rlE '(bash|sh|cat|find|cp) [^
-]*\\$\{CLAUDE_PLUGIN_ROOT\}' "$HOOKS_ABS" "$HOOKS_ABS/../commands" "$HOOKS_ABS/../scripts" 2>/dev/null | wc -l | tr -d ' ')" "0"
+# ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is
+# NOT set in the Bash environment. A remediation command built from it fails with
+# "No such file or directory", which leaves EXLOOM_REVIEW_SKIP — advertised in
+# the same message — as the only reachable option.
+#
+# Scoped to the WHOLE plugin, not to hooks/commands/scripts: skills and templates
+# carry runnable snippets too, and a guard that covers only the directories a
+# past fix happened to touch cannot catch the next one.
+#
+# The pattern lives in a variable. Written inline it sits inside a nested
+# single-quoted `$(...)`, where an escaped `\$` becomes a LITERAL BACKSLASH to
+# ERE — a pattern that matches nothing and a guard that can never fail. This test
+# asserts against a known violation below precisely so that cannot recur.
+PLUGIN_ROOT_DIR="$(cd "$HOOKS_ABS/.." && pwd)"
+CPR_RE='(bash|sh|cat|find|cp|\.)[[:space:]]+"?\$\{CLAUDE_PLUGIN_ROOT\}'
+
+# The guard must FAIL on a real violation. A guard proven only against a clean
+# tree is indistinguishable from one that matches nothing.
+CPR_PROBE="$REG/cpr-probe"; mkdir -p "$CPR_PROBE"
+printf 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/prove-change-is-tested.sh"\n' > "$CPR_PROBE/violation.md"
+ok "the guard actually matches a real \${CLAUDE_PLUGIN_ROOT} invocation" \
+   "$(grep -rlE "$CPR_RE" "$CPR_PROBE" 2>/dev/null | wc -l | tr -d ' ')" "1"
+# ...and must not fire on prose that merely names the variable, which several
+# files legitimately do when explaining why it cannot be used.
+printf 'The harness sets ${CLAUDE_PLUGIN_ROOT} in plugin.json only.\n' > "$CPR_PROBE/violation.md"
+ok "...and does not fire on prose that merely names it" \
+   "$(grep -rlE "$CPR_RE" "$CPR_PROBE" 2>/dev/null | wc -l | tr -d ' ')" "0"
+
+# .claude-plugin/plugin.json is excluded, and only it: that manifest is the one
+# place the harness DOES interpolate the variable, so its hook commands are
+# correct exactly as written.
+ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
+   "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
+      | grep -v '\.claude-plugin/plugin\.json$' | wc -l | tr -d ' ')" "0"
+ok "...while the manifest, where it IS interpolated, still uses it" \
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "5"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
 echo "== record-reviewer-verdict hook (a real dispatch writes one) =="
@@ -433,8 +464,9 @@ mv .claude/gate-off .claude/exloom-gate.enabled
 
 echo "== verdicts (a dispatch is not a review) =="
 
-# The receipt used to record only that a reviewer RAN. A REJECTED report opened
-# the gate exactly like an approval, so the mechanism enforced attendance.
+# A receipt that records only that a reviewer RAN enforces attendance, not
+# review: a REJECTED report would open the gate exactly like an approval. The
+# verdict is what makes it evidence.
 subrepo verdict; printf '# plan\n- src/one.go\n' > docs/plans/p.md
 VF=".claude/reviews/feat/plan.verdicts/l1-reviewer.json"
 disp() {   # disp <report-text>
@@ -473,8 +505,9 @@ ok "echoed format template is not an approval" \
 
 echo "== classifier: real code the old version called non-behavioural =="
 
-# Every case below was reproduced by review as a FALSE non-behavioural, which
-# kept a stale reviewer receipt "covering" a changed commit.
+# Each case below is a line a naive comment-stripper reads as inert. Getting any
+# of them wrong keeps a stale reviewer receipt "covering" a commit whose
+# behaviour changed.
 git checkout -q -b feat/cls main
 mkdir -p csrc
 beh() { git add -A >/dev/null 2>&1; git commit -qm "$1" >/dev/null 2>&1;
@@ -528,9 +561,10 @@ git checkout -q feat/x
 
 echo "== reviewer output parsed as the shipped agents actually print it =="
 
-# Fixtures copied from agents/l1-reviewer.md's own "Output format — strict" block.
-# The previous fixtures put severity and cite on ONE line — a shape no agent emits —
-# so the parser passed its tests while recording nothing from a real report.
+# Fixtures copied from agents/l1-reviewer.md's own "Output format — strict"
+# block. Severity sits on the HEADING and the finding line carries only a cite;
+# a fixture that puts both on one line is a shape no agent emits, and a parser
+# tested against it passes while recording nothing from a real report.
 subrepo realfmt
 printf '# plan\n- src/one.go\n' > docs/plans/p.md
 RVD=".claude/reviews/feat/plan.verdicts"
@@ -582,18 +616,20 @@ ok "echoed template does not win over the real verdict" "$(vof)" "REJECTED"
 
 cd "$WORK" || exit 1
 
-echo "== round-2 regressions (every one was a defect a FIX introduced) =="
+echo "== classifier: near-misses of the comment-marker rules =="
 
-# Each case reproduces something that broke while closing round 1. On this branch a
-# fix has been worse than the bug more than once, so these are permanent guards.
+# Each case sits one character away from a rule above it. These are the shapes a
+# marker-based classifier gets wrong once it has been made to handle the obvious
+# ones, so they stay as permanent guards.
 
 git checkout -q -b feat/r2 main
 mkdir -p r2
 r2beh() { git add -A >/dev/null 2>&1; git commit -qm "$1" >/dev/null 2>&1
           exloom_diff_is_behavioural "$2" HEAD && echo yes || echo no; }
 
-# Pointer dereference was classified as a javadoc continuation — a sibling of the
-# `#define` hole, in the same function, introduced by the fix for it.
+# `*o = 1` opens with a star, exactly like a javadoc continuation line. One is a
+# dereference and the other is a comment, and only the following character tells
+# them apart.
 printf 'int f(int *o){ *o = 1; return 0; }\n' > r2/d.c
 git add -A >/dev/null 2>&1; git commit -qm dbase >/dev/null 2>&1; RB="$(git rev-parse HEAD)"
 printf 'int f(int *o){ *o = 999; return 0; }\n' > r2/d.c
@@ -604,8 +640,9 @@ git add -A >/dev/null 2>&1; git commit -qm jbase >/dev/null 2>&1; RB="$(git rev-
 printf '/**\n * explains f much better\n */\nint f(void){ return 1; }\n' > r2/j.java
 ok "javadoc continuation -> NOT behavioural" "$(r2beh javadoc "$RB")" "no"
 
-# A shell script emitting markdown from a heredoc: the `#` marker treated heredoc
-# BODY lines as comments, so exloom mis-classified its own hooks.
+# A shell script emitting markdown from a heredoc: `#` opens a comment in shell
+# and a heading inside the body, so a marker rule that does not know where the
+# body starts misreads the whole file.
 printf 'cat <<EOF\n# heading one\nEOF\n' > r2/e.sh
 git add -A >/dev/null 2>&1; git commit -qm ebase >/dev/null 2>&1; RB="$(git rev-parse HEAD)"
 printf 'cat <<EOF\n# heading TWO CHANGED\nEOF\n' > r2/e.sh
@@ -631,7 +668,9 @@ ok "- **VERDICT:** APPROVED"       "$(vsay '- **VERDICT:** APPROVED')" "APPROVED
 ok "VERDICT: APPROVED."            "$(vsay 'VERDICT: APPROVED.')" "APPROVED"
 ok "APPROVED WITH CHANGES -> UNKNOWN" "$(vsay 'VERDICT: APPROVED WITH CHANGES')" "UNKNOWN"
 
-# A heading containing "clean" cleared severity and dropped every finding under it.
+# A heading may contain a word the severity matcher also looks for. "Critical
+# (cleanup of stale handlers)" is a Critical section, and keying on "clean"
+# inside it would drop every finding beneath.
 rm -rf .claude/reviews
 python3 -c "
 import json
@@ -642,7 +681,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 ok "'Critical (cleanup...)' still records findings" \
    "$(grep -c . "$VVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-echo "== proof: the three-run protocol, which shipped with no fixtures =="
+echo "== proof: the three-run protocol =="
 
 PRV="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
 prv() { local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
@@ -693,10 +732,10 @@ cd "$WORK" || exit 1
 
 echo "== round-3 blockers: forgery, binding, writing ABOUT the guarded path =="
 
-# 1. protect-verdicts matched command TEXT, so a command merely MENTIONING the
-#    guarded path was denied. It blocked a comment being written into the hook's own
-#    source, then blocked the commit message documenting that block, then blocked
-#    this very test three times. Content is now distinguished from targets.
+# Matching command TEXT rather than command TARGETS denies anything that merely
+# MENTIONS the guarded path — a commit message about the guard, a note written
+# into a heredoc, this test file itself. Content and targets are different
+# things, and only the target decides.
 GVP=".claude/reviews/feat/x"
 GV="${GVP}.verdicts/l1-reviewer.json"
 jbash() { python3 -c "
@@ -714,19 +753,12 @@ ok "a redirect INTO the path -> still denied" \
 ok "a quoted target -> still denied" \
    "$(deny "$(jbash "echo x | tee \"${GV}\"")")" "2"
 
-# 2. Plan approval was bound to the DISPATCH PROMPT — text written by the party being
-#    gated — so "Per <a> and <b>, check the heading style" approved BOTH plans off one
-#    cosmetic review. The reviewer's own REVIEWED: line is now authoritative.
-subrepo bind
-printf '# plan a\n- src/one.go\n' > docs/plans/a.md
-printf '# plan b\n- src/two.go\n' > docs/plans/b.md
-BVD=".claude/reviews/feat/plan.verdicts"
 echo "== a shell redirection is not a refspec =="
 
-# Reported from a real session, hit twice: `git push origin 2>&1` was read as a
-# push of a branch named `2>&1`, and the block message told the author to run
-# /review-init for a branch that does not exist — an argument-parsing slip that
-# reads as a review failure.
+# `git push origin 2>&1` must not parse as a push of a branch named `2>&1`. It
+# would make the block message tell the author to run /review-init for a branch
+# that does not exist — an argument-parsing slip that reads to them as a review
+# failure.
 pt() { exloom_push_target_branches "$1" | tr '\n' ' ' | sed 's/ $//'; }
 ok "git push origin 2>&1 -> no refspec"          "$(pt 'git push origin 2>&1')" ""
 ok "git push -u origin 2>&1 -> no refspec"       "$(pt 'git push -u origin 2>&1')" ""
@@ -741,13 +773,12 @@ ok "git push origin other-branch -> other-branch" "$(pt 'git push origin other-b
 
 echo "== SubagentStop: the verdict is captured at COMPLETION =="
 
-# The cause behind the async compensation. PostToolUse fires at launch and has no
-# report; SubagentStop fires on completion and carries it verbatim. Payload shape
-# below is captured from a real dispatch, not invented:
+# PostToolUse fires at launch and carries no report; SubagentStop fires on
+# completion and carries it verbatim. Listening only to the first records every
+# dispatch and no verdict, which makes a REJECTED review indistinguishable from
+# an approval. The payload shape:
 #   {"hook_event_name":"SubagentStop","agent_type":"exloom:l1-reviewer",
 #    "agent_id":"...","last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
-# Without this, a REJECTED review was indistinguishable from an approval on a
-# live branch.
 subrepo substop
 SSV=".claude/reviews/feat/plan.verdicts"
 ssfeed() {   # ssfeed <report>
@@ -771,9 +802,9 @@ ok "...and round_needed from the same report" \
 ok "...and the findings" \
    "$(grep -c . "$SSV/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-# The decisive one: a dispatch line and a completion line share a commit. The
-# dispatch line has no verdict and used to be grandfathered as passing, which
-# would let a REJECTED review through.
+# The decisive case: a dispatch line and a completion line share a commit. If the
+# verdict-less dispatch line counted as passing, it would let the REJECTED
+# completion beside it through.
 SSC=".claude/reviews/feat/plan.md"; printf '# c\n' > "$SSC"
 rm -rf .claude/reviews; mkdir -p "$SSV"
 printf '%s' '{"session_id":"s","hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_response":{"isAsync":true,"status":"async_launched"}}' \
@@ -783,23 +814,26 @@ printf '# c\n' > "$SSC"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null
 exloom_check_verdicts "$SSC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
 ok "a verdict-less dispatch line does NOT grandfather a REJECTED away" "$?" "2"
 
-# A genuinely old receipt — no verdict anywhere — must still be grandfathered.
+# A receipt with no verdict anywhere is a launch, whatever wrote it. An exemption
+# for older shapes would also admit reviews whose outcome was never captured.
 rm -rf .claude/reviews; mkdir -p "$SSV"
 printf '{"agent":"l1-reviewer","head":"%s","at":"n","session":"s"}\n' "$(git rev-parse HEAD)" > "$SSV/l1-reviewer.json"
 git add -A >/dev/null 2>&1; git commit -qm legacy >/dev/null 2>&1
-exloom_check_verdicts "$SSC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
-ok "a pre-verdict receipt is still grandfathered" "$?" "0"
+LOUT="$(exloom_check_verdicts "$SSC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1)"; LRC=$?
+ok "a pre-verdict receipt is no longer grandfathered" "$LRC" "2"
+ok "...and the block names the fix, not just the refusal" \
+   "$(printf '%s' "$LOUT" | grep -c 'without a name')" "1"
 
 echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
 
-# Captured from a real dispatch, verbatim. On an async launch the payload carries
-# no report at all — the reviewer has not run. v4.0.0/v4.0.1 recorded UNKNOWN
-# here, which the gate treats as "not approved", so every real dispatch in every
-# gate-enabled repo blocked with no path forward.
+# The payload of an async launch, verbatim. It carries no report at all, because
+# the reviewer has not run yet.
 #
-# UNKNOWN must mean "the reviewer stated no verdict" (their omission, blocking).
-# It must NOT mean "exloom could not observe one at this event" (our blindness).
-# The receipt records what WAS observed: a dispatch. The gate grandfathers that.
+# Recording that as UNKNOWN would block every async dispatch with no path
+# forward. UNKNOWN must mean "the reviewer stated no verdict" — their omission,
+# and blocking. It must not mean "no verdict was observable at this event", which
+# is exloom's blindness. So the receipt records only what WAS observed: a
+# launch.
 subrepo asyncdisp
 ADV=".claude/reviews/feat/plan.verdicts"
 rm -rf .claude/reviews
@@ -817,9 +851,9 @@ ok "async launch -> the line is marked as a dispatch, not a conclusion" \
 
 # And the consequence that matters. A launch is not a review: if the reviewer's
 # report never reaches exloom, this line is the only one on file, and letting it
-# through means an unread review satisfies the gate. It reached the field —
-# a subagent given a NAME reports through the mailbox rather than the tool
-# result, so no completion line is ever written and the launch stood alone.
+# through means an unread review satisfies the gate. The common cause is a
+# subagent given a NAME, which reports through the mailbox rather than the tool
+# result, so no completion line is ever written and the launch stands alone.
 ACL=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$ACL")"
 printf '# c\n' > "$ACL"; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
 ACL_OUT="$(exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1)"; ACL_RC=$?
@@ -829,13 +863,14 @@ ok "...and the block says the report never arrived" \
 ok "...and it names the cause a session can act on" \
    "$(printf '%s' "$ACL_OUT" | grep -c 'without a name' | head -1)" "1"
 
-# A pre-verdict receipt carries no dispatch marker, and is still grandfathered —
-# narrowing the legacy path must not break branches that were already in flight.
+# An older receipt carries no dispatch marker either, and is refused for the same
+# reason: the marker says which version wrote the line, not whether a conclusion
+# was recorded, and only the second question decides anything.
 printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
   "$(git rev-parse HEAD)" > "$ADV/l1-reviewer.json"
 git add -A >/dev/null 2>&1; git commit -qm pre >/dev/null 2>&1
 exloom_check_verdicts "$ACL" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev/null 2>&1
-ok "...but an unmarked pre-verdict receipt is still grandfathered" "$?" "0"
+ok "...and an unmarked one is refused the same way" "$?" "2"
 
 # The completion line lands after the launch line. The verdict wins; the marker
 # on the earlier line must not poison it.
@@ -866,11 +901,10 @@ ok "a real report with no VERDICT line -> still UNKNOWN" \
 echo "== payload shape: the field the harness actually sends =="
 
 # The harness delivers a Task result as `tool_response`, a content-block array.
-# Every fixture in this suite used to feed `tool_output` as a bare string — a
-# shape nothing emits — so the parser was verified against a payload it never
-# receives. The fixtures now use the real shape; these two assert the parser
-# still accepts both, because the fallback chain is what makes it robust across
-# harness versions, and silently losing it would be invisible otherwise.
+# A fixture feeding `tool_output` as a bare string tests a shape nothing emits,
+# so every fixture here uses the real one. These two assert the parser still
+# accepts both: the fallback chain is what makes it robust across harness
+# versions, and losing it would otherwise be invisible.
 subrepo shape; printf '# plan\n- src/one.go\n' > docs/plans/p.md
 SVD=".claude/reviews/feat/plan.verdicts"   # subrepo() always checks out feat/plan
 shape_verdict() {   # shape_verdict <json-payload>
@@ -887,11 +921,11 @@ ok "tool_output bare string (older shape) -> still read" \
 
 echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
 
-# The class, not the instances. Four rounds of findings were all one shape: the
-# producer and the consumer were edited separately and nothing checked they agree.
-# This drives EVERY agent's documented Output-format block through the real hook and
-# asserts what comes out. It is generated FROM agents/*.md, so an agent whose format
-# changes without the parser changing fails here rather than in round 5.
+# The producer and the consumer are separate files, and nothing else checks that
+# they agree. This drives EVERY agent's documented Output-format block through the
+# real hook and asserts what comes out. The fixtures are generated FROM
+# agents/*.md, so an agent whose format changes without the parser changing fails
+# here rather than on somebody's branch.
 
 AGENTS_DIR="$(cd "$(dirname "$LIB_ABS")/../agents" && pwd)"
 subrepo contract
@@ -923,15 +957,15 @@ for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"
   blk="$(agent_block "$a")"
   ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
 
-  # Its own APPROVED form must parse as APPROVED. An agent that copies its own
-  # documented verdict line and gets UNKNOWN is a gate that can never open —
-  # which is exactly what plan-reviewer.md did.
+  # Its own APPROVED form must parse as APPROVED. An agent that emits the verdict
+  # line its own file documents, and is scored UNKNOWN for it, is a gate that can
+  # never open.
   feed "$a" "$(printf '%s\n\nVERDICT: APPROVED\n' "$blk")"
   ok "$a: own block + APPROVED -> APPROVED" "$(vrd "$a")" "APPROVED"
 
-  # And with a cited finding present, at least one finding must be RECORDED.
-  # cross-layer-auditor and security-auditor recorded zero because their headings
-  # carry no severity word — a blocking re-find gate, structurally inert.
+  # And with a cited finding present, at least one finding must be RECORDED. An
+  # agent whose headings carry no severity word records zero, which leaves the
+  # blocking re-find gate reading an empty ledger.
   feed "$a" "$(printf '%s\n\nVERDICT: REJECTED (1 items)\n' "$blk")"
   ok "$a: own block + a cite -> at least one finding recorded" \
      "$([[ "$(fnd "$a")" -ge 1 ]] && echo yes || echo no)" "yes"
@@ -962,9 +996,8 @@ TPL="$(cd "$(dirname "$LIB_ABS")/../templates" && pwd)/review-checklist.md"
 PRE="$(sed -n "s/^  placeholder_re='\(.*\)'$/\1/p" "$LIB_ABS")"
 ok "placeholder_re extracted from lib.sh" "$([[ -n "$PRE" ]] && echo yes || echo no)" "yes"
 
-# Every <...> token the template ships must be matched, or the section it guards is
-# unenforced — the Tier 3 security Findings field and the all-tiers L1 Resolution
-# field were both silently optional.
+# Every <...> token the template ships must be matched, or the section it guards
+# is silently optional: the checklist looks complete and the gate never asked.
 unmatched=0
 while IFS= read -r tok; do
   [[ -n "$tok" ]] || continue
@@ -998,9 +1031,9 @@ cd "$WORK" || exit 1
 
 echo "== prove-change-is-tested (author-side, before review) =="
 
-# Modelled directly on real review transcripts: rounds 2..7 were spent on defects
-# this check catches before the first commit — a decorative assertion, a missing
-# read-path test, and a test task that reported UP-TO-DATE and never ran.
+# The three shapes this check exists to catch before review starts: a decorative
+# assertion, a write-path test with no read-path test, and a test task that
+# reports UP-TO-DATE and never runs.
 PROVE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
 
 proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
@@ -1009,10 +1042,9 @@ proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
   git config user.email t@e.com; git config user.name t
   # The gate marker and a feature branch are REQUIRED, not decoration:
   # prove-change-is-tested.sh returns before writing a receipt when either is
-  # missing. Without them these fixtures asserted exit codes on a path where the
-  # receipt-minting branch was dead code — including the forged-PROVED defect
-  # that lives precisely there. A fixture that does not reach the code it names
-  # is worse than no fixture, because it reports green.
+  # missing. Without them a fixture asserts exit codes on a path where the
+  # receipt-minting branch is dead code — and a fixture that never reaches the
+  # code it names is worse than none, because it reports green.
   : > .claude/exloom-gate.enabled
   printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
   printf '%s\n' "$3" > src/calc.sh
@@ -1038,8 +1070,8 @@ printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
 ok "a test that notices the change -> PROVED" "$(prove "$B")" "0"
 ok "...and the PROVED receipt is actually written" "$(proofres)" "PROVED"
 
-# B. The transcript's own failure: an assertion too weak to notice anything.
-#    (`hasMessageContaining("a")` on an object named `a`, in miniature.)
+# B. An assertion too weak to notice anything — a check that the result is
+#    non-empty, which is true before and after the change.
 proofrepo weak 'v=$(bash src/calc.sh); [ -n "$v" ]' 'echo 4'; B="$BASESHA"
 printf 'echo 5\n' > src/calc.sh
 printf 'v=$(bash src/calc.sh); [ -n "$v" ]  # still only checks non-empty\n' > tests/calc_test.sh
@@ -1067,9 +1099,9 @@ cd "$WORK" || exit 1
 
 echo "== the loop-termination signal is recorded, not just emitted =="
 
-# All five agents emit `ROUND NEEDED AFTER FIX:` as a mandatory closing line and
-# nothing read it. The presenting complaint is review loops that do not stop;
-# this is the signal that stops them, and it was write-only.
+# Every agent emits `ROUND NEEDED AFTER FIX:` as a mandatory closing line. It is
+# the signal that lets a loop terminate, so it has to be recorded rather than
+# merely emitted — a write-only signal stops nothing.
 subrepo roundsig
 RSV=".claude/reviews/feat/plan.verdicts"
 rn() {   # rn <report-text> -> the recorded round_needed
@@ -1101,12 +1133,12 @@ echo "== one dispatch leaves one receipt line, not eighteen =="
 
 # SubagentStop fires on EVERY turn a reviewer stops on, not only its last. A
 # reviewer that reads eight files stops eight times, and the seven intermediate
-# stops hand over a message with no VERDICT line — which scored UNKNOWN and was
-# appended verbatim. Observed in the field: 18 lines for one commit, 17 UNKNOWN
-# and one REJECTED. The gate read that correctly (it takes the strongest verdict
-# for the commit), so this is legibility, not a wrong decision — but a file that
-# is 90% noise cannot be read by a person, and a reader scanning it newest-first
-# would invert the answer.
+# stops hand over a message with no VERDICT line — which scores UNKNOWN and gets
+# appended verbatim, so one commit accumulates a long run of UNKNOWN lines around
+# the single real verdict. The gate reads that correctly, taking the strongest
+# verdict for the commit, so it is legibility rather than a wrong decision — but a
+# file that is mostly noise cannot be read by a person, and a reader scanning it
+# newest-first would invert the answer.
 subrepo dedupe
 DSV=".claude/reviews/feat/plan.verdicts"
 # Unlike mint()/rn(), this deliberately does NOT clear the receipt first — the
@@ -1168,9 +1200,9 @@ cd "$WORK" || exit 1
 
 echo "== lanes: rigour earned by stakes, not imposed by process =="
 
-# exloom shipped one lane and it was the strictest one — the same ten steps for a
-# null check and a subsystem. Tiers scale review DEPTH, derived from the diff;
-# they never scaled CEREMONY, which is what a small change cannot afford.
+# Tiers scale review DEPTH and are derived from the diff. They do not scale
+# CEREMONY, and ceremony is what a small change cannot afford — a single strict
+# lane means the same ten steps for a null check and for a subsystem.
 subrepo lanes
 
 ok "no marker -> standard, so nothing changes for an existing repo" "$(exloom_repo_lane)" "standard"
@@ -1249,11 +1281,12 @@ cd "$WORK" || exit 1
 
 echo "== a javadoc paragraph break is not a pointer dereference =="
 
-# A bare `*` line is how every javadoc block separates paragraphs. It stripped to
-# `*`, missed the `'* '*` case (which requires a trailing space) and hit the
-# `'*'*` guard that exists so `*p = x` is treated as code. So ANY javadoc edit
-# containing a paragraph break was classified behavioural, which invalidates every
-# reviewer receipt on the branch and mandates another round for a comment.
+# A bare `*` line is how every javadoc block separates paragraphs. It strips to
+# `*`, which does not match the `'* '*` continuation case (that needs a trailing
+# space) and does hit the `'*'*` guard that exists so `*p = x` counts as code.
+# Without a case for it, any javadoc edit containing a paragraph break scores
+# behavioural — invalidating every reviewer receipt on the branch and mandating
+# another round for a comment.
 subrepo javadoc noorigin
 cat > src/A.java <<'JAVA'
 /**
@@ -1286,12 +1319,12 @@ cd "$WORK" || exit 1
 
 echo "== a receipt goes to the repo the REVIEW is about, not the session's cwd =="
 
-# Found by dispatching a real reviewer at a worktree while the session sat in a
-# different repo. The hook resolved the repo from cwd, found no gate marker
-# there, and exited 0 in silence - so no receipt, no findings, and a gate that
-# reported "never dispatched" forever. Re-dispatching could not fix it, because
-# every dispatch wrote to the wrong repo. exloom:isolating-execution recommends a
-# worktree, so exloom's own advice produced the failure.
+# A reviewer dispatched at a worktree completes while the session's cwd is
+# elsewhere. Resolving the repo from cwd alone finds no gate marker there and
+# exits in silence — no receipt, no findings, and a gate that reports "never
+# dispatched" forever, which re-dispatching cannot clear because every dispatch
+# writes to the wrong repo. exloom:isolating-execution recommends a worktree, so
+# this path is well travelled.
 subrepo receiptrepo noorigin
 printf 'x\n' > src/a.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
 GATED="$PWD"
@@ -1317,9 +1350,8 @@ ok "...carrying the verdict, not just a dispatch line" \
 ok "...and nothing was written into the session's own repo" \
    "$([ -d .claude/reviews ] && echo wrote || echo clean)" "clean"
 
-# When no cited path lands in a gated repo, it must SAY SO. A silent exit here is
-# what made the original failure undiagnosable: the gate blocks and nothing
-# anywhere explains why.
+# When no cited path lands in a gated repo, it must SAY SO. A silent exit makes
+# the failure undiagnosable: the gate blocks and nothing anywhere explains why.
 python3 -c "
 import json
 msg = '## Critical\n- nowhere/at/all.java:1 - a defect\n\nVERDICT: REJECTED (1 items)'
@@ -1335,10 +1367,10 @@ cd "$WORK" || exit 1
 
 echo "== the round a finding belongs to is derived, never read from a state file =="
 
-# `.claude/reviews/<branch>.state` was read here and written by nothing in exloom,
-# so every finding landed in round 0. Two things silently stopped working: the
-# severity trend collapsed to one bucket, and the same defect found in three
-# passes counted as three open criticals, so the cap reported "3 critical
+# The round has to come from the receipts themselves. Reading it from a state
+# file nothing writes lands every finding in round 0, and two things then fail
+# quietly: the severity trend collapses to one bucket, and the same defect found
+# in three passes counts as three open criticals — so the cap reports "3 critical
 # findings" beside a single cite.
 subrepo rounds noorigin
 printf 'x\n' > src/a.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
@@ -1366,12 +1398,11 @@ cd "$WORK" || exit 1
 
 echo "== the gate says where it stands at every completion, not only at the end =="
 
-# Sessions hand-dispatch reviewers and never invoke /review-complete, and the
-# reason is structural rather than sloppiness: dispatching directly produces the
-# same findings, so the two feel equivalent, and nothing contradicts that until
-# the push is refused. What the command adds - the tier derived from the diff,
-# which receipts are missing, which sections are unfilled - is real work with no
-# visible output at the moment it matters. So it is printed at that moment.
+# A session that hand-dispatches reviewers gets the same findings as the command,
+# so the two feel equivalent, and nothing contradicts that until the push is
+# refused. What the command adds — the tier derived from the diff, which receipts
+# are missing, which sections are unfilled — is real work with no visible output
+# at the moment it matters. So it is printed at that moment.
 subrepo gatestatus noorigin
 mkdir -p .claude/reviews/feat
 printf 'a\n' > src/A.java; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
@@ -1424,16 +1455,15 @@ cd "$WORK" || exit 1
 
 echo "== reading a receipt is not writing one =="
 
-# The write check matched a bare `>` anywhere in the command, so two read-only
-# forms were denied. Both were reported from real sessions and dismissed twice
-# here before being reproduced:
+# Matching a bare `>` anywhere in the command denies two read-only forms:
 #
 #   ls -1 .claude/reviews/x.verdicts/ 2>/dev/null    a stderr redirect
 #   ls .claude/reviews/<branch>.verdicts/            `<branch>` contains a >
 #
-# The second is the form /review-complete instructs verbatim, so the command told
-# people to run something the gate refused. Over-blocking is what teaches people
-# to reach for EXLOOM_REVIEW_SKIP, which costs more than the forgery it prevents.
+# The second is the form /review-complete instructs verbatim, so the command
+# would be telling people to run something the gate refuses. Over-blocking is
+# what teaches people to reach for EXLOOM_REVIEW_SKIP, which costs more than the
+# forgery it prevents.
 subrepo pvreads noorigin
 mkdir -p .claude/reviews/feat
 printf 'x\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
@@ -1461,10 +1491,10 @@ cd "$WORK" || exit 1
 
 echo "== the fork point is the NEAREST branch, not the first one named =="
 
-# The rule was "origin/main, else master, else dev". In a repo that keeps main as
-# a RELEASE branch and dev as the integration branch, the first candidate puts the
-# whole release gap in the diff, so EVERY branch derives Tier 3 off somebody
-# else's migration — and Tier 3 has no escape hatch by design.
+# Taking the FIRST candidate that resolves — origin/main, else master, else dev —
+# breaks in a repo that keeps main as a RELEASE branch and dev as the integration
+# branch: the whole release gap lands in the diff, so every branch derives Tier 3
+# off somebody else's migration, and Tier 3 has no escape hatch by design.
 #
 # `git symbolic-ref refs/remotes/origin/HEAD` does not rescue it: it names the
 # branch a clone checks out, which is a different question from the branch work
@@ -1486,8 +1516,9 @@ git add -A >/dev/null 2>&1; git commit -qm mine >/dev/null 2>&1
 ok "the nearest candidate wins, not the first named" \
    "$(exloom_fork_point HEAD)" "$(git rev-parse origin/dev)"
 ok "...so the tier describes THIS change, not the release gap" "$(exloom_derive_tier HEAD)" "1"
-# The regression this guards: with origin/main chosen, the diff carries somebody
-# else's migration and the tier is 3 — unescapable, on a one-file change.
+# What the nearest-candidate rule prevents: with origin/main chosen, the diff
+# carries somebody else's migration and the tier is 3 — unescapable, on a
+# one-file change.
 ok "...where the old rule would have derived 3 off the migration" \
    "$(git diff --name-only "$(git merge-base HEAD origin/main)" HEAD | grep -c 'db/migrations')" "1"
 ok "...and the nearest-base diff does not contain it at all" \
@@ -1512,11 +1543,11 @@ echo "== criterion coverage is produced by the runner, never by a test's name ==
 # in the TEST NAME, and every runner that matters emits JUnit XML. One parser
 # instead of one per framework.
 #
-# The hole that makes a naive version worthless: a name is hand-written. A test
-# called "F-012/R-3/AC-2 — …" that asserts nothing passes, and would report the
-# criterion covered — the one number in exloom an author could forge by typing.
-# The proof run already answers it, at zero extra cost: a test that passes
-# against the BASE source does not notice the change, whatever its name says.
+# A name is hand-written, which is the hole a naive version leaves open: a test
+# called "F-012/R-3/AC-2 — …" that asserts nothing still passes, and would report
+# the criterion covered — the one number here an author could forge by typing.
+# The proof run closes it at no extra cost: a test that passes against the BASE
+# source does not notice the change, whatever its name says.
 subrepo criteria noorigin
 mkdir -p reports
 cat > "$REG/criteria/mkreport.sh" <<'MK'
@@ -1572,10 +1603,10 @@ ok "the receipt records a PROVED result alongside the criteria" \
 echo "== an additive change is provable by mutation, not by absence =="
 
 # The three-run proof is structurally unsatisfiable for a purely additive change:
-# every test exercising a new API fails to COMPILE at base. The script refuses to
-# call that proof — correctly — which left no way to prove an additive change at
-# all, and "additive, no behaviour change without opt-in" is the shape of most
-# new security controls.
+# every test exercising a new API fails to COMPILE at base. Refusing to call that
+# a proof is correct, but it leaves additive work unprovable — and "additive, no
+# behaviour change without opt-in" is the shape of most new security controls.
+# Mutation asks the same question without needing the code to be absent.
 subrepo mutation noorigin
 cat > "$REG/mutation/runner.sh" <<'MK'
 #!/usr/bin/env bash
@@ -1653,8 +1684,7 @@ cd "$WORK" || exit 1
 
 echo "== the spec linter: structural errors block, judgement calls warn =="
 
-# `reviewing-plans` asks nine questions in prose, and prose checks do not run.
-# The line between ERROR and WARN is the whole design: errors are structural and
+# The line between ERROR and WARN is the whole design. Errors are structural and
 # a machine cannot be wrong about them; warns are judgement and a machine
 # probably is. A judgement call that blocks is how a linter gets switched off.
 LINT="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/lint-spec.sh"
@@ -1696,8 +1726,8 @@ good "$REQ_OK"
 ok "a well-formed spec passes" "$(lintrc)" "0"
 ok "...silently" "$(lint | grep -c ERROR | head -1)" "0"
 
-# Gapless refs. An error rather than a warning, because the mistake showed up in
-# specs hand-written by the people who wrote the rule.
+# Gapless refs. An error rather than a warning: a ref is cited by plans, tests
+# and checklists, so a gap is a broken link rather than a matter of taste.
 good "$(printf '%s' "$REQ_OK" | sed 's/^R-1/R-2/')"
 ok "a spec starting at R-2 -> error" "$(lintrc)" "1"
 ok "...naming the expected ref" "$(lint | grep -c 'expected R-1, found R-2' | head -1)" "1"
@@ -1807,10 +1837,10 @@ cd "$WORK" || exit 1
 
 echo "== the proof binds the COMMAND it proved, not just its own presence =="
 
-# cmd_hash was written by prove-change-is-tested.sh and read by nothing. The only
-# assertion on it was `grep -c cmd_hash == 1` — the key exists. So a repo could
-# prove with a real suite and then point .claude/exloom-test-command at `true`,
-# and the receipt stayed valid. Presence is text; binding is behaviour.
+# The receipt records the hash of the pinned test command, and the gate compares
+# it. Without that comparison a repo could prove with a real suite, then point
+# .claude/exloom-test-command at `true`, and the receipt would stay valid.
+# Asserting the key merely EXISTS tests text; comparing it tests behaviour.
 proofrepo bindcmd 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
 printf 'echo 5\n' > src/calc.sh
 printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
@@ -1827,10 +1857,10 @@ ok "test command swapped after the proof -> blocked" "$(prf)" "2"
 
 echo "== security review is triggered by SURFACE, not only by tier =="
 
-# The review-gate skill promised security review for dependency and
-# deserialization changes; lib.sh required security-auditor only at Tier 3, so
-# both derived to Tier 1/2 and got none. The doc promised a review the code did
-# not require.
+# Dependency and deserialization changes derive to Tier 1 or 2, so requiring
+# security-auditor by tier alone would never reach them — and the skill promises
+# a security review for exactly those. The surface has to trigger it directly, or
+# the documentation promises a review the code does not require.
 subrepo secsurf
 git update-ref refs/remotes/origin/main "$(git rev-parse main)" 2>/dev/null
 SB="$(git rev-parse main)"
@@ -1861,10 +1891,10 @@ cd "$WORK" || exit 1
 
 echo "== test-vs-source classification: a production package named spec/ =="
 
-# Found in a real repo running v4.0.0. `*/spec/*` matched
-# src/main/java/.../orchestration/spec/SpeakerSelectionSpec.java, so the proof
-# reverted part of a production package and kept the rest — the tree would not
-# compile, and the run failed for a reason unrelated to the tests.
+# A production package can be named `spec`. If `*/spec/*` matched inside
+# src/main, the proof would revert part of a production package and keep the
+# rest: the tree would not compile, and the run would fail for a reason that has
+# nothing to do with the tests.
 PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
 istest() {   # istest <path> -> test|source, using the script's own function
   bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
@@ -1883,13 +1913,13 @@ ok "plain source -> source"  "$(istest 'internal/order/order.go')" "source"
 
 echo "== the shipped template must not block a branch that filled it honestly =="
 
-# Found by an end-to-end run, not by this suite: the template carried
-# `- <step name> — <one sentence why>` under Escape hatches, and both phrases are
-# in placeholder_re. A developer who correctly used NO escape hatch left the line
-# alone and the gate blocked, pointing at a section they were right not to fill.
-# Every branch would have hit it. The placeholder-coverage test above passes
-# either way, because it only asks whether each token is RECOGNISED — not whether
-# an honestly-completed checklist survives the scan.
+# A placeholder example left in the document BODY blocks every branch: a
+# developer who correctly used no escape hatch leaves the line alone, and the
+# gate then points at a section they were right not to fill.
+#
+# The placeholder-coverage test above cannot catch that. It asks whether each
+# token is RECOGNISED, not whether an honestly-completed checklist survives the
+# scan — which is a different question, and this is where it is asked.
 TPL="$HOOKS_ABS/../templates/review-checklist.md"
 for tier in 0 1 2 3; do
   filled="$(sed -e 's/<[^>]*>/filled/g' \
@@ -1906,9 +1936,9 @@ ok "no placeholder example outside a comment in Escape hatches" \
 
 echo "== reviewers are decoupled: only L1 must cover the shipped commit =="
 
-# Requiring every reviewer to approve the SAME commit is what produced the loop:
-# a fix cancels approvals from reviewers that were already satisfied, so N
-# reviewers chase a target that moves each time one is answered.
+# Requiring every reviewer to approve the SAME commit is what stops a loop
+# converging: a fix cancels approvals from reviewers that were already satisfied,
+# so N reviewers chase a target that moves every time one of them is answered.
 subrepo decouple
 DC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$DC")"
 DCV="$(exloom_verdict_dir "$DC")"; mkdir -p "$DCV"
@@ -1958,10 +1988,9 @@ rchk() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" >/dev
 
 rounds_at 2
 ok "round count is distinct reviewed commits" "$(exloom_round_count "$RC" HEAD)" "2"
-# `grep -c .` prints 0 AND exits 1 on no match, so the `|| printf 0` fallback fired
-# `grep -c .` prints 0 AND exits 1 on no match, so the `|| printf 0` fallback fired
-# too, and the answer was a two-line string. Every arithmetic test on it then
-# failed with a syntax error on stderr, at every push before the first review.
+# `grep -c .` prints 0 AND exits 1 on no match, so a `|| printf 0` fallback fires
+# too and the answer becomes a two-line string. Every arithmetic test on it then
+# fails with a syntax error, at every push before the first review.
 ok "no receipts at all -> exactly one zero, not two" \
    "$(exloom_round_count ".claude/reviews/no-such-branch.md" HEAD)" "0"
 ok "...and it survives an arithmetic test without erroring" \
@@ -1970,11 +1999,10 @@ ok "under the cap -> ordinary block, not the cap" "$(rchk)" "2"
 ok "...and the message is NOT the cap message" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 | grep -c 'Round cap reached' | head -1)" "0"
 
-# Seen in practice: four dispatches on disk, the cap did not fire, the
-# push went through with no prompt. Cause — the count read only the COMMITTED
-# ref, and nothing commits receipts until /review-complete says so. It answered 0
-# rather than erroring: fail-open in the mechanism whose only job is to notice
-# accumulation.
+# Counting only the COMMITTED ref answers 0 whenever receipts are still on disk —
+# which is most of the time, since nothing commits them until /review-complete
+# says so. The cap then never fires, and it fails OPEN in the one mechanism whose
+# only job is to notice accumulation.
 printf 'uncommitted\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r3 >/dev/null 2>&1
 printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
 ok "an UNCOMMITTED receipt still counts" "$(exloom_round_count "$RC" HEAD)" "3"
@@ -1983,12 +2011,12 @@ ok "...and is not double-counted once committed" "$(exloom_round_count "$RC" HEA
 
 # At the cap the gate BLOCKS and hands the session a question to put to the user.
 #
-# It used to print an "ask" decision instead, which the harness renders as
-# approve/cancel on the push itself. Cancel there is a tool refusal, not an
-# answer: the push died, the session had nothing to act on, and the person had to
-# retype what they wanted. A cap is a decision point, so it has to yield a
-# DECISION — which means named options, which only AskUserQuestion can render,
-# which is a session tool and not a hook capability.
+# Printing an "ask" decision instead would render as approve/cancel on the push
+# itself, and cancel there is a tool refusal rather than an answer: the push dies,
+# the session has nothing to act on, and the person retypes what they wanted. A
+# cap is a decision point, so it has to yield a DECISION — which means named
+# options, which only AskUserQuestion can render, and that is a session tool
+# rather than a hook capability.
 rounds_at 3
 ok "at the cap -> blocks (2), it does not prompt on the push" "$(rchk)" "2"
 capmsg() { exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null; }
@@ -2034,9 +2062,19 @@ ok "a pass over unchanged code IS a no-op" \
 ok "...and the cap report says so, rather than counting it" \
    "$(capmsg | grep -c 'ran against the same code as the pass before it' | head -1)" "1"
 
-# A recorded user answer stops the asking.
+# A recorded user answer stops the asking about ROUNDS, and only that. The last
+# receipt here is REJECTED, and "we have reviewed enough times" is not an answer
+# to "did anyone approve this".
 printf '\n## Escape hatches used\n- User approved at round cap — approved after 3 passes\n' >> "$RC"
 git add -A >/dev/null 2>&1; git commit -qm userok >/dev/null 2>&1
+ok "the answer does not waive a reviewer that REJECTED the code" "$(rchk)" "2"
+ok "...and says which question it actually answered" \
+   "$(capmsg | grep -c 'does not answer' | head -1)" "1"
+
+# With the reviewer satisfied, the same recorded answer ships the branch: the cap
+# is a counter a person answers, and their answer stands.
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$(git rev-parse HEAD)" >> "$RCV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm approved >/dev/null 2>&1
 ok "the user's recorded answer -> no further prompt" "$(rchk)" "0"
 python3 -c "
 import sys,re
@@ -2064,12 +2102,118 @@ ok "uncommitted config is ignored" "$(exloom_max_rounds)" "3"
 git add -A >/dev/null 2>&1; git commit -qm cap >/dev/null 2>&1
 ok "committed config is honoured" "$(exloom_max_rounds)" "5"
 
+echo "== a pipeline that records nothing is not a clean branch =="
+
+# When receipt capture degrades, every line records a launch and no conclusion,
+# and every mechanism downstream reads blank and renders blank as fine: the cap
+# report says no findings exist and every reviewer is satisfied. A person then
+# answers the cap question against that.
+subrepo blindpipe
+BCL=".claude/reviews/feat/plan.md"; BVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$BVD"; printf '**Tier:** 1\n' > "$BCL"
+printf 'x\n' >> src/base.txt; git add -A >/dev/null 2>&1; git commit -qm c1 >/dev/null 2>&1
+for i in 1 2 3 4; do
+  printf 'l%s\n' "$i" >> src/base.txt
+  git add -A >/dev/null 2>&1; git commit -qm "c$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","at":"2026-01-0%sT00:00:00Z","session":"s"}\n' \
+    "$(git rev-parse HEAD)" "$i" >> "$BVD/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+
+ok "blindness is detected"            "$(exloom_evidence_blind "$BCL" HEAD)" "4"
+ok "...and the note says what to do"  "$(exloom_evidence_blind_note "$BCL" HEAD | grep -c 'without a name')" "1"
+
+# An exemption for verdict-less receipts is meant to protect reviews that really
+# happened under an older version. It cannot distinguish those from reviews whose
+# outcome was never captured, so it is widest exactly where the evidence is
+# weakest.
+BOUT="$(exloom_check_verdicts "$BCL" 1 HEAD "$(git rev-parse HEAD)" "push" 2>&1)"; BRC=$?
+ok "a branch with no verdict anywhere does NOT ship" "$BRC" "2"
+ok "...and is reported as launched, not approved" \
+   "$(printf '%s' "$BOUT" | grep -c 'never reached exloom')" "1"
+ok "...with the pipeline warning attached" \
+   "$(printf '%s' "$BOUT" | grep -c 'EVIDENCE PIPELINE IS NOT RECORDING')" "1"
+
+# One real verdict is enough to clear the blindness warning: the pipeline is
+# demonstrably recording, and the remaining verdict-less lines are launches
+# rather than an absence of evidence about the branch as a whole.
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-09T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" >> "$BVD/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm real >/dev/null 2>&1
+ok "one real verdict clears the blindness" \
+   "$(exloom_evidence_blind "$BCL" HEAD >/dev/null 2>&1 && echo blind || echo ok)" "ok"
+
+echo "== the cap override answers the round question, and only that =="
+
+# Checked below the receipt evaluation, not above it. Returning early would let a
+# recorded 'merge as-is' waive the requirement that reviewers ran at all — which
+# is a different question, and one the person was never asked.
+subrepo capscope
+CCL=".claude/reviews/feat/plan.md"; CVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$CVD"
+printf '**Tier:** 1\n\n## Escape hatches used\n- User approved at round cap — the open items are acceptable\n' > "$CCL"
+for i in 1 2 3 4; do
+  printf 'c%s\n' "$i" >> src/base.txt
+  git add -A >/dev/null 2>&1; git commit -qm "c$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-0%sT00:00:00Z","session":"s"}\n' \
+    "$(git rev-parse HEAD)" "$i" >> "$CVD/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+COUT="$(exloom_check_verdicts "$CCL" 1 HEAD "$(git rev-parse HEAD)" "push" 2>&1)"; CRC=$?
+ok "a cap decision does not waive a missing review" "$CRC" "2"
+ok "...and says which question it actually answered" \
+   "$(printf '%s' "$COUT" | grep -c 'does not answer')" "1"
+
+# With the reviewers genuinely satisfied, the same decision ships the branch —
+# the cap is a counter a person answers, and their answer stands.
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-09T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" >> "$CVD/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
+exloom_check_verdicts "$CCL" 1 HEAD "$(git rev-parse HEAD)" "push" >/dev/null 2>&1
+ok "...but ships once the reviewers are real" "$?" "0"
+
+echo "== the status line stops driving the loop at the cap =="
+
+# exloom_gate_status runs after every reviewer completes, and a fix commit always
+# leaves the L1 receipt behind the tip — so an unconditional "covers an earlier
+# commit - re-run it" asks for another round on every pass, indefinitely. That
+# makes the status a motor for the loop the cap exists to stop.
+subrepo capstatus
+SCL=".claude/reviews/feat/plan.md"; SVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$SVD"; printf '**Tier:** 1\n' > "$SCL"
+for i in 1 2 3 4; do
+  printf 's%s\n' "$i" >> src/base.txt
+  git add -A >/dev/null 2>&1; git commit -qm "s$i" >/dev/null 2>&1
+  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"YES","at":"2026-01-0%sT00:00:00Z","session":"s"}\n' \
+    "$(git rev-parse HEAD)" "$i" >> "$SVD/l1-reviewer.json"
+done
+git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+SOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
+ok "past the cap the status says STOP"        "$(printf '%s' "$SOUT" | grep -c 'STOP -')" "1"
+ok "...and does not ask for another reviewer" "$(printf '%s' "$SOUT" | grep -c 're-run it')" "0"
+ok "...naming the pass count and the cap"     "$(printf '%s' "$SOUT" | grep -c '4 review passes (cap 3)')" "1"
+ok "...and hands over the three options"      "$(printf '%s' "$SOUT" | grep -c 'Merge as-is')" "1"
+
+# Under the cap it must still do its ordinary job, or the fix would just be a
+# mute button.
+subrepo undercap
+UCL=".claude/reviews/feat/plan.md"; UVD=".claude/reviews/feat/plan.verdicts"
+mkdir -p "$UVD"; printf '**Tier:** 1\n' > "$UCL"
+printf 'u1\n' >> src/base.txt; git add -A >/dev/null 2>&1; git commit -qm u1 >/dev/null 2>&1
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
+  "$(git rev-parse HEAD)" > "$UVD/l1-reviewer.json"
+printf 'u2\n' >> src/base.txt; git add -A >/dev/null 2>&1; git commit -qm u2 >/dev/null 2>&1
+UOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
+ok "under the cap it still reports a stale receipt" \
+   "$(printf '%s' "$UOUT" | grep -c 'covers an earlier commit')" "1"
+ok "...and does not say STOP" "$(printf '%s' "$UOUT" | grep -c 'STOP -')" "0"
+
 echo "== the bypass leaves a trace =="
 
-# EXLOOM_REVIEW_SKIP turns the gate off unconditionally and should. What was
-# wrong is that it left nothing behind: the skip was announced on stderr, which
-# scrolls past, so afterwards nothing could say which changes shipped around the
-# gate — not a person reading the repo, and not CI.
+# EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
+# announcement on stderr scrolls past, so without a committed trace nothing can
+# afterwards say which changes shipped around the gate — not a person reading the
+# repo, and not CI.
 subrepo bypassreceipt
 printf 'x\n' > f.txt
 git add -A >/dev/null 2>&1; git commit -qm f >/dev/null 2>&1

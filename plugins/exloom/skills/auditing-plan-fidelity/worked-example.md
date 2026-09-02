@@ -32,14 +32,31 @@ Result: 4 files planned+changed (expected). 0 files planned+unchanged. 1 file un
 
 ### Step 2: Acceptance Criteria Verification
 
-Criterion 1: "Rate limiting returns HTTP 429 when threshold exceeded."
-Status: **Verified.** Diff shows `rate-limiter.ts` returns `res.status(429).json({ error: 'Rate limit exceeded' })`. Test file includes assertion for 429 response.
+**The coverage check first**, in both directions:
 
-Criterion 2: "Rate limit state uses Redis for multi-instance support."
-Status: **Deviated.** Diff shows rate limiter uses an in-memory `Map` with TTL, not Redis. Check deviation log: not logged. This is silent drift on a core acceptance criterion.
+```bash
+comm -23 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' docs/exloom/specs/F-031-rate-limiting.md | sort -u) \
+         <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' docs/exloom/plans/2026-05-02-rate-limiting-plan.md | sort -u)
+```
 
-Criterion 3: "Rate limit window resets after 60 seconds."
-Status: **Unverified.** The diff shows a `windowMs: 60000` config value, which suggests 60-second windows, but actual reset behavior depends on runtime timing. Needs manual test with timed requests.
+Prints nothing — every criterion the spec defines is cited by a task, and every ref the plan cites is defined in the spec. No forgotten scope, no criterion invented at plan time. Then read what the proof run actually proved:
+
+```bash
+sed -n 's/.*"criteria":"\([^"]*\)".*/\1/p' .claude/reviews/feature/rate-limiting.verdicts/proof.json | tail -1
+```
+
+Returns `F-031/R-1/AC-1`. So of the three criteria, only one has a test that passes with the change and fails without it. That is not a verdict on its own, but it tells you which two to read hardest.
+
+Now each criterion, from the **spec**:
+
+`F-031/R-1/AC-1` — "Rate limiting returns HTTP 429 when the threshold is exceeded."
+Status: **Verified.** The diff shows `rate-limiter.ts` returning `res.status(429).json({ error: 'Rate limit exceeded' })`, and the test file asserts the 429. This is the one the proof receipt names.
+
+`F-031/R-2/AC-1` — "Rate limit state uses Redis, so limits hold across instances."
+Status: **Deviated.** The diff shows an in-memory `Map` with a TTL, not Redis. Not in the deviation log. This is silent drift on a core criterion — and note that the proof receipt's omission of this ref was the first hint.
+
+`F-031/R-3/AC-1` — "The rate limit window resets after 60 seconds."
+Status: **Unverified.** The diff carries a `windowMs: 60000` config value, which suggests 60-second windows, but the reset behaviour depends on runtime timing. Needs a manual test with timed requests.
 
 ### Step 3: Deviation Log Review
 
@@ -51,7 +68,7 @@ Missing: the Redis-to-memory change is not in the deviation log. This is a signi
 
 ### Step 4: Verdict
 
-**FAIL.** One unlogged deviation: acceptance criterion #2 (Redis for multi-instance support) was silently changed to in-memory storage. This affects production behavior and was not recorded.
+**FAIL.** One unlogged deviation: `F-031/R-2/AC-1` (Redis, so limits hold across instances) was silently changed to in-memory storage. This affects production behaviour and was not recorded.
 
 Blockers before code review can proceed:
 1. The executor must add a deviation log entry explaining why Redis was dropped and what triggered the decision during implementation.

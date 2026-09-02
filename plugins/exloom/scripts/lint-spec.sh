@@ -49,8 +49,8 @@ for f in "${FILES[@]}"; do
   # ---------- ref well-formedness and sequence ----------
   # Requirements:  "R-<n> · <type>"   Criteria: "AC-<n> · <level>"
   # Criteria are numbered within their requirement, so the counter resets at
-  # every R- line. A single flat counter was the first thing tried and it makes
-  # every spec with two requirements look broken.
+  # every R- line. A single flat counter across the document would report every
+  # spec with more than one requirement as broken.
   expect_r=1
   expect_ac=1
   seen_ac_for_current_r=0
@@ -114,8 +114,8 @@ for f in "${FILES[@]}"; do
   # CASE-SENSITIVE, and that is the whole trick. EARS writes the keyword in caps
   # (`WHEN a discount is submitted THE SYSTEM SHALL …`) at column 0; Gherkin
   # writes it in title case inside the criterion. Matching case-insensitively
-  # counted every requirement as its own criterion body, so a criterion that said
-  # only "It should work." passed.
+  # would count every requirement as its own criterion body, and a criterion
+  # reading only "It should work." would pass.
   n_ac="$(printf '%s\n' "$body" | grep -cE '^[[:space:]]*AC-[0-9]' || true)"
   n_when="$(printf '%s\n' "$body" | grep -cE '^[[:space:]]*(When|Then)\b' || true)"
   if [[ "${n_ac:-0}" -gt 0 && "${n_when:-0}" -lt "${n_ac:-0}" ]]; then

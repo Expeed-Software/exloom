@@ -1,6 +1,6 @@
 ---
 name: isolating-execution
-description: Use before executing a plan — puts the work in an isolated, gated workspace. At minimum a feature branch (so the review gate applies, since the hooks skip protected branches), or a dedicated worktree for heavier isolation. Run it first, before executing-handoff-plans or orchestrating-execution.
+description: Use before executing a plan — puts the work in an isolated, gated workspace. At minimum a feature branch (so the review gate applies, since the hooks skip protected branches), or a dedicated worktree for heavier isolation. Run it first, before executing-handoff-plans.
 ---
 
 # Isolating Execution
@@ -148,16 +148,17 @@ not do is call the branch "gated" when the marker isn't there.
 ## Why this is exloom's, not generic worktree advice
 
 Generic isolation protects your current branch. exloom's isolation exists to make
-the **enforced gate** apply: Level 1 is chosen specifically because the review-gate
-hooks skip protected branches, so putting the work on a feature branch is what
-turns the gate on. And at the high end, isolation is not one sandbox but a
-**fan-out** — parallel implementers each get their
-own worktree and gates each one's branch before integrating. Isolation here is
+the **enforced gate** apply: Level 1 is chosen specifically because the
+review-gate hooks skip protected branches, so putting the work on a feature
+branch is what turns the gate on. And at the high end, isolation is not one
+sandbox but a **fan-out** — parallel implementers each get their own worktree,
+and each branch is gated separately before it integrates. Isolation here is
 always in service of review, never tidiness alone.
 
 ## Integration
 
-- **Before:** `exloom:executing-handoff-plans` — run this first.
+- **Run this first**, before `exloom:executing-handoff-plans` — that skill needs
+  a gated branch to build on.
 - **Pairs with:** `exloom:review-gate` — the feature branch is what the gate
   protects.
 - **At finish:** integrate the branch and (for Level 2) remove the worktree.

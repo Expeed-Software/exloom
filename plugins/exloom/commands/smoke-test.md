@@ -69,7 +69,7 @@ chore(review): smoke test recorded for <branch-name>
 
 ## Step 7 — Tell the user
 
-Tell the user the smoke-test evidence was recorded and committed (`chore(review): smoke test recorded`). Then print what is still required for the declared tier (cross-layer contract check and adversarial review for Tier 2+, runbook and recovery plan for Tier 3) and suggest `/review-complete` when those are done.
+Tell the user the smoke-test evidence was recorded and committed (`chore(review): smoke test recorded`). Then print what is still required for the declared tier — the cross-layer contract check and adversarial review at Tier 2+, and at Tier 3 the security review, the runbook, and the two lines under "What a revert will not undo" — and suggest `/review-complete` when those are done.
 
 ## Refusals
 

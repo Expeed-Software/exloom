@@ -17,16 +17,16 @@ QA usually pastes a URL — from the board, a backlog, a sprint taskboard, a que
 - otherwise the numeric segment following `_workitems/edit/` (a trailing slash is not part of the ID).
 
 ```
-…/_workitems/edit/24073/                                          -> 24073
-…/_boards/board/t/apptor-webhook%20Team/Stories?workitem=24073    -> 24073
-…/_backlogs/backlog/apptor-webhook%20Team/Stories?workitem=23471  -> 23471
+…/_workitems/edit/10420/                                       -> 10420
+…/_boards/board/t/Checkout%20Team/Stories?workitem=10420       -> 10420
+…/_backlogs/backlog/Checkout%20Team/Stories?workitem=10517     -> 10517
 ```
 
 A bare ID is equally fine. The organisation comes from `az` defaults, or from the URL host when working across organisations.
 
 Never search for the story, never list projects, never fetch unrelated items. The scope of a run is exactly one story.
 
-**Echo what you resolved** — `24073 — Provider self-signup UX (apptor-webhook)` — before doing anything else. This is what makes an unrecognised URL shape harmless: either QA sees the right story named back, or they correct you immediately. It costs one line and removes the need to anticipate every URL form.
+**Echo what you resolved** — `10420 — Guest checkout address validation (Checkout)` — before doing anything else. This is what makes an unrecognised URL shape harmless: either QA sees the right story named back, or they correct you immediately. It costs one line and removes the need to anticipate every URL form.
 
 ## 2. Fetch the story
 

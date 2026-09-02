@@ -45,6 +45,19 @@ Show the proposed tier, the rule that triggered it, and the `git diff --stat` ou
 
 Two of the rules above are judgment the hook cannot make, so it derives a lower floor and leaves the decision here: deployment/k8s/helm/docker paths floor at Tier 2 (raise to 3 when the change is flag- or prod-related), and "frontend AND backend changed" or "more than one module" need stack knowledge a file list does not carry. Apply them yourself.
 
+**The repository may add rules of its own.** A committed `.exloom.yml` names path globs that this repo treats as Tier 2 or Tier 3 — its own words for risk, such as `identity`, `iam` or `rbac`, which the list above does not know. Those rules only ever raise the tier. Rather than reproducing them here, take the tier from the derivation itself, which already merges both sources:
+
+```bash
+# ${CLAUDE_PLUGIN_ROOT} is set for plugin.json hooks, NOT in your shell.
+# Resolve the installed plugin instead; several versions live in the cache,
+# so take the highest.
+LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
+. "$LIB"
+exloom_derive_tier HEAD; exloom_tier_reasons
+```
+
+If that disagrees with the rules above, it is right and they are the summary — it is the same function the push gate runs.
+
 ## Step 2b — Propose a lane
 
 The tier is derived from the diff. The **lane** is the user's call, and it decides how much happens *before* the code — not how deep the review goes.
@@ -79,8 +92,9 @@ plugin versions stay in the cache and `find` returns them path-sorted, so
 the gate checks for, so the branch is blocked by a check its template never
 mentioned. `sort -V | tail -1` takes the highest version.
 
-Sanity-check the file you copied: it must contain `## Re-finds` and
-`## Provenance`. If it does not, you have an old template.
+Sanity-check the file you copied: it must contain `## Re-finds`, `## Provenance`,
+and a `**Tier derived from:**` field. If any is missing you have an old template —
+go back and take the highest version.
 
 Substitute:
 
@@ -90,10 +104,13 @@ Substitute:
 - **Tier derived from** → the output of `exloom_tier_reasons`, one line per rule, as `` `path` → `rule` → source ``. If the tier came from the built-in rules with no repository policy in play, write `built-in defaults only`. Get it by sourcing the hook library and running the derivation:
 
   ```bash
-  . "$(dirname "$(git rev-parse --git-common-dir)")/.claude/plugins/exloom/hooks/lib.sh" 2>/dev/null \
-    || . "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+  LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
+  . "$LIB"
   exloom_derive_tier HEAD >/dev/null; exloom_tier_reasons
   ```
+
+  Same `sort -V | tail -1` rule as the template above, and for the same reason —
+  several plugin versions live in the cache at once.
 
   Write the reasons down even when they are obvious. This is the line a PR reviewer reads when they want to know why a two-file change is Tier 3, and the line CI reads when it re-derives the tier and wants to compare.
 - Blast radius line → "N files changed, M modules touched, user-facing: yes/no" from the diff analysis.

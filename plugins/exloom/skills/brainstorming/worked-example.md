@@ -81,15 +81,28 @@ dropped (acceptable given 30-second tolerance).
 **Non-goals:** Notification preferences, persistent history, mobile push,
 read/unread tracking beyond the current browser session.
 
-### Steps 6-8: Write, Review, Transition
+### Steps 6-8: Write, Lint, Review, Transition
 
-Write spec to `docs/exloom/specs/2026-04-12-dashboard-notifications.md`.
-Self-review: placeholder scan finds none. Consistency check confirms component
-list matches data flow. Brownfield check confirms the spec references existing
-`EmailNotificationService` and justifies the only new pattern (SSE) as the
-minimal addition to the existing event detection infrastructure. User reviews
-spec, confirms non-goals are acceptable, approves. Transition to
-`exloom:planning-for-handoff`.
+Write the spec to `docs/exloom/specs/F-018-dashboard-notifications.md` — the next
+free `F-` number in that directory. Each requirement takes an EARS shape and
+carries at least one criterion, so `F-018/R-2/AC-1` is citable by the plan and by
+the tests that follow.
+
+Lint it:
+
+```bash
+LINT="$(find ~/.claude/plugins -path '*exloom*/scripts/lint-spec.sh' | sort -V | tail -1)"
+bash "$LINT" docs/exloom/specs/F-018-dashboard-notifications.md
+```
+
+It reports one warning: the spec mentions "payments" but states no `unwanted`
+requirement. That one is real — a payment notification that fires twice, or fires
+for another tenant's order, is the defect worth writing down. Add
+`IF the recipient is not the order's owner THEN THE SYSTEM SHALL NOT deliver the
+event`, and re-run to a clean exit.
+
+The user then reviews the spec, confirms the non-goals are acceptable, and
+approves. Transition to `exloom:planning-for-handoff`.
 
 **The brownfield payoff:** The existing `EmailNotificationService` already has
 all event detection logic — it knows when orders change status, when payments

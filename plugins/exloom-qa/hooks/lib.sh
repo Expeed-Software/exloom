@@ -82,7 +82,7 @@ except Exception:
 
 # Split a shell command into segments on newline, ; && || and |, IGNORING those
 # characters when they appear inside quotes. Quote-awareness is not optional:
-# a Test Case tag value is "exloom-qa:24501; exloom-qa:24501:TC-007; Negative",
+# a Test Case tag value is "exloom-qa:10420; exloom-qa:10420:TC-007; Negative",
 # so a naive split on ';' severs the tag from its own command and the gate then
 # denies a properly tagged, approved case.
 # Without a usable Python, emit the command unsplit — coarser, and fail-closed.

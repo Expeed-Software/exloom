@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Refuse a commit message that carries private context into this public repo.
+#
+# Commit messages are the one surface that cannot be corrected after the fact:
+# fixing one means rewriting pushed history. So the check has to run before the
+# commit exists, not after.
+#
+# Enable once, per clone:
+#     git config core.hooksPath .githooks
+set -e
+exec bash "$(dirname "$0")/../scripts/validate-plugin.sh" --commit-msg "$1"

@@ -61,10 +61,9 @@ except Exception:
 #   {"agent_type":"exloom:l1-reviewer","agent_id":"...",
 #    "last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
 #
-# Capturing at PostToolUse alone is why every real dispatch recorded no verdict,
-# and why a REJECTED review was indistinguishable from an approval on a live
-# branch. This is the cause; the receipt-shape change in 4.0.2 was only the
-# compensation.
+# Both registrations are required. Listening on PostToolUse alone records every
+# dispatch and no verdict, which makes a REJECTED review indistinguishable from
+# an approval.
 EVENT="$(_field hook_event_name)"
 if [[ "$EVENT" == "SubagentStop" ]]; then
   SUBAGENT="$(_field agent_type)"
@@ -82,9 +81,9 @@ fi
 
 # Which reviewer is this? Suffix match, so both `l1-reviewer` and the namespaced
 # `exloom:l1-reviewer` record against the same canonical name. An agent that is
-# not one of exloom's four reviewers leaves no receipt — dispatching a
-# general-purpose agent to "do an L1 review" deliberately does not satisfy the
-# gate, because the gate cannot tell what such an agent was asked to do.
+# not one of exloom's reviewers leaves no receipt: dispatching a general-purpose
+# agent to "do an L1 review" deliberately does not satisfy the gate, because
+# nothing here can tell what such an agent was actually asked to do.
 AGENT=""
 case "$SUBAGENT" in
   *l1-reviewer)          AGENT="l1-reviewer" ;;
@@ -96,43 +95,42 @@ esac
 # ---------- which repo is this review ABOUT? ----------
 # NOT necessarily the one the session is sitting in. A reviewer dispatched at a
 # worktree, or at a second repo in a multi-repo session, completes while the
-# session's cwd is somewhere else entirely - and this used to resolve the repo
-# from cwd, find no gate marker there, and exit 0 in silence.
+# session's cwd is somewhere else entirely.
 #
-# The result was a deadlock with no diagnosis: the gate reported "never
-# dispatched" and re-dispatching could not help, because every dispatch wrote to
-# the wrong repo. exloom:isolating-execution recommends a worktree for isolation,
-# so exloom's own advice put people in the state where its receipts stopped
-# working. Found by reviewing a real branch in a worktree.
+# Resolving from cwd alone would find no gate marker there and exit in silence,
+# producing a deadlock with no diagnosis: the gate reports "never dispatched",
+# and re-dispatching cannot help because every dispatch writes to the wrong repo.
+# exloom:isolating-execution recommends a worktree for isolation, so that path is
+# well travelled.
 #
 # Resolution order, first gate-enabled repo wins:
 #   1. the session's cwd, which is right for the ordinary single-repo case;
 #   2. any absolute path the REPORT cites, mapped back to its repo root.
 # The reviewer cites file:line for every finding, so (2) is the review's own
-# evidence about what it read. It cannot manufacture a receipt for a review that
-# did not happen - this hook only runs on a real completion - it only says where
-# the review it just observed belongs.
+# evidence about what it read. This cannot manufacture a receipt for a review
+# that did not happen — the hook only runs on a real completion. It only decides
+# where the review it just observed belongs.
 _repo_is_gated() { [[ -n "$1" && -d "$1" && -f "$1/.claude/exloom-gate.enabled" ]]; }
 
 _repo_of_path() {
-  # Reduce to a DIRECTORY. A cite names a file, and the first version kept the
-  # path whenever it existed and then required a directory — so every real cite,
-  # which is exactly the case that matters, failed the check.
+  # Reduce to a DIRECTORY. A cite names a file, so testing the path itself for
+  # directory-ness would reject every real cite — which is the only case that
+  # matters here.
   local d="$1"
   [[ -d "$d" ]] || d="$(dirname "$d")"
   [[ -d "$d" ]] || return 1
   git -C "$d" rev-parse --show-toplevel 2>/dev/null
 }
 
-# Absolute paths named anywhere in the payload, Windows or POSIX. `tr`, not sed:
-# the payload's backslashes are JSON-escaped, and every sed form that survives
-# both this script's quoting and the shell's got the escape count wrong.
+# Absolute paths named anywhere in the payload, Windows or POSIX. `tr` rather
+# than sed: the payload's backslashes are JSON-escaped, and getting the escape
+# count right through both this script's quoting and the shell's is a losing
+# game. `\134` names the backslash, which tr warns about as a literal.
 _cited_paths() {
-  # Squeeze BEFORE matching: a JSON payload escapes each backslash, so a Windows
+  # Squeeze slashes BEFORE matching. JSON escapes each backslash, so a Windows
   # path arrives as `E:\\Projects` and becomes `E://Projects` here — at which
-  # point `[A-Za-z]:/` no longer matches and the drive letter is silently lost,
-  # leaving `/Projects/...` that resolves to nothing. `\134` rather than a
-  # literal backslash, which tr warns about.
+  # point `[A-Za-z]:/` no longer matches, the drive letter is silently lost, and
+  # what is left is a `/Projects/...` that resolves to nothing.
   printf '%s' "$HOOK_INPUT" \
     | tr '\134' '/' | tr -s '/' \
     | grep -oE '([A-Za-z]:)?/[A-Za-z0-9_.@+-][A-Za-z0-9_./@+-]{3,240}' \
@@ -184,12 +182,13 @@ SESSION="$(_safe "$SESSION")"
 [[ -n "$SUBAGENT" ]] || exit 0
 
 # ---------- read the reviewer's report ----------
-# Shape-agnostic, and with a python3 fallback for the same reason every other
-# extractor in this codebase has one: jq is NOT present by default on Windows Git
-# Bash, and without a fallback the scan silently degraded to the RAW PAYLOAD —
-# which contains `tool_input.prompt`, i.e. author-written text. A dispatch prompt
-# that merely quoted the required output format flipped a rejection into an
-# approval. The raw scan is now a last resort AND has tool_input removed first.
+# Shape-agnostic, with a python3 fallback for the same reason every other
+# extractor here has one: jq is not present by default on Windows Git Bash.
+#
+# There is deliberately NO raw-payload fallback. The payload contains
+# `tool_input.prompt` — author-written text — so a scan that degraded to it would
+# read a dispatch prompt quoting the required output format as the reviewer's own
+# verdict, turning a rejection into an approval.
 _response_text() {
   local out=""
   # SubagentStop hands the finished report over directly. Preferred whenever
@@ -226,12 +225,11 @@ try:
 except Exception:
     pass' 2>/dev/null || true)"
   fi
-  # NO raw-payload fallback. Stripping tool_input with a brace-delimited pattern
-  # stops at the first `}`, so any prompt containing a brace (a code sample, a
-  # ${...}, JSON) left author-written text in the scan, and a prompt quoting the
-  # required output format then supplied the verdict. Reachable exactly where it
-  # matters: Git Bash with neither jq nor python3. UNKNOWN is the honest answer,
-  # and it blocks rather than opens.
+  # Nothing further. Stripping tool_input from the raw payload cannot be done
+  # safely with a brace-delimited pattern — it stops at the first `}`, so any
+  # prompt containing a brace (a code sample, a ${...}, JSON) leaves
+  # author-written text in the scan. Where neither jq nor python3 exists, UNKNOWN
+  # is the honest answer, and UNKNOWN blocks.
   printf '%s' "$out"
 }
 
@@ -246,13 +244,13 @@ SCAN="$(printf '%s' "$SCAN" | sed 's/\\n/\n/g')"
 # and no report at all — the reviewer has not run yet.
 #
 # That must NOT be recorded as UNKNOWN. UNKNOWN means "the reviewer stated no
-# verdict", which correctly blocks. This is "exloom could not observe a verdict
-# at this event", which is our blindness, not the reviewer's omission. Recording
-# UNKNOWN here made every real dispatch block with no path forward.
+# verdict", which correctly blocks. This is "no verdict was observable at this
+# event" — exloom's blindness, not the reviewer's omission — and recording it as
+# UNKNOWN would block every async dispatch with no path forward.
 #
-# So when there is no report text, omit the verdict keys entirely and record what
-# WAS observed: a reviewer was dispatched at this commit. That is the receipt
-# shape exloom wrote before it recorded verdicts, and the gate grandfathers it.
+# So when there is no report text, omit the verdict keys entirely and record only
+# what WAS observed: a reviewer was launched at this commit. The gate treats such
+# a line as a launch, never as an approval.
 REPORT_SEEN=1
 [[ -n "$(printf '%s' "$SCAN" | tr -d '[:space:]')" ]] || REPORT_SEEN=0
 
@@ -266,12 +264,11 @@ REPORT_SEEN=1
 # CHANGES` is not an approval); and take the LAST match, not the first (a report
 # quoting its own template would otherwise be scored on the template).
 VERDICT="UNKNOWN"
-# Decoration is stripped from the WHOLE line before matching. Tolerating it only at
-# the edges left `VERDICT: **APPROVED**`, `**VERDICT:** REJECTED (2 items)`,
-# `- **VERDICT:** APPROVED` and `VERDICT: APPROVED.` all recording UNKNOWN — only the
-# single form the fixture covered worked, so the parser was fitted to its own test a
-# second time. A missed APPROVED is a false block, and the block message answers a
-# false block by naming EXLOOM_REVIEW_SKIP.
+# Decoration is stripped from the WHOLE line before matching, not just its edges.
+# `VERDICT: **APPROVED**`, `**VERDICT:** REJECTED (2 items)`, `- **VERDICT:**
+# APPROVED` and `VERDICT: APPROVED.` are all forms a model actually writes, and
+# an edge-only strip records every one of them as UNKNOWN. A missed APPROVED is a
+# false block, and a false block is answered by reaching for the bypass.
 VLINE="$(printf '%s\n' "$SCAN" \
   | tr -d '*_`#>' \
   | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:].]*$//' \
@@ -304,17 +301,16 @@ esac
 #     - path/to/file.ext:123 — one sentence problem statement
 #
 # The severity is on the HEADING; the finding line carries only a cite. Requiring
-# both on one line records nothing from any shipped agent.
-# The round is DERIVED, not read from a state file. It used to come from
-# `.claude/reviews/<branch>.state`, which nothing in exloom ever wrote — so every
-# finding was recorded as round 0 and two things silently stopped working: the
-# severity trend collapsed to a single bucket, and the same defect found in three
-# passes counted as three open criticals.
+# both on one line would record nothing from any shipped agent.
 #
-# A round is a distinct reviewed commit, which is what exloom_round_count already
-# means by it. Computed here from l1-reviewer's receipt so every agent's findings
-# agree on which pass they belong to, and +1 because this dispatch is the pass
-# being recorded.
+# The round is DERIVED, never read from a state file. A round is a distinct
+# reviewed commit — the same thing exloom_round_count means by it — computed here
+# from l1-reviewer's receipt so that every agent's findings agree on which pass
+# they belong to, plus one because this dispatch is the pass being recorded.
+#
+# Getting this wrong is quiet: every finding lands in one bucket, the severity
+# trend flattens, and the same defect found in three passes counts as three open
+# criticals.
 ROUND="$(cat "${VDIR}/l1-reviewer.json" 2>/dev/null \
   | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
   | grep -v "^${HEAD_SHA}$" | sort -u | awk 'END{print NR+1}')"
@@ -335,8 +331,8 @@ while IFS= read -r fline; do
       item_sev=""
       cur_scope="IN-SCOPE"
       # Normalised across agents: l1 says Critical/Important/Minor, adversarial
-      # says Blocking, security says High/Medium/Low. Unnormalised, the same
-      # defect reported by two reviewers never matched as a re-find.
+      # says Blocking, security says High/Medium/Low. Without normalising, the
+      # same defect reported by two reviewers never matches as a re-find.
       case "$head_txt" in
         *non-blocking*|*advisory*)                 cur_sev="LOW" ;;
         *critical*|*blocking*|*" high"*|*"(high"*) cur_sev="HIGH" ;;
@@ -344,9 +340,9 @@ while IFS= read -r fline; do
         *minor*|*" low"*|*"(low"*)                 cur_sev="LOW" ;;
       esac
       # A pre-existing section carries no severity word ("## Pre-existing
-      # (backlog, not this branch)"), so without this its findings were dropped
-      # entirely and the ledger's pre-existing column was permanently zero. They
-      # are recorded — they are simply never blocking.
+      # (backlog, not this branch)"), so without this its findings are dropped
+      # entirely and the ledger's pre-existing column stays permanently zero.
+      # They are recorded; they are simply never blocking.
       case "$head_txt" in
         *pre-existing*) cur_scope="PRE-EXISTING"; [[ -n "$cur_sev" ]] || cur_sev="MED" ;;
       esac
@@ -355,9 +351,9 @@ while IFS= read -r fline; do
   esac
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   if [[ -z "$cite" ]]; then
-    # No cite: if the line names a severity, remember it for the lines that follow.
-    # security-auditor emits `- [severity: High] [category]` and puts the cite on
-    # the NEXT line, so a per-line-only rule recorded nothing from it.
+    # No cite: if the line names a severity, remember it for the lines that
+    # follow. security-auditor emits `- [severity: High] [category]` and puts the
+    # cite on the NEXT line, so a per-line-only rule records nothing from it.
     case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in
       *severity:*critical*|*severity:*high*|*'[critical]'*|*'[high]'*) item_sev="HIGH" ;;
       *severity:*medium*|*'[medium]'*|*important*)                     item_sev="MED" ;;
@@ -367,11 +363,11 @@ while IFS= read -r fline; do
     continue
   fi
 
-  # Severity from the heading, else from the LINE. Requiring a severity-bearing
-  # heading meant cross-layer-auditor (`## Grep 1 — Orphan fields`),
-  # security-auditor (`## Findings`, severity per line) and plan-reviewer
-  # (`REJECTED items:`) recorded zero findings each — three of five reviewers,
-  # with a blocking re-find gate reading nothing.
+  # Severity from the heading, else from the LINE. Not every reviewer puts it in
+  # a heading: a cross-layer section reads `## Grep 1 — Orphan fields`, and
+  # security-auditor uses `## Findings` with the severity on each line. Requiring
+  # a severity-bearing heading would record nothing from either, leaving the
+  # blocking re-find gate reading an empty ledger.
   line_sev=""
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in
     *critical*|*blocking*|*severity:\ high*|*\[high\]*|*" high "*) line_sev="HIGH" ;;
@@ -394,10 +390,10 @@ while IFS= read -r fline; do
   printf '%s' "$fline" | grep -qiE 'IN-SCOPE'     && scope="IN-SCOPE"
 
   file="${cite%%:*}"
-  # Fingerprint from the text AFTER the cite is removed. Keeping the cite meant
-  # the path dominated the 48-character window, so two unrelated findings in one
-  # deep-path file collapsed into a fabricated re-find, and a moved file never
-  # matched itself.
+  # Fingerprint from the text AFTER the cite is removed. Keeping the cite lets a
+  # long path dominate the 48-character window, so two unrelated findings in one
+  # deeply-nested file collapse into a fabricated re-find, and a file that moved
+  # never matches itself.
   text="$(printf '%s' "$fline" | sed "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||g" \
           | tr -cd 'A-Za-z' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
   fp="$(printf '%s|%s|%s' "$sev" "$(basename "$file")" "$text" | tr -cd 'A-Za-z0-9|._-')"
@@ -415,19 +411,18 @@ fi
 # ---------- do not append a line that adds nothing ----------
 # SubagentStop fires on EVERY turn the reviewer stops on, not only its last one.
 # A reviewer that reads eight files stops eight times, and only the final stop
-# carries the report — the other seven hand over an intermediate message with no
-# VERDICT line, which scored UNKNOWN and was appended verbatim. Observed in the
-# field: 18 lines for one commit, 17 of them UNKNOWN, one REJECTED.
+# carries the report; the rest hand over intermediate messages with no VERDICT
+# line, each scoring UNKNOWN. Appended unconditionally, one commit accumulates a
+# long run of UNKNOWN lines around the single real verdict.
 #
-# The gate read those correctly (it takes the strongest verdict for the commit,
-# not the last line), so this was never a wrong decision — but a receipt file
-# that is 90% noise cannot be read by a human, and any future reader that scans
-# it newest-first would invert the answer.
+# The gate reads that correctly — it takes the strongest verdict for the commit
+# rather than the last line — so this is legibility rather than a wrong decision.
+# But a receipt file that is mostly noise cannot be read by a person, and a
+# reader scanning it newest-first would invert the answer.
 #
-# So the append is now conditional on the line being NEW INFORMATION for this
-# commit. Nothing else changes: the first UNKNOWN for a commit is still
-# recorded, and still blocks, because a reviewer that states no verdict has not
-# approved anything.
+# So the append is conditional on the line being NEW INFORMATION for this commit.
+# The first UNKNOWN for a commit is still recorded and still blocks, because a
+# reviewer that states no verdict has not approved anything.
 _recorded_for_head() {
   # $1: a JSON fragment to look for on a line already naming this HEAD.
   local f="${VDIR}/${AGENT}.json"
@@ -442,10 +437,9 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
     exit 0
   fi
   # `"dispatch":true` marks the line as an observation of a LAUNCH, never of a
-  # conclusion. The gate must not let it vouch for anything: receipts written
-  # before exloom recorded verdicts also carry no verdict key, and without a
-  # marker separating the two, a launch line is indistinguishable from a genuinely
-  # old receipt and is grandfathered through as approval.
+  # conclusion, so a reader of the receipt file can tell the two apart at a
+  # glance. The gate refuses any verdict-less line regardless; the marker is what
+  # lets a message name the cause rather than reporting a stale approval.
   printf '{"agent":"%s","subagent_type":"%s","head":"%s","dispatch":true,"at":"%s","session":"%s"}\n' \
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
     >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
@@ -486,7 +480,7 @@ echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${A
 
 # WHERE THE GATE STANDS, printed here rather than only when someone runs
 # /review-complete. A session that dispatches reviewers by hand gets the same
-# findings as the command, so the two feel equivalent and nothing contradicts
+# findings as the command, so the two feel equivalent, and nothing contradicts
 # that until the push is refused — by which point the tier was never derived, a
 # required reviewer was never run, and the checklist still holds placeholders.
 # Saying it at every completion removes the reason to defer the command.
@@ -494,8 +488,8 @@ _LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib.sh"
 if [[ -r "$_LIB" ]]; then
   # shellcheck source=/dev/null
   # `2>&1 >/dev/null` in THIS order: stderr goes to the pipe, then stdout goes to
-  # /dev/null. Reversing it sends both to /dev/null and the status vanishes -
-  # easy to "tidy" into being wrong, so it is spelled out here.
+  # /dev/null. Reversed, both go to /dev/null and the status vanishes — easy to
+  # "tidy" into being wrong, so it is spelled out.
   . "$_LIB" 2>/dev/null && exloom_gate_status "$BRANCH" "$HEAD_SHA" 2>&1 >/dev/null | cat >&2
 fi
 exit 0

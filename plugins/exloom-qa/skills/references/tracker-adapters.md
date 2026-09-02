@@ -83,7 +83,7 @@ Every published case carries **two** provenance tags plus its test types:
 System.Tags=exloom-qa:<story-id>; exloom-qa:<story-id>:TC-<nnn>; <Test Type>; <Test Type>
 ```
 
-Example: `exloom-qa:24501; exloom-qa:24501:TC-007; Negative; Validation`
+Example: `exloom-qa:10420; exloom-qa:10420:TC-007; Negative; Validation`
 
 Both tags are required. WIQL `CONTAINS` on `System.Tags` matches **whole tags, not substrings** — verified. Without the separate story-level tag there is no way to enumerate a story's published cases in one query, only to look up TCs whose ids you already know.
 

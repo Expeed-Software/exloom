@@ -8,8 +8,8 @@
 #
 # The command is split into segments on ; && || | and newlines, and each is
 # classified independently. A compound command that reads a story AND creates a
-# case is judged on the create, not on the whole blob — scanning the blob made
-# read-only queries collide with write patterns elsewhere in the same line.
+# case is judged on the create, not on the whole blob: scanning the blob lets a
+# read-only query collide with a write pattern elsewhere on the same line.
 #
 # Exit codes:
 #   0  — allow (no segment is a gated tracker write)
@@ -50,9 +50,9 @@ classify_segment() {
   # Is this segment an Azure DevOps command at all?
   #
   # The command must START the segment (after optional VAR=value assignments).
-  # Merely CONTAINING "az boards ..." is not enough: prose mentions it — commit
-  # messages, documentation, this comment. An unanchored match blocked a commit
-  # whose message described the gate, which is a false positive with no upside.
+  # Merely CONTAINING "az boards ..." is not enough — prose mentions it too, in
+  # commit messages, documentation, and this comment. An unanchored match denies
+  # a commit whose message merely describes the gate.
   local prefix='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+)?'
   local is_ado=0
   printf '%s' "$seg" | grep -Eq "${prefix}az[[:space:]]+(boards|devops)([^[:alnum:]_]|$)" && is_ado=1
@@ -123,7 +123,7 @@ classify_segment() {
   if [[ -z "$tag_parts" ]]; then
     exloomqa_deny \
       "This writes a Test Case with no exloom-qa provenance tag, so it cannot be matched to an approved case." \
-      "Publish through /qa-test-publish, which tags every case as
+      "Publish through the publishing-test-cases skill, which tags every case as
   exloom-qa:<story-id>; exloom-qa:<story-id>:TC-<nnn>"
   fi
 
@@ -135,18 +135,18 @@ classify_segment() {
   if [[ ! -f "$artifact" ]]; then
     exloomqa_deny \
       "No exloom-qa artifact found for story ${story_id} (expected ${artifact})." \
-      "Run /qa-test-init ${story_id}, then /qa-test-review to generate and approve cases."
+      "Run the capturing-story-context skill for story ${story_id}, then generating-test-cases and reviewing-test-coverage to generate and approve them."
   fi
   if ! awk '/^## Approval Record/{f=1;next} /^## /{f=0} f' "$artifact" | grep -qiE '^[[:space:]]*Approved:'; then
     exloomqa_deny \
       "${artifact} has no approval record — no test case for story ${story_id} has been approved." \
-      "Run /qa-test-review and approve the cases you want published."
+      "Run the reviewing-test-coverage skill and approve the cases you want published."
   fi
   if ! exloomqa_is_approved "$artifact" "$tc_id"; then
     exloomqa_deny \
       "${tc_id} is not in the approved list for story ${story_id}." \
       "Only cases named in the Approval Record of ${artifact} may be published.
-Re-run /qa-test-review to approve ${tc_id} if it should ship."
+Re-run the reviewing-test-coverage skill to approve ${tc_id} if it should ship."
   fi
   return 0
 }

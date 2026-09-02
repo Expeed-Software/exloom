@@ -120,8 +120,7 @@ Use this when the repo has no code yet or only scaffolding.
 
 2. **Pick template.** Select the matching template from `../../assets/claude-md-templates/`. If no template matches the stated stack, use `default.md` and fill it in manually.
 
-3. **Fill template.** Add the project name, description, and team context. Apply all the baselines — there are no existing conventions to conflict with. Include an empty Overrides section with a comment: `
-`.
+3. **Fill template.** Add the project name, description, and team context. Apply all the baselines — there are no existing conventions to conflict with. Leave the Overrides section in place but empty, with a line saying what it is for: `_(Empty by default — record here any baseline this repo deliberately departs from, with the reason.)_`
 
 4. **Commit with permission.** Propose the commit message `docs: add CLAUDE.md for [project name]` and wait for user approval before committing.
 
@@ -216,12 +215,14 @@ If no template matches, use `default.md` and fill in detected conventions manual
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 See [worked-example.md](worked-example.md).
+
 ## Integration
 
-- **You arrive here from:** starting work on a new-to-you repo that has no CLAUDE.md exists and recommends creating one.
+- **You arrive here from:** starting work on a repo that is new to you and has no CLAUDE.md, or one whose CLAUDE.md has drifted from what the code now does.
 - **You leave here toward:** the CLAUDE.md is committed and becomes the project's working constitution. Future skills read it for project context — every other skill benefits from a well-authored CLAUDE.md.
 - **If the CLAUDE.md reveals a baseline conflict worth standardizing:** route to `exloom:capturing-learnings` so the conflict, its context, and its resolution are preserved for future projects facing the same situation.
 - **Why it matters:** CLAUDE.md is the first thing read when anyone — person or model — picks the repo up cold. A thorough one directly improves how fast someone switches into the project with full Claude assistance.

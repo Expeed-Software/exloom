@@ -48,20 +48,21 @@ case "$TOOL" in
   Bash)
     CMD="$(_tool_input command)"
     [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
-    # \r as well: exloom_tool_input normalises CRLF, but the raw-payload fallback
-    # on line 78 does not, and a lone CR leaves the last word of every line as
-    # `word\r` — so command-position anchors and terminator matches never fire.
+    # `\r` as well as `\n`: exloom_tool_input normalises CRLF, but the
+    # raw-payload fallback above does not, and a lone CR leaves the last word of
+    # every line as `word\r`, so command-position anchors never fire.
     CMD="${CMD//$'\n'/ }"; CMD="${CMD//$'\r'/ }"; CMD="${CMD//$'\t'/ }"
-    # Match TARGETS, not content: heredoc bodies and `-m` messages are stripped so
-    # a command that merely NAMES the directory is allowed. Over-blocking is what
-    # teaches people to reach for EXLOOM_REVIEW_SKIP.
+    # Match TARGETS, not content. Heredoc bodies and `-m` messages are stripped
+    # so that a command which merely NAMES the directory is allowed;
+    # over-blocking is what teaches people to reach for EXLOOM_REVIEW_SKIP.
     SCAN_CMD="$(exloom_strip_heredocs "$CMD")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E "s/(-m|--message=?)[[:space:]]*'[^']*'//g")"
     SCAN_CMD="$(printf '%s' "$SCAN_CMD" | sed -E 's/(-m|--message=?)[[:space:]]*"[^"]*"//g')"
-    # Destroying the whole reviews tree names neither the verdicts dir nor the
-    # state file, so it needs its own arm. The verb must be in COMMAND position
-    # and the path must be named: `grep -rn rm .claude/reviews` is read-only, and
-    # a bare-verb heuristic blocked `rm -f build.log && tar -xzf x.tgz`.
+    # Destroying the whole reviews tree names neither the verdicts directory nor
+    # the state file, so it needs its own arm. The verb must be in COMMAND
+    # position and the path must be named: a search whose pattern happens to be
+    # `rm` is read-only, and a bare-verb heuristic denies any command line that
+    # removes an unrelated file first.
     if printf '%s' "$SCAN_CMD" | grep -Eq '[.]claude/reviews' \
        && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(rm|mv|git[[:space:]]+(clean|checkout|restore|rm))([[:space:]]|$)'; then
       TARGET="$CMD"
@@ -76,20 +77,19 @@ case "$TOOL" in
       # Reading, staging and committing receipts must keep working — only deny
       # the forms that create or change one.
       #
-      # REDIRECT TARGETS, not "is there a > anywhere". Matching a bare `>` blocked
-      # two read-only forms, both reported from real sessions and both dismissed
-      # here once before they were reproduced:
+      # REDIRECT TARGETS, not "is there a `>` anywhere". Matching a bare `>`
+      # denies two read-only forms:
       #
       #   ls -1 .claude/reviews/x.verdicts/ 2>/dev/null    a stderr redirect
       #   ls .claude/reviews/<branch>.verdicts/            `<branch>` contains a >
       #
       # The second is the form /review-complete literally instructs, so the
-      # command told people to run something the gate refused.
+      # command would be telling people to run something the gate refuses.
       #
-      # A redirect operator follows whitespace, a `&`, a digit (2>), or the start
-      # of the command. Inside `<branch>` the `>` follows a letter, so it is not
-      # one. `2>/dev/null` IS a redirect, and its target is /dev/null, which is
-      # not a receipt.
+      # A redirect operator follows whitespace, a `&`, a digit (as in `2>`), or
+      # the start of the command. Inside `<branch>` the `>` follows a letter, so
+      # it is not one. `2>/dev/null` IS a redirect, and its target is /dev/null,
+      # which is not a receipt.
       REDIR="$(printf '%s' "$SCAN_CMD"         | grep -oE '(^|[[:space:]]|&|[0-9])>>?[[:space:]]*[^[:space:];|&()]+'         | sed -E 's/^.*>>?[[:space:]]*//')"
       if ! printf '%s' "$REDIR" | grep -Eq "$VERDICT_RE"          && ! printf '%s' "$SCAN_CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e'; then
         exit 0

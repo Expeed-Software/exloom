@@ -60,11 +60,10 @@ cd "$ROOT" || exit 2
 # Duplicated here rather than sourced, because this script runs standalone and
 # from a repo that has no exloom hooks installed. Keep the two in step.
 #
-# What it cost while it was wrong, on a real branch: the base was 1118 commits
-# back, the test class under review did not exist there, and the control run
-# reported "No tests found" -- so the proof was VOID and the message blamed the
-# test filter. The tier derivation had already been fixed for exactly this; this
-# copy was missed.
+# A wrong base is not a small error: it can sit hundreds of commits back, so the
+# test class under review does not exist there at all, the control run reports
+# "No tests found", and the proof is VOID with a message that blames the test
+# filter instead.
 if [[ -z "$BASE" ]]; then
   _best=""; _best_dist=""
   for r in origin/main origin/master origin/dev origin/develop \
@@ -122,9 +121,9 @@ CHANGED="$(printf '%s\n' "$CHANGED" | sed '/^$/d' | sort -u)"
 
 is_test() {
   # A production source root is never a test, whatever its subdirectories are
-  # called. `orchestration/spec/` under src/main is production code; matching
-  # */spec/* there reverted half a package and left the tree uncompilable, so
-  # the proof failed for a reason that had nothing to do with the tests.
+  # called. A package such as `orchestration/spec/` under src/main is production
+  # code; matching */spec/* there would revert half of it, leave the tree
+  # uncompilable, and fail the proof for a reason unrelated to the tests.
   case "$1" in
     */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
   esac
@@ -182,8 +181,9 @@ echo "command: $TESTCMD"
 # the check ran, not an assertion that it did. Only this script writes it, and
 # the gate requires one covering the commit being shipped.
 #
-# Without this the check is a script somebody has to remember to run — which is
-# the category of thing this whole mechanism exists because nobody remembers.
+# Without a receipt this is a script somebody has to remember to run, which is
+# exactly the category of thing the gate exists to stop relying on.
+
 # ---------- which acceptance criteria did the suite run? ----------
 # The ref goes in the test NAME, so one JUnit-XML parser covers every runner
 # instead of one annotation reader per framework. Both `F-012/R-3/AC-2` and
@@ -209,11 +209,11 @@ _criteria_from_reports() {   # _criteria_from_reports <worktree>
     ( cd "$wt" && printf '%s\n' "$reports" | python3 -c '
 import sys, re, xml.etree.ElementTree as ET
 REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
-# XXE and billion-laughs both need a DTD, and a JUnit report never has one — so
-# refusing any file that declares one closes both without needing defusedxml,
+# XXE and billion-laughs both need a DTD, and a JUnit report never has one, so
+# refusing any file that declares one closes both without needing defusedxml —
 # which cannot be assumed present on a developer machine or a CI image. These
-# files are written by the repos test runner, but a proof run parses whatever is
-# on disk and that is not the same trust boundary.
+# files are normally written by the repo test runner, but a proof run parses
+# whatever is on disk, and that is not the same trust boundary.
 DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.I)
 found = set()
 for line in sys.stdin:
@@ -267,17 +267,16 @@ _receipt() {
 }
 
 # ---------- RUN 1: base source + base tests. MUST PASS. ----------
-# Without this control the whole check was meaningless. The decision used to be
-# `rc != 0 -> PROVED`, so ANY failure in the base worktree minted the receipt:
+# Without this control the whole check is meaningless, because "the tests failed
+# without the change" and "the tests cannot run here at all" look identical.
+# Every one of these produces a failure at base that proves nothing:
 #   - the new test references a symbol the change introduced, so it does not
-#     compile at base (the modal case for every change that adds a function);
-#   - `git worktree add` does not copy gitignored files, so node_modules/.venv/
-#     vendor/target are absent and every run fails on a missing dependency —
-#     a repo with gitignored deps got an unconditional PROVED forever;
-#   - a broken runner, an OOM, a daemon crash, or `--cmd false`.
-# Reproduced twice by review. This control turns all of those into "the
-# environment cannot run the suite", which is not evidence of anything.
-echo "run 1/2: base source + base tests (control — must pass)…"
+#     compile at base — the modal case for any change that adds a function;
+#   - `git worktree add` does not copy gitignored files, so node_modules, .venv,
+#     vendor and target are absent and every run fails on a missing dependency;
+#   - a broken runner, an OOM, a daemon crash, or a `--cmd` that always fails.
+# The control turns all of those into "the environment cannot run the suite".
+echo "run 1/3: base source + base tests (control — must pass)…"
 ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
 base_rc=$?
 if [[ $base_rc -ne 0 ]]; then
@@ -288,9 +287,9 @@ if [[ $base_rc -ne 0 ]]; then
   echo
   # A pinned command whose filter selects nothing at the base is a different
   # problem from a missing dependency, and pointing at node_modules sends the
-  # reader to the wrong place. Seen on a real branch: the committed command named
-  # three test classes added by ANOTHER branch, so it matched nothing here and
-  # voided the proof for every branch that did not contain them.
+  # reader to the wrong place. The usual cause is a committed command naming test
+  # classes another branch added: they do not exist at this base, so the filter
+  # matches nothing and the proof is void for every branch without them.
   if grep -qiE 'No tests found for given includes|no tests (were )?found|matched no tests|ERROR: not found: |No test files found|no tests ran' \
        "$WT/.base-out" 2>/dev/null; then
     echo "The command's test FILTER matched nothing at the base commit — see below."
@@ -319,14 +318,14 @@ while IFS= read -r t; do
 done <<< "$TST"
 [[ $copied -gt 0 ]] || { echo "could not stage test files into the worktree" >&2; exit 2; }
 
-echo "run 2/2: base source + your $copied test file(s) (must fail)…"
+echo "run 2/3: base source + your $copied test file(s) (must fail)…"
 ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
 rc=$?
 
-# A ref in a test name is a claim. A test that passes against the BASE source
-# does not notice the change, whatever it is called — so subtracting this set
-# from run 3's leaves the criteria the runs actually prove. Captured now because
-# run 3 reuses this worktree and overwrites the reports.
+# A criterion ref in a test name is a claim, and a test that passes against the
+# BASE source does not notice the change whatever it is called. Subtracting this
+# set from run 3's leaves the criteria the runs actually prove. Captured now,
+# because run 3 reuses this worktree and overwrites the reports.
 CRITERIA_BASE_OK="$(_criteria_from_reports "$WT")"
 
 # 126/127 are "not executable" / "command not found" — a broken command, never a
@@ -340,15 +339,16 @@ fi
 
 # RUN 3: your change + your tests. MUST PASS.
 #
-# Catches a command that inverts on the test file's existence (`[ ! -e tests/t.sh ]`
-# passes runs 1 and 2 while testing nothing), and, on its own merit, tests that do
-# not pass on the change they were written for.
+# Catches a command that inverts on a test file's existence — `[ ! -e tests/t.sh ]`
+# passes runs 1 and 2 while testing nothing — and, on its own merit, tests that
+# do not pass on the change they were written for.
 if [[ $rc -ne 0 ]]; then
   while IFS= read -r sf; do
     [[ -n "$sf" && -f "$sf" ]] || continue
     mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
     cp "$sf" "$WT/$sf" 2>/dev/null
   done <<< "$SRC"
+  echo "run 3/3: your change + your tests (must pass)…"
   ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.now-out" 2>&1
   now_rc=$?
   if [[ $now_rc -ne 0 ]]; then
@@ -383,7 +383,7 @@ if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not e
     echo
     echo "The base run failed to BUILD, so the three-run proof cannot apply here."
     echo "Falling back to mutation, which does not need the code to be absent."
-    echo "run 3/3: mutation of the changed code…"
+    echo "run 3/3 (mutation): mutating the changed code…"
     # $WT already holds your change and your tests, and the suite passed there —
     # run 3 above put it in exactly that state before this branch was reached.
     ( cd "$WT" && eval "$MUTCMD" ) >"$WT/.mut-out" 2>&1
@@ -468,7 +468,7 @@ _receipt NOT_PROVED
 echo
 echo "NOT PROVED — the tests PASS without the source change (exit 0)."
 echo
-echo "One of these is true, and all three cause review rounds:"
+echo "One of these is true:"
 echo "  1. the tests do not actually exercise the change (assertions too weak to notice it);"
 echo "  2. the test runner did not run them (cached / UP-TO-DATE / filtered out) — check the tail below;"
 echo "  3. the change genuinely has no observable behaviour, in which case say so explicitly."

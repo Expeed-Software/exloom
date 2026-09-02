@@ -149,6 +149,7 @@ For new files, the path is a design decision — state it explicitly and explain
 ## Tasks Must Be Bite-Sized
 
 See [task-sizing.md](task-sizing.md).
+
 ## Decision Points
 
 | Situation | Decision |
@@ -167,16 +168,18 @@ See [task-sizing.md](task-sizing.md).
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 See [worked-example.md](worked-example.md).
+
 ## Integration
 
 - **You arrive here from:** `exloom:brainstorming` (with an approved spec) or from a requirements document / ticket with clear scope
 - **You leave here toward:** execution, then `exloom:review-gate` when closing. If the plan will be handed to a different executor, have a human read it first.
 - **Plan structure:** a handoff plan has 11 sections, in this order — Metadata, Goal, Acceptance Criteria, Files to Touch, Existing Patterns to Follow, Edge Cases, Non-Goals, Executor FAQ, Tasks, Review Checklist, and an initially-empty Deviation Log. The Process steps above produce the core — Acceptance Criteria, Non-Goals, Files to Touch, Existing Patterns to Follow, Edge Cases, Executor FAQ, and Tasks; add Metadata and a one-paragraph Goal at the top, a Review Checklist agreed with the reviewer, and the empty Deviation Log at the end. A plan missing any of the 11 is not handoff-ready.
 - **Commit messages:** follow this repo's existing commit convention
-- **Related skills:** `exloom:review-gate` (the evidence gate at completion), `exloom:brainstorming` (reviews the output)
+- **Related skills:** `exloom:brainstorming` (produces the spec this plan cites), `exloom:executing-handoff-plans` (executes it), `exloom:auditing-plan-fidelity` (checks the diff against it), `exloom:review-gate` (the evidence gate at completion)
 
 Run the Step 9 coverage check either way, then execute. It is the same check whether the executor is someone else or a future you.
 

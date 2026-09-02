@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, a recovery plan for Tier 3) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
+description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, and at Tier 3 a security review plus what a revert will not undo) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
 ---
 
 # Review Gate
@@ -54,7 +54,9 @@ Four things are **not** self-attested, and they are deliberately the ones that d
 
 - **The tier.** `lib.sh` derives a minimum tier from the diff (the rules `/review-init` proposes) and blocks a checklist declaring less. There is no escape hatch, because the tier decides which gates apply: an escapable tier makes every other gate optional, and "this change is only Tier 1" is the specific judgment an author under time pressure gets wrong.
 
-- **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction. A receipt carrying no verdict key at all still counts, so a branch already in flight is never stranded.
+- **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction.
+
+  **A receipt carrying no verdict at all is a launch, not a review.** It says a reviewer started; it does not say what it found, and "we do not know what it found" is not approval. Earlier versions accepted these so that upgrading would not strand branches in flight, but that exemption also admitted receipts whose review outcome was never *captured* — refusing costs a single re-dispatch, accepting ships code nobody has been shown to have reviewed. The fix is almost always to dispatch the reviewer **without a name**: a named subagent reports through the mailbox rather than the tool result the hook reads.
 
 - **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
 
@@ -99,7 +101,9 @@ Pick one and the session carries it out. The recommendation comes from open Crit
 
 **The second option is fix-then-re-review, not "run another pass."** A pass does not fix anything — re-reviewing a commit nobody changed returns the previous pass's findings and spends a round doing it. If the last pass ran against the same code as the one before it, the report says so instead of counting it.
 
-Once you choose merge, the answer is recorded in the checklist and the branch stops asking.
+Once you choose merge, the answer is recorded in the checklist and the branch stops asking — **about rounds**. It is not an answer about whether anyone reviewed the code, so a missing, stale or rejecting reviewer still blocks after it. Approving "we have reviewed this enough times" and approving "no review was recorded" are different things, and only the first is a question the cap asks.
+
+The cap is also stated where the loop actually spins. It is checked at the push, but a session in a review loop is not pushing — it is reviewing — so the status printed after every reviewer completion carries it too, and stops asking for another round once the branch is past it.
 
 Change the cap by committing `.claude/exloom-max-rounds` with a number. Committed only, because raising it weakens the gate and that belongs in a diff.
 
@@ -110,7 +114,7 @@ Change the cap by committing `.claude/exloom-max-rounds` with a number. Committe
 | Docs-only, typo-only, comment-only (no runtime code modified) | 0 | L1 code review only |
 | <5 files, single module, no UI/API/DB change, internal-only | 1 | L1 + smoke test + proof-is-tested + checklist |
 | User-facing OR cross-module OR new/changed API OR new event type OR new public config | 2 | Tier 1 + adversarial review |
-| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + committed runbook + a three-part recovery plan |
+| Data migration OR feature-flag cutover OR production deploy OR auth/tenant/secrets/crypto change | 3 | Tier 2 + security review + a committed runbook + what a revert will not undo |
 
 Decide tier when the plan is written. Record in the checklist's Tier field. Do not downgrade mid-flight — the gate derives the minimum from the diff and blocks a downgrade, so this is enforced, not advised. When uncertain, go one tier higher — the cost of an extra adversarial review is an hour; the cost of a missed integration gap in production is measured in customer-visible incidents.
 
@@ -165,6 +169,19 @@ This is the highest-yield check in the protocol, because the dominant defect sha
 
 Implementer addresses every Blocking finding. Non-blocking findings go to the checklist with disposition (fixed / deferred with reason / won't fix with reason).
 
+### Step 4 — Prove the change is tested (Tier 1+)
+
+```bash
+PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"
+bash "$PROVE"
+```
+
+It runs the suite three times in a throwaway worktree: at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). It writes `proof.json` into the same protected directory as the reviewer receipts, and the gate requires one reading `PROVED` that covers the reviewed commit.
+
+`NOT_PROVED` is answered by a test that fails without your change, never by running it again. A purely additive change cannot satisfy the three runs at all — its tests do not compile at the base — so commit a `.claude/exloom-mutation-command` that exits 0 at your mutation threshold and the proof uses that instead.
+
+This is the cheapest evidence exloom produces: no model tokens, just your own suite run three times. Every lane keeps it.
+
 ### Step 5 — Security review (Tier 3, and any change touching input / auth / secrets / deserialization / dependencies)
 
 Dispatch the `security-auditor` agent. It runs the repo's security scanners — secrets detection, a dependency-vulnerability audit, and static analysis — and reviews the diff for the AI-generated-code failure modes: injection, missing authorization, secrets/PII exposure, insecure deserialization, SSRF, weak crypto, unsafe defaults, and hallucinated or vulnerable dependencies. Every finding carries a severity, a source→sink, and a confidence (CONFIRMED vs SUSPECTED), and the tool output is pasted as evidence.
@@ -173,7 +190,7 @@ This is a **first pass, not a guarantee** — it never certifies code "secure," 
 
 ### Step 6 — What a revert will not undo (Tier 3 only)
 
-Two lines. Both are facts about the diff, and both are answerable by the person standing here: an author, on a feature branch, before merge.
+A committed runbook, and two lines. Both lines are facts about the diff, and both are answerable by the person standing here: an author, on a feature branch, before merge.
 
 - **Runbook path** — a markdown doc committed alongside the change: deploy order, health checks, signals to watch, common failure modes. The file must exist; `/review-complete` checks.
 - **What reverting does not fix** — the state a revert leaves in the new shape. Rows already rewritten, messages already sent, events consumers already received, caches rebuilt, credentials rotated. `nothing` is a valid answer and must be written rather than left blank.

@@ -138,7 +138,7 @@ run allow "create a non-Test-Case work item" \
   'az boards work-item create --type "User Story" --title "Some story" --org https://dev.azure.com/acme'
 
 echo ""
-echo "-- reads must never be blocked (regression: live false positive 2026-08-20) --"
+echo "-- reads must never be blocked, whatever HTTP verb they use --"
 run allow "WIQL POST is a read despite the POST method" \
   'curl -s -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "{\"query\":\"SELECT [System.Id] FROM WorkItems\"}" https://dev.azure.com/acme/proj/_apis/wit/wiql?api-version=7.1'
 run allow "GET on the workitems endpoint" \
@@ -156,7 +156,7 @@ run deny "relation remove" \
   'az boards work-item relation remove --id 24132 --relation-type "tests" --target-id 24501 --org https://dev.azure.com/acme --yes'
 
 echo ""
-echo "-- prose is not a command (regression: a commit message was blocked) --"
+echo "-- prose is not a command: naming a command is not running one --"
 run allow "commit message describing the gate" \
   'git commit -m "fix: az boards work-item relation add carries no exloom-qa:24501:TC-007 tag, so the gate denied it"'
 run allow "documentation mentioning a create command" \

@@ -36,7 +36,8 @@ If the learning only applies to a single codebase and would confuse or mislead d
 
 Edit the repo's `CLAUDE.md` directly. Add it to the most specific applicable section. If no section fits, add a "Gotchas" section at the bottom.
 
-See [gotchas.md](gotchas.md) for the entry shape.
+See [gotchas.md](gotchas.md) for the entry shape, and for Questions 2 through 4 —
+the org-wide, new-skill and personal-memory destinations.
 
 ## When a Learning Contradicts Existing Content
 
@@ -55,7 +56,7 @@ Sometimes the learning is not new information — it is a correction. A shared d
 
 ## PR Generation
 
-When routing to a PR (destination 2 or 3 above), use the template provided in the decision tree. Key principles:
+When routing to a PR — Question 2 (shared conventions) or Question 3 (a new skill), both in [gotchas.md](gotchas.md) — follow the proposal shape given there. Key principles:
 
 - **Title format:** `learning: [topic]` for reference updates, `feat: new skill [skill-name]` for new skills
 - **Body must include:** what was learned, where it was discovered, what the proposed change is, who it helps
@@ -129,5 +130,5 @@ Since `payments-service` is a repo the team owns, no PR is needed for the CLAUDE
 
 ## Related Skills
 
-- `exloom:authoring-claude-md` — the primary destination for repo-specific learnings
-- Debugging sessions often produce learnings worth capturing — reach for this skill when one resolves
+- `exloom:authoring-claude-md` — the primary destination for repo-specific learnings.
+- Debugging sessions often produce learnings worth capturing — reach for this skill when one resolves.

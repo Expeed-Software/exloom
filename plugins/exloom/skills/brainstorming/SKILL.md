@@ -162,7 +162,8 @@ formally.
 **What to do:** Run the linter. Fix the errors.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/lint-spec.sh" docs/exloom/specs/F-012-slug.md
+LINT="$(find ~/.claude/plugins -path '*exloom*/scripts/lint-spec.sh' | sort -V | tail -1)"
+bash "$LINT" docs/exloom/specs/F-012-slug.md
 ```
 
 Errors are things a machine can be certain about — gapless refs, a criterion under
@@ -260,9 +261,11 @@ forming your own.
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 See [worked-example.md](worked-example.md).
+
 ## Integration
 
 - **You arrive here from:** a user request, a ticket, an idea, a product
@@ -271,8 +274,8 @@ See [worked-example.md](worked-example.md).
 - **You leave here toward:** `exloom:planning-for-handoff` — always. Never directly
   to implementation. The spec is an input to a plan, not an execution artifact.
   Skipping plans breaks the handoff chain and makes execution unauditable.
-- **During Step 1:** If the project is unfamiliar, invoke
-  read the surrounding code to build a mental model before brainstorming.
+- **During Step 1:** If the project is unfamiliar, read the surrounding code and
+  build a mental model before brainstorming anything.
 - **During any step:** If brainstorming reveals a learning about the codebase or
   team conventions, route through `exloom:capturing-learnings` so knowledge
   persists beyond this session.

@@ -14,7 +14,7 @@ Find the skill for your situation and invoke it. It pulls in the others in order
 | Reviewing, changing, or approving cases | `reviewing-test-coverage` |
 | Approved and ready for the board | `publishing-test-cases` |
 
-Commands: `/qa-test-init <project> <story-id>` → `/qa-test-review` → `/qa-test-publish`.
+Invoke them with the Skill tool, in that order. There are no slash commands for this workflow — the skills are the interface.
 
 ## Rules that hold everywhere
 

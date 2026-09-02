@@ -11,11 +11,15 @@ Tier 3?" without anyone reading a shell script.
 ## Step 1 — Load the library
 
 ```bash
-. "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+# ${CLAUDE_PLUGIN_ROOT} is set for plugin.json hooks, NOT in your shell.
+# Resolve the installed plugin instead; several versions live in the cache,
+# so take the highest.
+LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
+. "$LIB"
 ```
 
-If that path is not set in your environment, find the installed plugin under
-`~/.claude/plugins/cache/exloom/exloom/<version>/hooks/lib.sh`.
+`sort -V | tail -1` matters: `find` returns cached versions path-sorted, so
+`head -1` would source the oldest one installed.
 
 ## Step 2 — Report the policy state first
 

@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# exloom — shared hook library. SOURCED by block-unverified-push.sh and
-# protect-verdicts.sh; never executed directly. Keeping the checklist
-# validation, branch classification, and JSON extraction in one place means the
-# Stop hook and the push gate can never silently disagree about what "complete"
-# means (they used to duplicate ~150 lines).
+# exloom — shared hook library. SOURCED by the hooks; never executed directly.
+#
+# Checklist validation, branch classification and JSON extraction live here so
+# that every hook answers "is this branch reviewed?" the same way. Two hooks with
+# their own copy of that logic drift, and the drift shows up as a push refused
+# for a reason no other hook agrees with.
 #
 # All functions assume the caller has already cd'd to the repo root when they
 # touch git. Every git failure fails OPEN (return/exit 0 at the call site) —
 # exloom blocks on missing evidence, never on an infrastructure hiccup.
 
-# Resolved once so block messages can print a command that actually runs.
-# `${CLAUDE_PLUGIN_ROOT}` is interpolated by the harness into plugin.json only;
-# it is NOT set in the Bash tool environment, so every remediation command that
-# used it failed with "No such file or directory" and left the bypass as the
-# only reachable option.
+# Resolved once, so block messages can print a command that actually runs.
+# `${CLAUDE_PLUGIN_ROOT}` is interpolated into plugin.json by the harness and is
+# NOT set in the Bash tool environment, so a remediation command built from it
+# would fail with "No such file or directory" and leave the bypass as the only
+# reachable option.
 EXLOOM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Repository policy (.exloom.yml). Loaded here, once, so every hook reasons
-# about it through the same functions — a push gate and a /review-init that each
-# parsed the file their own way would eventually disagree about which tier a
-# change is, and the disagreement would surface as a mysterious block.
+# Repository policy (.exloom.yml), loaded once here so every hook reads it
+# through the same functions. A push gate and a /review-init that each parsed the
+# file their own way would eventually disagree about a change's tier, and that
+# disagreement surfaces as a block nobody can explain.
 # shellcheck source=/dev/null
 [[ -r "$EXLOOM_LIB_DIR/policy.sh" ]] && . "$EXLOOM_LIB_DIR/policy.sh"
 
@@ -49,25 +50,29 @@ except Exception:
 
 # Read a JSON string value with sed, when neither jq nor python3 is available.
 #
-# Do not "simplify" to `s/.*"key" *: *"\([^"]*\)".*/\1/`. `[^"]*` stops at the
-# first quote byte, truncating any value containing an escaped quote; the leading
-# `.*` is greedy, so it matches the LAST occurrence of the key. Both fail OPEN.
-# `\\.` consumes an escaped pair before `[^"\\]` can stop on it; `head -1` takes
-# the first occurrence. The value stays JSON-escaped, which is correct for
-# shape-matching — `\"` is not a quote character in the command.
+# Do not "simplify" this to `s/.*"key" *: *"\([^"]*\)".*/\1/`. That form fails
+# open twice over: `[^"]*` stops at the first quote byte, truncating any value
+# containing an escaped quote, and the leading `.*` is greedy, so it matches the
+# LAST occurrence of the key rather than the first.
+#
+# Here `\\.` consumes an escaped pair before `[^"\\]` can stop on it, and
+# `head -1` takes the first occurrence. The value stays JSON-escaped, which is
+# what shape-matching wants — `\"` is not a quote character in the command.
 _exloom_sed_str() {
   grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"\(\\\\.\|[^\"\\\\]\)*\"" 2>/dev/null \
     | head -1 | sed -e "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
 }
 
 # Remove heredoc BODIES and here-string operands, keeping everything else, so a
-# scanner sees write targets and not prose. Commands AFTER the terminator must
-# still be scanned — truncating at the first `<<` lets `cat <<< '' ; rm <target>`
-# through.
+# scanner sees write targets rather than prose.
 #
-# Bash string ops, not awk: the caller flattens newlines first, and an awk
-# program nested three quoting layers deep behaved differently in situ than
-# standalone. This is unit-testable on its own.
+# Commands AFTER the terminator must still be scanned. Truncating at the first
+# `<<` would let `cat <<< '' ; rm <target>` through, which is the whole reason a
+# scanner cannot simply ignore everything past a redirection.
+#
+# Written with bash string operations rather than awk: the caller flattens
+# newlines first, so there is nothing awk buys here, and a small awk program
+# nested inside three layers of quoting is far harder to test on its own.
 exloom_strip_heredocs() {
   local s="$1" pre rest tag
   # A here-string carries a word, not a body.
@@ -111,13 +116,13 @@ except Exception:
   if [[ -z "$out" ]]; then
     out="$(printf '%s' "$json" | _exloom_sed_str "$key")"
   fi
-  # jq built for Windows writes CRLF, so a multi-line command comes back as
-  # `cmd\r\nnext` and every downstream word/line match sees `next\r` instead of
-  # `next`. This silently defeated the heredoc-terminator match in
-  # exloom_strip_heredocs — the guard fell through to "unterminated" and dropped
-  # the real write target. On Git Bash, which is the whole environment here, a
-  # scanner that does not normalise line endings is a scanner that fails open.
-  # Normalise CRLF only; a lone CR is left alone.
+  # jq built for Windows writes CRLF, so a multi-line command arrives as
+  # `cmd\r\nnext` and every downstream word or line match sees `next\r` rather
+  # than `next`. That is enough to defeat the heredoc-terminator match in
+  # exloom_strip_heredocs, which then treats the body as unterminated and drops
+  # the real write target. Git Bash is the primary environment here, so a scanner
+  # that does not normalise line endings is a scanner that fails open. Normalise
+  # CRLF only; a lone CR is left alone.
   out="${out//$'\r'$'\n'/$'\n'}"
   printf '%s' "$out"
 }
@@ -169,15 +174,21 @@ exloom_is_skip_branch() {
 
 # ---------- push target parsing ----------
 # Given a git push command line, echo the newline-separated list of SOURCE branch
-# names whose code the push ships — i.e. the branch each refspec's LEFT side names,
-# because the review checklist is keyed to the code being pushed, not the remote
-# destination. `git push origin foo` -> foo; `git push origin HEAD:foo` -> HEAD
-# (caller maps HEAD to the current branch); `git push origin mybranch:foo` ->
-# mybranch. Echo nothing => "the current branch" (bare `git push`,
-# `git push origin`). A `__DELETE__` line marks a deletion refspec (`:branch`,
-# `--delete`) which ships no code. `--all`/`--mirror` echo nothing (can't scope;
-# caller falls back to the current branch). This closes the hole where
-# `git push origin other-branch` from a reviewed branch shipped an unreviewed one.
+# names whose code the push ships — the branch each refspec's LEFT side names,
+# because the checklist is keyed to the code being pushed and not to the remote
+# destination.
+#
+#   git push origin foo            -> foo
+#   git push origin HEAD:foo       -> HEAD   (caller maps HEAD to the current branch)
+#   git push origin mybranch:foo   -> mybranch
+#   git push / git push origin     -> nothing, meaning "the current branch"
+#
+# A `__DELETE__` line marks a refspec that ships no code (`:branch`, `--delete`,
+# `tag <name>`). `--all` and `--mirror` echo nothing, because they cannot be
+# scoped; the caller falls back to the current branch.
+#
+# Reading the left side is what stops `git push origin other-branch`, run from a
+# reviewed branch, shipping an unreviewed one.
 exloom_push_target_branches() {
   local cmd="$1" i t pushidx=-1 skip_next=0 deletion=0 allrefs=0
   local -a toks=() positionals=() refspecs=()
@@ -190,11 +201,10 @@ exloom_push_target_branches() {
     t="${toks[$i]}"
     case "$t" in ';'|'&&'|'||'|'|'|'&') break ;; esac
     if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
-    # A shell redirection is not a refspec. `git push origin 2>&1` was read as a
-    # push of a branch named `2>&1`, and the block message then told the author
-    # to run /review-init for a branch that does not exist — an argument-parsing
-    # slip that reads as a review failure. Only bites when no branch is named;
-    # `git push origin HEAD 2>&1` was always correct.
+    # A shell redirection is not a refspec. Without this, `git push origin 2>&1`
+    # parses as a push of a branch named `2>&1`, and the block message tells the
+    # author to run /review-init for a branch that does not exist — an
+    # argument-parsing slip that reads to them as a review failure.
     case "$t" in
       [0-9]*'>&'[0-9]*|'&>'*|'>'*|'>>'*|[0-9]*'>'*|'<'*) continue ;;
     esac
@@ -241,18 +251,19 @@ exloom_push_target_branches() {
 # that are unambiguous from a file list — "frontend AND backend changed" and
 # "more than one module" need stack knowledge the hook does not have, and stay
 # with the skill as judgment.
-# The nearest candidate wins, not the first that resolves: where main is a
-# release branch and dev the integration branch, taking main puts the whole
-# release gap in the diff and every branch derives Tier 3. origin/HEAD names
-# the branch a clone checks out, which is a different question.
+
+# The fork point: the NEAREST candidate base wins, not the first that resolves.
+# Where `main` is a release branch and `dev` the integration branch, taking main
+# puts the whole release gap into the diff and every branch derives Tier 3.
+# `origin/HEAD` is not consulted — it names the branch a clone checks out, which
+# is a different question from where this work forked.
 exloom_fork_point() {   # exloom_fork_point <tip>
   local tip="$1"
 
-  # MEMOISED, and the refs listed in ONE call. The first version probed ten
-  # candidate names with three git subprocesses each, on every invocation, and
-  # derive_tier and check_verdicts both call it — about 3-6 seconds per gate
-  # evaluation on Windows, where a process spawn is expensive. The test suite went
-  # from ten seconds to minutes and that is how it was noticed.
+  # Memoised, and the refs listed in ONE call. Probing ten candidate names with
+  # three git subprocesses each would cost seconds per gate evaluation on
+  # Windows, where a process spawn is expensive — and both exloom_derive_tier and
+  # exloom_check_verdicts call this.
   if [[ "${_EXLOOM_FP_TIP:-}" == "$tip" && -n "${_EXLOOM_FP:-}" ]]; then
     printf '%s' "$_EXLOOM_FP"; return 0
   fi
@@ -282,9 +293,10 @@ ${cand}
 
 # Records why a tier was chosen: one line per matched rule,
 #     <path>\t<rule>\t<source>
+#
 # A tier with no stated cause is a number people argue with. With one, the
-# checklist, the PR reader and anything re-deriving it in CI all see the same
-# reasoning, and a rule that matched the wrong file is visible instead of
+# checklist, the PR reader and anything re-deriving the tier in CI all see the
+# same reasoning, and a rule that matched the wrong file is visible rather than
 # mysterious.
 _exloom_tier_reason() {   # _exloom_tier_reason <files> <ere> <rule-label>
   local hit
@@ -308,14 +320,18 @@ exloom_derive_tier() {
   # The effective tier is the highest anything matched, so a repo can teach the
   # gate its own vocabulary — `identity`, `iam`, `rbac` — and cannot use the same
   # file to lower a protection the built-ins already applied.
-  # Called plainly, NOT in a command substitution: the reasons live in a global
-  # and a subshell would throw them away, leaving a tier nobody can explain.
+  #
+  # Called plainly, NOT inside a command substitution: the reasons are published
+  # through a global, and a subshell would discard them, leaving a tier with no
+  # explanation attached.
   exloom_policy_tier "$files" >/dev/null 2>&1 || true
   pol_tier="${_EXLOOM_POL_TIER:-}"
   _EXLOOM_TIER_REASONS="${_EXLOOM_POL_REASONS:-}"
 
-  # Docs-only is checked FIRST so a markdown file under an `auth/` path does not
-  # score Tier 3 on a path match.
+  # Docs-only is checked FIRST, before any path rule, so a markdown file that
+  # happens to live under `auth/` or `identity/` does not score Tier 3 on a path
+  # match. Matching a glob does not make a document into code, and this ordering
+  # is what makes that true for repository rules as well as built-in ones.
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     case "$f" in
@@ -323,11 +339,6 @@ exloom_derive_tier() {
       *) docs_only=0; break ;;
     esac
   done <<< "$files"
-  # Docs-only is the one place a repository rule does NOT escalate on its own
-  # evidence: a markdown file under `identity/` is documentation, and matching a
-  # path glob does not make it code. The built-in check runs first for exactly
-  # this reason, and the repo rules inherit that ordering rather than working
-  # around it.
   if [[ $docs_only -eq 1 ]]; then _EXLOOM_TIER_REASONS=""; printf '0'; return 0; fi
 
   _exloom_max_tier() {   # _exloom_max_tier <built-in>
@@ -337,11 +348,11 @@ exloom_derive_tier() {
 
   # Tier 3 — data migration, or the security surface /review-init enumerates.
   #
-  # `auth` matches as a WORD, not a substring — a bare `auth` matched
-  # `authoring-claude-md` and forced Tier 3 on a docs change, which the tier has
-  # no escape hatch from.
-  # Matches: auth/ auth- authentication authorization authz authn oauth
-  # Does not match: authoring author authors
+  # `auth` matches as a WORD, not a substring, because the tier has no escape
+  # hatch: a bare substring match would put every path containing "authoring" or
+  # "author" at Tier 3 with no way to argue.
+  #   Matches:         auth/ auth- authentication authorization authz authn oauth
+  #   Does not match:  authoring author authors
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog'; then
     _exloom_tier_reason "$files" '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog' 'data migration'
     printf '3'; return 0
@@ -350,12 +361,13 @@ exloom_derive_tier() {
     _exloom_tier_reason "$files" '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey' 'auth / tenancy / secrets / crypto'
     printf '3'; return 0
   fi
-  # Below Tier 3 the repository rules can still be the higher of the two, so
-  # every remaining exit takes the maximum rather than returning its own answer.
+  # Tier 3 is already the ceiling, so those two exits answer directly. Below it a
+  # repository rule can still be the higher of the two, so every remaining exit
+  # takes the maximum rather than returning its own answer.
 
-  # Tier 2 — deployment surface, an API/route surface, or a five-file blast
+  # Tier 2 — deployment surface, an API or route surface, or a five-file blast
   # radius. Deployment paths floor at 2 rather than 3 because /review-init's rule
-  # is conditional on the change being flag/prod-related, which a file list
+  # is conditional on the change being flag- or prod-related, which a file list
   # cannot decide; the skill still says go to 3 when it is.
   if printf '%s\n' "$files" | grep -Eqi '(^|/)(deployment|deploy|k8s|kubernetes|helm|docker)(/|$)|docker-compose|Dockerfile'; then
     _exloom_tier_reason "$files" '(^|/)(deployment|deploy|k8s|kubernetes|helm|docker)(/|$)|docker-compose|Dockerfile' 'deployment surface'
@@ -385,6 +397,49 @@ exloom_derive_tier() {
 # committed with the checklist — the same rule the checklist itself lives under.
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
+# ---------- is the evidence pipeline alive? ----------
+# exloom_evidence_blind <checklist> <tip>
+#   prints the number of dispatches when receipts exist but NONE of them, for any
+#   reviewer, carries a verdict. Prints nothing, and returns 1, otherwise.
+#
+# The model here is that receipts are evidence, and the failure that model does
+# not survive is receipt CAPTURE degrading. When a reviewer's report never
+# reaches the hook, every line records a launch and no conclusion — and every
+# mechanism downstream then reads blank and renders blank as fine. The severity
+# trend prints "(no findings recorded)", indistinguishable from a clean branch,
+# and the reviewer status prints "satisfied".
+#
+# Hence a liveness check, stated wherever the evidence surfaces. A tool whose
+# claim is evidence has to be able to say when it has none; the one thing it may
+# never do is present an absence of evidence as evidence of absence.
+exloom_evidence_blind() {   # exloom_evidence_blind <checklist> <tip>
+  local checklist="$1" tip="$2" vdir agent content lines=0 verdicts=0
+  vdir="$(exloom_verdict_dir "$checklist")"
+  for agent in l1-reviewer adversarial-reviewer security-auditor; do
+    content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${vdir}/${agent}.json" 2>/dev/null || true)"
+    [[ -n "$content" ]] || continue
+    lines=$(( lines + $(printf '%s\n' "$content" | grep -c '"head"' || true) ))
+    verdicts=$(( verdicts + $(printf '%s\n' "$content" | grep -c '"verdict"' || true) ))
+  done
+  [[ "$lines" -gt 0 && "$verdicts" -eq 0 ]] || return 1
+  printf '%s' "$lines"
+}
+
+# The same fact as a printable block, for the places that show it to a person.
+exloom_evidence_blind_note() {   # exloom_evidence_blind_note <checklist> <tip>
+  local n
+  n="$(exloom_evidence_blind "$1" "$2")" || return 1
+  printf '%s' "EVIDENCE PIPELINE IS NOT RECORDING. ${n} reviewer dispatch(es) are on
+file for this branch and NOT ONE carries a verdict, so exloom has never observed
+what any reviewer concluded here. Everything below that looks clean — no
+findings, reviewers satisfied — is an absence of data, not a result.
+
+The usual cause is a reviewer dispatched with a NAME, which routes its report to
+the mailbox instead of the tool result the hook reads. Re-dispatch one reviewer
+without a name and check that a line carrying \"verdict\" appears in
+$(exloom_verdict_dir "$1")/ before treating any of this as review evidence."
+}
+
 # ---------- the bypass leaves a trace ----------
 # exloom_bypass_receipt <action>
 #
@@ -392,21 +447,20 @@ exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 # behaviour: a gate with no exit gets removed rather than bypassed, and the one
 # thing worse than a skipped review is a team that uninstalled the plugin.
 #
-# What was wrong was that it left nothing behind. The skip was announced on
-# stderr, which scrolls past and is gone, so afterwards there was no way to ask
-# which changes had shipped around the gate — not by a person reading the repo,
-# and not by anything running in CI.
+# An announcement on stderr is not enough, though — it scrolls past, and
+# afterwards nothing can answer which changes shipped around the gate, neither a
+# person reading the repo nor anything running in CI. So the bypass writes a
+# file, committed alongside the change like every other piece of evidence.
 #
-# So the bypass now writes a file, committed alongside the change like every
-# other piece of evidence. It records what the hook can observe: the branch, the
-# commit, the action let through, the git identity, the time. It does NOT record
-# a reason, because nothing here can verify one, and a field that invites a
-# sentence nobody checks is worse than an absent field — the reason belongs in
-# the checklist's escape-hatch section, in the diff, where a reviewer reads it.
+# It records what the hook can observe: the branch, the commit, the action let
+# through, the git identity, the time. It does NOT record a reason, because
+# nothing here can verify one, and a field that invites a sentence nobody checks
+# is worse than an absent field. The reason belongs in the checklist's
+# escape-hatch section, in the diff, where a reviewer reads it.
 #
 # NEVER blocks and never changes the exit code. A bypass that failed because its
-# receipt could not be written would be a gate that turns back on at the worst
-# moment.
+# receipt could not be written would be a gate turning back on at the worst
+# possible moment.
 exloom_bypass_receipt() {
   local action="${1:-unknown}" root branch sha who when file
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
@@ -438,8 +492,10 @@ exloom_bypass_receipt() {
 # they would never require the security auditor the skill promises for them.
 #
 # Deliberately narrow: manifests and lockfiles by filename, deserialization entry
-# points by diff content. Outbound-request / SSRF shapes are NOT matched — every
-# formulation tried forced security review on ordinary HTTP client code.
+# points by diff content. Outbound-request and SSRF shapes are NOT matched,
+# because any pattern broad enough to catch them also forces a security review on
+# ordinary HTTP client code, and a check that fires on everything is one people
+# route around.
 exloom_security_surface() {   # exloom_security_surface <base> <tip>
   local base="$1" tip="$2" files
   files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
@@ -520,26 +576,24 @@ exloom_policy_required_reviewers() {   # exloom_policy_required_reviewers <base>
 }
 
 # How many review rounds has this branch had? Distinct commits appearing in the
-# L1 receipt, which is one JSON line per real dispatch. Deterministic — no model,
-# no judgement.
-# Counts BOTH the committed receipts and any sitting uncommitted in the working
-# tree, then de-duplicates.
+# L1 receipt, which holds one JSON line per real dispatch. Deterministic — no
+# model, no judgement.
 #
-# Reading only the committed ref made this silently answer 0 whenever the
-# receipts had not been committed yet — which is most of the time, since nothing
-# commits them until /review-complete says so. On a real branch four dispatches
-# were on disk and this returned zero, so the cap never fired and the push went
-# through with no prompt. A counter that reports "no rounds" when it cannot see
-# the rounds is worse than one that errors: it fails open in the mechanism whose
-# only job is to notice accumulation.
+# Counts BOTH the committed receipts and any sitting uncommitted in the working
+# tree, then de-duplicates. Reading only the committed ref would answer 0
+# whenever the receipts have not been committed yet, which is most of the time,
+# since nothing commits them until /review-complete says so. A counter that
+# reports "no rounds" when it cannot see the rounds is worse than one that
+# errors: it fails open in the mechanism whose only job is to notice
+# accumulation.
 exloom_round_count() {   # exloom_round_count <checklist> <tip>
   local vdir committed working
   vdir="$(exloom_verdict_dir "$1")"
   committed="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
   working="$(cat "${vdir}/l1-reviewer.json" 2>/dev/null || true)"
-  # awk, not `grep -c . || printf 0`: grep prints 0 AND exits 1 on no match, so the
-  # fallback fired too and the answer was the two-line string "0\n0" — which every
-  # arithmetic test on it then rejected with a syntax error on stderr.
+  # awk, not `grep -c . || printf 0`: on no match grep prints 0 AND exits 1, so
+  # the fallback also fires and the answer becomes the two-line string "0\n0",
+  # which every arithmetic test on it rejects with a syntax error.
   printf '%s\n%s\n' "$committed" "$working" \
     | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' \
     | sort -u | awk 'END{print NR}'
@@ -556,17 +610,17 @@ exloom_max_rounds() {
   [[ -n "$n" && "$n" -ge 1 ]] 2>/dev/null && printf '%s' "$n" || printf '3'
 }
 
-# Has a human recorded a decision to ship at the cap? Mechanical: the checklist's
-# escape-hatch section must carry a line naming the cap. The reason is for the
-# next reader, not for the gate — the gate only checks that a person wrote one.
-# Has the USER been asked and decided to ship at the cap?
+# Has the user been asked, and decided to ship at the cap?
 #
-# Recorded in the checklist by the session AFTER it puts the report in front of
-# the user and asks. The control here is the asking, not the file: the block
-# message below instructs the session to show the report in the conversation and
-# take an explicit answer. A protected file was tried and is worse — it forces
-# the person out of the session to run a shell command, which is not a decision
-# point, it is an obstacle.
+# The session records this in the checklist AFTER it puts the report in front of
+# the user and takes an explicit answer. The control is the asking, not the file:
+# the block message instructs the session to show the report in the conversation
+# and offer named options.
+#
+# Mechanically, all this checks is that the escape-hatch section carries a line
+# naming the cap with a reason after it. The reason is for the next reader, not
+# for the gate. A protected file the person must edit from a shell would be
+# worse — that is an obstacle, not a decision point.
 exloom_cap_override() {   # exloom_cap_override <checklist> <tip>
   local content
   content="$(MSYS_NO_PATHCONV=1 git show "${2}:${1}" 2>/dev/null || true)"
@@ -616,9 +670,9 @@ exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
     local maxr
     maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
     [[ -n "$maxr" ]] || continue
-    # DISTINCT defects, by fingerprint — not finding lines. The same defect
-    # reported in three passes is one thing still open, and counting the lines
-    # said "3 critical findings" beside a single cite.
+    # DISTINCT defects, by fingerprint, not finding lines. The same defect
+    # reported in three passes is one thing still open; counting lines would
+    # report "3 critical findings" beside a single cite.
     n=$(( n + $(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep '"severity":"HIGH"' \
                  | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u | awk 'END{print NR}') ))
   done <<< "$all"
@@ -648,11 +702,10 @@ exloom_open_critical_cites() {   # exloom_open_critical_cites <checklist> <tip>
 
 # Did the LAST review pass look at code anyone had changed?
 #
-# A review pass does not fix anything. Running a fourth pass on a tip identical
-# to the third pass's is a guaranteed repeat of the third pass's findings — it
-# spends a round and moves nothing. This is the mechanism behind "each feature is
-# getting bigger and never completes": the counter counted reviews when the thing
-# that has to happen between rounds is a FIX.
+# A review pass does not fix anything. Running a pass on a tip identical to the
+# previous pass's is a guaranteed repeat of the previous pass's findings: it
+# spends a round and moves nothing. The thing that has to happen between rounds
+# is a FIX, so the report needs to be able to say when one did not.
 #
 # Returns 0 when the last pass reviewed unchanged code (a no-op pass), 1 when
 # code moved between the last two passes or there are not yet two to compare.
@@ -677,16 +730,17 @@ exloom_last_pass_was_noop() {   # exloom_last_pass_was_noop <checklist> <tip>
 # A short answer to "where does the gate stand right now", printed after every
 # reviewer completes rather than only when someone runs /review-complete.
 #
-# The bookkeeping was invisible until the end, and that is why sessions
-# hand-dispatch reviewers and never invoke the command: dispatching directly
-# produces the same findings, so it FEELS equivalent, and nothing contradicts
-# that until the push is refused. What the command adds - the tier derived from
-# the diff, which receipts are missing or stale, which sections are unfilled - is
-# real work that produces no visible output at the moment it matters.
+# Without this, the bookkeeping is invisible until the push, which is why a
+# session hand-dispatches reviewers and never invokes the command: dispatching
+# directly produces the same findings, so it feels equivalent, and nothing
+# contradicts that until the push is refused. What the command adds — the tier
+# derived from the diff, which receipts are missing or stale, which sections are
+# unfilled — is real work that otherwise produces no visible output at the moment
+# it matters.
 #
-# So it is printed at the moment it matters. A reviewer just finished; this says
-# what that changed and what is still outstanding. Nothing here blocks, and it
-# does not replace the command - it removes the reason to defer it.
+# So it is printed at that moment. A reviewer just finished; this says what that
+# changed and what is still outstanding. Nothing here blocks, and it does not
+# replace the command — it removes the reason to defer it.
 exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   local branch="$1" tip="$2" checklist vdir content lane tier derived eff
   checklist=".claude/reviews/${branch}.md"
@@ -706,17 +760,40 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   sec_base="$(exloom_fork_point "$tip" 2>/dev/null || true)"
   [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$tip" && sec_extra="security"
 
-  # THE BLOCK'S APPEARANCE IS THE SIGNAL. Printing the same shape whether or not
-  # anything is wrong puts "your branch cannot ship" on the same channel, with the
-  # same prefix, as "receipt recorded" - three times a round, mostly unchanged.
-  # That is how a status line gets tuned out, which would rebuild the problem it
-  # was written to fix, with more output.
+  # The block's APPEARANCE is the signal. Printing the same shape whether or not
+  # anything is wrong puts "your branch cannot ship" on the same channel, with
+  # the same prefix, as "receipt recorded" — several times a round, mostly
+  # unchanged. That is how a status line gets tuned out, which would rebuild the
+  # problem it exists to fix, with more output.
   #
   # So the detail prints only when something is ACTIONABLE, and a satisfied gate
-  # is one line. Then a reader does not have to read the block to know there is
-  # something to read.
+  # is one line. A reader can then tell there is something to read without
+  # reading it.
   local -a lines=()
   local actionable=0 covered=0 required=0
+
+  # ---------- past the cap, this stops asking for rounds ----------
+  #
+  # This function runs after every reviewer completes, and a fix commit always
+  # leaves the L1 receipt behind the tip — so without this it prints "covers an
+  # earlier commit, re-run it" on every pass, indefinitely. That makes the status
+  # a motor for the very loop the cap exists to stop, and the cap cannot correct
+  # it, because the cap is checked at the push and a session in a review loop is
+  # not pushing.
+  #
+  # Past the cap, then, the status stops instructing and starts asking. It still
+  # does not block — a status line that blocks would be a second gate — but it
+  # must not be the thing that keeps the loop running either.
+  #
+  # Note the state here, do NOT return on it. Going silent past the cap would
+  # hide a reviewer that was never dispatched. The problem is not that this
+  # function speaks; it is that it INSTRUCTS. The per-reviewer detail is useful
+  # at every round, and "re-run it" is the part that must stop.
+  local st_rounds st_max at_cap=0 st_answered=0
+  st_rounds="$(exloom_round_count "$checklist" "$tip" 2>/dev/null || echo 0)"
+  st_max="$(exloom_max_rounds 2>/dev/null || echo 3)"
+  [[ "${st_rounds:-0}" -ge "${st_max:-3}" ]] && at_cap=1
+  exloom_cap_override "$checklist" "$tip" 2>/dev/null && st_answered=1
 
   if [[ -n "$derived" && "$derived" =~ ^[0-3]$ && "$tier" -lt "$derived" ]]; then
     lines+=("  tier          declared ${tier}, but this diff derives to ${derived} - the push will be refused until it is raised")
@@ -724,12 +801,13 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   fi
 
   # Coverage is judged the way the GATE judges it, not by an exact match on the
-  # tip. A status line that is stricter than the check it reports on tells people
-  # to re-run a reviewer the gate is content with — and once its demands are
-  # known to be inflated, the ones that are real stop being read either.
+  # tip. A status line stricter than the check it reports on tells people to
+  # re-run a reviewer the gate is content with — and once its demands are known
+  # to be inflated, the ones that are real stop being read as well.
   #
-  # So: an APPROVED verdict at any commit whose diff to the tip cannot change
-  # behaviour is current. A line carrying no verdict is a launch, never coverage.
+  # So an APPROVED verdict at any commit whose diff to the tip cannot change
+  # behaviour counts as current, and a line carrying no verdict is a launch,
+  # never coverage.
   local agent file sha rline state
   for agent in $(exloom_required_reviewers "$eff" "$sec_extra"); do
     required=$((required + 1))
@@ -760,7 +838,17 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
       ok)         covered=$((covered + 1)) ;;
       unapproved) lines+=("  ${agent}  reviewed this code and did NOT approve it"); actionable=1 ;;
       launched)   lines+=("  ${agent}  launched, but its report never reached exloom - re-dispatch it without a name"); actionable=1 ;;
-      *)          lines+=("  ${agent}  covers an earlier commit - re-run it if code changed since"); actionable=1 ;;
+      *)
+        # Past the cap the fact is still worth stating; the instruction is not.
+        # A fix commit always leaves the L1 receipt behind the tip, so an
+        # unconditional "re-run it" here asks for a round after every completion,
+        # forever.
+        if [[ "$at_cap" -eq 1 ]]; then
+          lines+=("  ${agent}  covers an earlier commit - do NOT re-run, the branch is past its round cap")
+        else
+          lines+=("  ${agent}  covers an earlier commit - re-run it if code changed since")
+        fi
+        actionable=1 ;;
     esac
   done
 
@@ -776,16 +864,48 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     fi
   fi
 
-  if [[ "$actionable" -eq 0 ]]; then
-    echo "exloom: gate satisfied at ${tip:0:12} - ${covered}/${required} receipts current, Tier ${tier}, ${lane} lane" >&2
-    return 0
+  # Printed before anything else in this block, because every other line here is
+  # derived from receipts, and if none of them recorded a verdict then none of
+  # those lines mean what they appear to mean.
+  local st_blind2
+  if st_blind2="$(exloom_evidence_blind_note "$checklist" "$tip" 2>/dev/null)"; then
+    echo "exloom: ${st_blind2}" >&2
   fi
 
-  local cap=""
-  [[ "$eff" != "$tier" ]] && cap=", reviewer set capped at Tier ${eff}"
-  echo "exloom: ACTION NEEDED - ${branch} cannot ship as it stands (Tier ${tier}, ${lane} lane${cap})" >&2
-  printf '%s\n' "${lines[@]}" >&2
-  echo "  next          /review-complete does this bookkeeping and records it; dispatching reviewers by hand does none of it" >&2
+  # Satisfied is reported whether or not the branch is past its cap: the two are
+  # different facts, and suppressing this one at the cap would leave a branch
+  # whose reviewers are all current with no confirmation of it. Past the cap the
+  # STOP block follows, so the reader gets both.
+  if [[ "$actionable" -eq 0 ]]; then
+    echo "exloom: gate satisfied at ${tip:0:12} - ${covered}/${required} receipts current, Tier ${tier}, ${lane} lane" >&2
+    [[ "$at_cap" -eq 0 ]] && return 0
+  fi
+
+  if [[ "$actionable" -eq 1 ]]; then
+    local cap=""
+    [[ "$eff" != "$tier" ]] && cap=", reviewer set capped at Tier ${eff}"
+    echo "exloom: ACTION NEEDED - ${branch} cannot ship as it stands (Tier ${tier}, ${lane} lane${cap})" >&2
+    printf '%s\n' "${lines[@]}" >&2
+    echo "  next          /review-complete does this bookkeeping and records it; dispatching reviewers by hand does none of it" >&2
+  fi
+
+  # The cap, stated where the loop is actually spinning. The push gate asks the
+  # same question, but a session in a review loop is not pushing — it is
+  # reviewing — so this is the only place the question reliably gets asked.
+  if [[ "$at_cap" -eq 1 ]]; then
+    if [[ "$st_answered" -eq 1 ]]; then
+      echo "exloom: ${branch} has ${st_rounds} passes and a recorded cap decision - the round question is answered, do not dispatch another reviewer." >&2
+    else
+      echo "exloom: STOP - ${branch} has had ${st_rounds} review passes (cap ${st_max}). Do not dispatch another reviewer." >&2
+      echo "  A pass is not a fix. Ask the user, with AskUserQuestion and these options:" >&2
+      echo "    - Fix the open critical findings, then re-review" >&2
+      echo "    - Merge as-is - the open items are acceptable" >&2
+      echo "    - Show me the findings first" >&2
+      echo "  Their answer goes in ${checklist} under 'Escape hatches used' as" >&2
+      echo "  '- User approved at round cap - <their words>'. The push gate asks the" >&2
+      echo "  same question and will not pass this branch until it is answered." >&2
+    fi
+  fi
   return 0
 }
 
@@ -794,15 +914,16 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
 # Only the L1 reviewer's approval must cover the shipped commit. The others must
 # have RUN and APPROVED at some point on this branch.
 #
-# Requiring every reviewer to approve the SAME commit is what produced the 7-12
-# round loop: any fix creates a new commit, which cancels every approval —
+# Requiring every reviewer to approve the SAME commit is what makes a review loop
+# fail to converge: any fix creates a new commit, which cancels every approval —
 # including from reviewers already satisfied — so N reviewers must simultaneously
-# approve a target that moves each time one of them is answered. Expected rounds
-# go as 1/p^N. Decoupling makes it 1/p: L1 covers what ships, the others cover
-# that a hostile and a security pass happened and their findings were addressed.
+# approve a target that moves each time one of them is answered, and the expected
+# number of rounds grows as 1/p^N. Decoupling makes it 1/p. L1 covers what ships;
+# the others cover that a hostile pass and a security pass happened and that
+# their findings were addressed.
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
-  local vdir agent file content sha ok approved_at behind seen_verdict legacy_at dispatch_only
+  local vdir agent file content sha ok approved_at behind seen_verdict dispatch_only
   local -a missing=() stale=() unapproved=() launched=()
   vdir="$(exloom_verdict_dir "$checklist")"
 
@@ -810,9 +931,9 @@ exloom_check_verdicts() {
   # exloom_security_surface. Computed once here rather than in the tier lookup,
   # because only this function knows which commits are being compared.
   local sec_base sec_extra=""
-  # The same fork point the tier uses. First-that-resolves compared the branch
-  # against a stale release branch, so a dependency bump somebody else made
-  # months ago read as this change's security surface.
+  # The same fork point the tier uses. Taking the first base that resolves would
+  # compare the branch against a stale release branch, so a dependency bump
+  # somebody else made months ago would read as this change's security surface.
   sec_base="$(exloom_fork_point "$reviewed" || true)"
   if [[ -n "$sec_base" ]] && exloom_security_surface "$sec_base" "$reviewed"; then
     sec_extra="security"
@@ -823,10 +944,20 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""; seen_verdict=0; legacy_at=""; dispatch_only=""
-    # Read whole receipt LINES, so the commit and the verdict on one line are
-    # evaluated together. Reading them separately would let an APPROVED verdict
-    # from an old commit vouch for a REJECTED review of the current one.
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""
+
+    # A receipt with no verdict is NOT accepted, whatever wrote it.
+    #
+    # Such a line says a reviewer was launched. It does not say what the reviewer
+    # concluded, and "we do not know what it concluded" is not approval. The
+    # asymmetry is not close: refusing one costs a single re-dispatch, accepting
+    # one ships code nobody has been shown to have reviewed. The gate may not
+    # guess in the permissive direction.
+    #
+    # Read whole receipt LINES, so that the commit and the verdict on one line
+    # are evaluated together. Reading the two fields separately would let an
+    # APPROVED verdict from an old commit vouch for a REJECTED review of the
+    # current one.
     while IFS= read -r rline || [[ -n "$rline" ]]; do
       [[ -z "$rline" ]] && continue
       sha="$(printf '%s' "$rline" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
@@ -841,45 +972,27 @@ exloom_check_verdicts() {
         fi
       fi
 
-      # A dispatch is not a review. A reviewer that returned REJECTED must not
-      # satisfy the gate it was dispatched to satisfy.
-      #
-      # GRANDFATHERED: receipts written before exloom recorded verdicts have no
-      # "verdict" key at all. Those still count — refusing them would block every
-      # in-flight branch the moment this version is installed, and a migration
-      # that breaks running work does not get adopted, it gets uninstalled.
-      # A dispatch and a completion both write a line at the same commit: the
-      # first carries no verdict (the reviewer had not run), the second carries
-      # the real one. Breaking on the first verdict-less line would grandfather a
-      # REJECTED review through, so the legacy path is only reachable when NO
-      # covering line carries a verdict at all — i.e. genuinely old receipts.
-      #
-      # `"dispatch":true` says the line records a LAUNCH. It is never legacy: if
-      # a reviewer's report never reaches the hook, its dispatch line is the only
-      # line on file, and grandfathering it means an unread review satisfies the
-      # gate. Seen in the field — a named subagent reports through the mailbox
-      # rather than the tool result, so no completion line is ever written.
+      # A dispatch is not a review, and a reviewer that returned REJECTED must
+      # not satisfy the gate it was dispatched to satisfy. A line either states a
+      # verdict or it records a launch; only the first is evidence.
       case "$rline" in
         *'"verdict":"APPROVED"'*) seen_verdict=1; ok=1; approved_at="$sha"; break ;;
         *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) seen_verdict=1; rejected=1 ;;
-        *'"dispatch":true'*) dispatch_only="$sha" ;;
-        *) legacy_at="$sha" ;;   # a pre-verdict receipt
+        *) dispatch_only="$sha" ;;
       esac
     done < <(printf '%s\n' "$content")
-    if [[ $ok -ne 1 && $seen_verdict -eq 0 && -n "$legacy_at" ]]; then
-      ok=1; approved_at="$legacy_at"
-    fi
     if [[ $ok -ne 1 ]]; then
       if   [[ $rejected -eq 1 ]];        then unapproved+=( "$agent" )
       elif [[ -n "$dispatch_only" ]];    then launched+=( "$agent" )
       else                                    stale+=( "$agent" ); fi
     elif [[ "$agent" != "l1-reviewer" && -n "$approved_at" ]]; then
-      # Decoupling means these reviewers approve code, then more code lands. That
-      # gap is a real exposure — this branch's own round-1 fixes introduced six
-      # round-2 defects, one of them at exactly the integration level only a
-      # hostile pass catches. It cannot be closed without either re-running them
-      # every commit (the loop) or delta review (unsound), so it is DISCLOSED
-      # instead: a fact for whoever reads the PR, never a block.
+      # Decoupling means these reviewers approve code and then more code lands.
+      # That gap is a real exposure: fixes made in response to round-1 findings
+      # are exactly the commits most likely to touch an integration seam, and a
+      # hostile pass is what catches those. It cannot be closed without either
+      # re-running every reviewer per commit (the loop) or reviewing only the
+      # delta (unsound), so it is DISCLOSED instead — a fact for whoever reads
+      # the PR, never a block.
       behind="$(git rev-list --count "${approved_at}..${reviewed}" 2>/dev/null || echo 0)"
       if [[ "${behind:-0}" -gt 0 ]]; then
         echo "exloom: ${agent} approved ${approved_at:0:12} — ${behind} commit(s) have landed since; it did not see them." >&2
@@ -887,37 +1000,72 @@ exloom_check_verdicts() {
     fi
   done
 
-  # ---------- the round cap, checked BEFORE the reviewers are judged ----------
-  # The cap is a property of the branch, not of the findings. It used to be
-  # checked only when something was outstanding, so a branch that reached round
-  # 10 and then satisfied every reviewer shipped silently — the count never
-  # surfaced. And since verdict capture degraded on async dispatch, "outstanding"
-  # became rare, which disabled the cap almost entirely.
+  # ---------- the round cap ----------
+  #
+  # The cap is a property of the branch, not of the findings, so it is evaluated
+  # whether or not anything is outstanding. Checking it only when a reviewer is
+  # unsatisfied would let a branch reach round ten, satisfy everyone, and ship
+  # without the count ever surfacing.
   #
   # A counter that only goes up is the point: it cannot be satisfied by more
   # work, only by a person deciding the branch is done taking rounds.
   local rounds max
   rounds="$(exloom_round_count "$checklist" "$tip")"
   max="$(exloom_max_rounds)"
+
+  local outstanding=""
+  [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
+  [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
+  [[ ${#launched[@]} -gt 0 ]]   && outstanding="${outstanding}$(printf '  %s — launched, but its report never reached exloom\n' "${launched[@]}")"
+  [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
+
+  # The cap override answers a question about ROUNDS. It is not an answer about
+  # whether anyone reviewed the code.
+  #
+  # Checked here rather than above the receipt evaluation, because returning
+  # early would let a recorded "merge as-is" waive the requirement that reviewers
+  # ran at all — and the report a person answers that question against is built
+  # from those same receipts, so a broken pipeline makes the question itself
+  # wrong. The override clears the cap and nothing else; outstanding reviewers
+  # still block, and say so.
   if [[ "$rounds" -ge "$max" ]] && exloom_cap_override "$checklist" "$tip"; then
-    # The user was shown the full report — findings by pass, reviewer status,
-    # recommendation — and chose to merge. That answer settles the branch; it does
-    # not then get second-guessed by the same reviewer state they just read.
-    echo "exloom: shipping at ${rounds} passes on a decision recorded in ${checklist}." >&2
-    return 0
+    if [[ -z "$outstanding" ]]; then
+      echo "exloom: shipping at ${rounds} passes on a decision recorded in ${checklist}." >&2
+      return 0
+    fi
+    _exloom_block "$action" "A round-cap decision is recorded in ${checklist}, but it does not
+cover this.
+
+The cap answers 'have we reviewed enough times'. It does not answer 'did anyone
+review this', and these reviewers have not:
+
+
+${outstanding}
+$(exloom_evidence_blind_note "$checklist" "$tip" || true)
+Fix the reviewers listed above, or remove the cap decision if it was made on a
+report that showed them as satisfied."
+    return 2
   fi
+
   if [[ "$rounds" -ge "$max" ]]; then
-    local outstanding=""
-    [[ ${#unapproved[@]} -gt 0 ]] && outstanding="$(printf '  %s — reviewed this code and did NOT approve\n' "${unapproved[@]}")"
-    [[ ${#stale[@]} -gt 0 ]]      && outstanding="${outstanding}$(printf '  %s — approved earlier code, not the current tip\n' "${stale[@]}")"
-    [[ ${#launched[@]} -gt 0 ]]   && outstanding="${outstanding}$(printf '  %s — launched, but its report never reached exloom\n' "${launched[@]}")"
-    [[ ${#missing[@]} -gt 0 ]]    && outstanding="${outstanding}$(printf '  %s — never dispatched\n' "${missing[@]}")"
     [[ -n "$outstanding" ]] || outstanding="  every required reviewer is satisfied at this commit
 "
-    local trend crit cites fix_opt rec noop=""
+    local trend crit cites fix_opt rec noop="" blind=""
     trend="$(exloom_severity_trend "$checklist" "$tip" 2>/dev/null || true)"
-    [[ -n "$trend" ]] || trend="  (no findings recorded)
+    # "(no findings recorded)" reads as a clean branch. When the pipeline is
+    # blind it instead means nothing was ever parsed, and rendering the two the
+    # same way tells an author there is nothing to fix when the truth is that
+    # nobody knows.
+    if blind="$(exloom_evidence_blind_note "$checklist" "$tip")"; then
+      trend="  (nothing was recorded — see the warning above)
 "
+      blind="${blind}
+
+"
+    elif [[ -z "$trend" ]]; then
+      trend="  (no findings recorded)
+"
+    fi
     crit="$(exloom_open_criticals "$checklist" "$tip" 2>/dev/null || echo 0)"
     cites="$(exloom_open_critical_cites "$checklist" "$tip" 2>/dev/null || true)"
 
@@ -947,13 +1095,13 @@ fix in front of it will do the same.
     # NOT permissionDecision:"ask". That renders as approve/cancel on the push
     # itself, and cancel is a tool refusal rather than an answer: the push dies,
     # the session has nothing to act on, and the person has to retype their
-    # intent. A cap is a decision point, so it has to produce a DECISION.
+    # intent. A cap is a decision point, so it must produce a DECISION.
     #
     # So this blocks, and hands the session the question to put to the user. The
-    # push stays blocked either way — the gate is still enforced here, in the
-    # hook. What the session controls is only which of the named options gets
-    # carried out.
-    _exloom_block "$action" "Review has run ${rounds} passes on this branch (cap ${max}).
+    # push stays blocked either way — the gate is enforced here, in the hook.
+    # What the session controls is only which of the named options is carried
+    # out.
+    _exloom_block "$action" "${blind}Review has run ${rounds} passes on this branch (cap ${max}).
 
 Findings by pass:
 ${trend}
@@ -983,9 +1131,9 @@ return here with the same findings."
   if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 && ${#launched[@]} -eq 0 ]]; then return 0; fi
 
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
-  # Say which lane set that bar. A Sprint branch asked for one reviewer where the
-  # tier would have asked for three, and a reader of this message should not have
-  # to work out why the demand looks light.
+  # Say which lane set that bar. A Sprint branch is asked for one reviewer where
+  # the tier would have asked for three, and a reader of this message should not
+  # have to work out why the demand looks light.
   [[ "$lane" == "sprint" ]] && detail="This branch is on the Sprint lane, so the reviewer set is capped at Tier 1.
 ${detail}"
   [[ -n "$sec_extra" ]] && detail="${detail}
@@ -1038,12 +1186,13 @@ exloom_diff_is_behavioural() {
   local from="$1" to="$2" files f ext body line stripped marker
 
   # ---------- binary and metadata changes are ALWAYS behavioural ----------
-  # `git diff` emits only "Binary files a/x and b/x differ" for a binary change,
-  # which carries no +/- lines at all — so a line-based classifier called it
-  # non-behavioural and every reviewer receipt stayed "covering". Swapping a
-  # vendored .jar, a .dll, a model weight, a keystore or a wasm blob kept a stale
-  # review valid. Same shape for a pure rename and a file-mode change.
-  # --numstat reports "-\t-\tpath" for binary, which is unambiguous.
+  # For a binary change `git diff` emits only "Binary files a/x and b/x differ",
+  # with no +/- lines at all, so a purely line-based classifier would call it
+  # non-behavioural — and swapping a vendored .jar, a .dll, a model weight, a
+  # keystore or a wasm blob would keep a stale review valid. A pure rename and a
+  # file-mode change have the same shape.
+  #
+  # --numstat reports "-\t-\tpath" for binary content, which is unambiguous.
   if git diff --numstat "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
      | grep -qE '^-[[:space:]]+-[[:space:]]'; then
     return 0
@@ -1054,18 +1203,19 @@ exloom_diff_is_behavioural() {
   fi
 
   # ---------- comment markers are per-language, never universal ----------
-  # Treating `#` as a comment everywhere classified real code as inert:
+  # Treating `#` as a comment everywhere classifies real code as inert:
   #   #define TIMEOUT 300 / #include <stdlib.h>   (C/C++/ObjC/C#)
   #   #[derive(...)] / #![allow]                  (Rust attributes)
   #   #login { display: none }                    (CSS id selector)
   #   //go:build linux / //go:generate            (Go directives)
   #   #!/bin/sh                                   (shebang)
-  # Each was verified to flip the whole diff to non-behavioural.
+  # Any one of those is enough to flip a whole diff to non-behavioural.
   #
-  # So the marker set is chosen per file, and any file whose language is unknown
-  # is treated as having NO comment markers — i.e. every changed line counts.
-  # -z + tr: `git diff --name-only` quotes paths containing non-ASCII or special
-  # characters (core.quotepath), and the quoted form then matched no file at all.
+  # So the marker set is chosen per file, and a file whose language is unknown is
+  # treated as having NO comment markers — every changed line counts.
+  #
+  # core.quotepath=false: git otherwise quotes paths containing non-ASCII or
+  # special characters, and the quoted form matches no file on disk.
   files="$(git -c core.quotepath=false diff --name-only "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null)"
   [[ -n "$files" ]] || return 1
 
@@ -1088,13 +1238,11 @@ exloom_diff_is_behavioural() {
       *)                   marker='' ;;   # unknown language: nothing is a comment
     esac
 
-    # `-w` ignores whitespace-only changes, which is right for a brace language
-    # (reindenting a Java block changes nothing) and WRONG where indentation is
-    # syntax. In Python, de-indenting a line moves it out of an `if` branch; in
-    # YAML it re-parents a key. Both are behavioural and both are invisible to
-    # `-w`, so such a change scored "not behavioural", a stale receipt stayed
-    # valid, and the code shipped unreviewed. The suite pinned this as the spec:
-    # its only fixture was blank-line churn, the one case where `-w` is correct.
+    # `-w` ignores whitespace-only changes. That is right for a brace language,
+    # where reindenting a block changes nothing, and WRONG wherever indentation
+    # is syntax: in Python, de-indenting a line moves it out of an `if` branch;
+    # in YAML it re-parents a key. Both are behavioural and both are invisible to
+    # `-w`, which would score the change inert and leave a stale receipt valid.
     local wsflag='-w'
     case "$ext" in
       py|pyi|pyx|yaml|yml|sass|styl|pug|jade|haml|slim|coffee|nim|cr) wsflag='' ;;
@@ -1167,9 +1315,9 @@ exloom_check_refinds() {
     #      disposition keyword on that line or within the two lines after it (the
     #      template's entry is two lines: cite, then `FIXED THE CLASS:` beneath).
     #
-    #   2. No `## Re-finds` section -> the checklist predates this mechanism; fall
-    #      back to the cite appearing anywhere, so in-flight branches stay
-    #      unblockable rather than being stranded with no migration path.
+    #   2. No `## Re-finds` section -> a checklist from an older template; fall
+    #      back to the cite appearing anywhere, so a branch already in flight is
+    #      not stranded with no way past the gate.
     if [[ -n "$cite" ]]; then
       local refind_section
       refind_section="$(printf '%s\n' "$CHECKLIST_CONTENT" \
@@ -1208,9 +1356,9 @@ pick whichever is true:
   3. FIXED THE CLASS — you closed the whole set in this branch. Name the test.
   4. GENUINELY SEPARATE — why this defect is unrelated to the earlier one.
 
-Option 1 used to be missing, so the only way past this gate was to close the class
-in the current branch. That turned one-line changes into refactors, and every
-addition became unreviewed code the next round found defects in.
+Option 1 matters. Without it the only way past this gate is to close the class in
+the current branch, which turns a one-line change into a refactor — and every
+line that refactor adds is unreviewed code for the next round to find defects in.
 
 The findings are recorded per reviewer under the verdicts directory, one JSON
 line each, in <agent>.findings.jsonl."
@@ -1242,13 +1390,10 @@ exloom_check_proof() {
       if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
         exloom_diff_is_behavioural "$sha" "$reviewed" && continue
       fi
-      # The receipt records the hash of the pinned test command. Comparing it
-      # here is what makes the proof bind to the command that was actually
-      # proved: without this, a repo could prove with a real suite, then change
-      # .claude/exloom-test-command to `true`, and the receipt stayed valid
-      # because nothing compared the recorded hash to the current one. The field
-      # was written and never read, and the suite asserted only that the key
-      # existed — text, not behaviour.
+      # The receipt records the hash of the pinned test command, and comparing it
+      # here is what binds the proof to the command that was actually run.
+      # Without this comparison a repo could prove with a real suite, then change
+      # .claude/exloom-test-command to `true`, and the receipt would stay valid.
       local rec_hash cur_hash="none"
       rec_hash="$(printf '%s' "$line" | sed -n 's/.*"cmd_hash"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
       if [[ -n "$rec_hash" && "$rec_hash" != "none" ]]; then
@@ -1300,9 +1445,9 @@ alone and cannot be written by hand."
 
   _exloom_block "$action" "${detail}
 
-This check exists because review rounds are repeatedly spent on defects it finds
-first: an assertion satisfied by any string, a write-path test with no read-path
-test, a build that reported success without running the suite."
+This check exists because these defects are otherwise found by a human, a round
+or two later: an assertion satisfied by any string, a write-path test with no
+read-path test, a build that reported success without running the suite."
   return 2
 }
 
@@ -1321,10 +1466,10 @@ exloom_validate_checklist() {
   local checklist="$1" tip="$2" worktree="$3" action="$4"
   local content
 
-  # FAIL CLOSED on a policy exloom cannot read. Falling back to the built-in
-  # rules would be the worst available outcome: an author writes a Tier 3 rule
-  # for their identity module, a typo means it never loads, the built-ins score
-  # the change Tier 1, and everyone believes a rule is in force that never ran.
+  # FAIL CLOSED on a policy that cannot be read. Falling back to the built-in
+  # rules is the worst available outcome: an author writes a Tier 3 rule for
+  # their identity module, a typo means it never loads, the built-ins score the
+  # change Tier 1, and everyone believes a rule is in force that never ran.
   # Three outcomes only — valid: enforce; absent: built-ins; invalid: stop.
   if ! exloom_policy_load 2>/dev/null; then
     _exloom_block "$action" "$(exloom_policy_error)"
@@ -1426,17 +1571,17 @@ Run /review-complete — it names each tier-required section still missing."
   elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$eff_tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
   fi
-  # HTML comments are guidance, not evidence, and the template uses them to show
-  # what a filled-in line looks like — which necessarily quotes the placeholder
-  # tokens. Scanning them made the template's own instructions block the push.
+  # HTML comments are guidance, not evidence. The template uses them to show what
+  # a filled-in line looks like, which necessarily quotes the placeholder tokens,
+  # so scanning them would let the template's own instructions block the push.
   scan="$(printf '%s\n' "$content" \
     | awk '/<!--/{inc=1} !inc{print} /-->/{inc=0}' \
     | awk -v drop="$drop" '/^## /{skip=(drop!="" && $0 ~ drop)?1:0} !skip{print}')"
   if printf '%s' "$scan" | grep -Eq "$placeholder_re" || printf '%s' "$scan" | grep -qE '^Date:[[:space:]]*YYYY-MM-DD[[:space:]]*$'; then
-    # NAME THE LINES. Saying only "a required section" left the author grepping a
-    # regex out of this file to find out which one, while every other block in
-    # here names exactly what is missing. Reported with the heading each line sits
-    # under, since a bare line is not always enough to place it.
+    # NAME THE LINES. "A required section is unfilled" would leave the author
+    # reading a regex out of this file to work out which one. Each line is
+    # reported with the heading it sits under, since a bare line is not always
+    # enough to place it.
     local unfilled
     unfilled="$(printf '%s\n' "$scan" \
       | EXLOOM_PH_RE="$placeholder_re" awk '
@@ -1504,10 +1649,8 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     fi
 
     # Reviewer verdict receipts — the one check that tests an event rather than
-    # an assertion. Uses the DECLARED tier, which is >= derived by the check above.
-    # 3 means the round cap emitted an "ask" decision: the harness now prompts
-    # the USER. Propagated distinctly so the hook exits 0 — the JSON on stdout is
-    # the decision, and a non-zero exit would discard it and hard-block instead.
+    # an assertion. Uses the effective tier; the declared tier is already known
+    # to be at least the derived one from the check above.
     exloom_check_verdicts "$checklist" "$eff_tier" "$tip" "$reviewed_sha" "$action" "$lane"
     case "$?" in 0) ;; 3) return 3 ;; *) return 2 ;; esac
 
@@ -1543,8 +1686,8 @@ Run /review-complete to record who and what produced this change."
       p_commit="$(git log -1 --format=%H "$ref" -- "$checklist" 2>/dev/null)"
       if [[ -z "$p_commit" ]] || ! git verify-commit "$p_commit" >/dev/null 2>&1; then
         # Name the reason that actually applies. Naming the marker when the LANE
-        # asked for it sent people looking for a file that was not there, and
-        # told them to remove it.
+        # is what demanded signing would send the reader looking for a file that
+        # is not there, and tell them to remove it.
         local why="the repo has .claude/exloom-provenance-signed.enabled" out="remove that marker"
         if [[ "$lane" == "certified" ]]; then
           why="this branch is on the Certified lane"
@@ -1577,23 +1720,18 @@ Configure git commit signing (GPG or SSH) and re-run /review-complete, which com
 
 # Internal: print a uniform BLOCK message. Args: <action> <detail>
 #
-# There was a second emitter here, _exloom_ask, which printed the PreToolUse
-# permission JSON with decision "ask" so Claude Code would show its own prompt.
-# It is gone, and the round cap now blocks like everything else.
+# Every refusal in this file goes through here, including the round cap. A hook
+# has exactly one user-facing primitive — block with a message — and the
+# alternative, a PreToolUse permission decision of "ask", renders as
+# approve/cancel on the push itself. Cancel is not an answer: it refuses the
+# tool, the push dies, the session has nothing to act on, and the person has to
+# retype what they wanted. Two of the cap's three real answers, "fix these" and
+# "show me the findings", cannot be expressed as approve or cancel at all.
 #
-# The reasoning that put it there was sound and the outcome was not. `exit 2`
-# plus "ask the user" in stderr is only an instruction, and a session did write
-# its own approval line and push — so the decision was routed to the harness to
-# take the model out of the path. But the harness renders that as approve/cancel
-# on the push itself, and CANCEL IS NOT AN ANSWER: it refuses the tool, the push
-# dies, the session has nothing to act on, and the person has to retype what they
-# wanted. A cap exists to produce a decision, and two of its three real answers
-# (fix these, show me the findings) cannot be expressed as approve or cancel.
-#
-# Named options need AskUserQuestion, which is a session tool and not a hook
-# capability. So the cap blocks, and the block text tells the session which
-# question to ask and what to do with each answer. The push stays blocked by the
-# hook either way; what the session controls is only which named option runs.
+# Named options need AskUserQuestion, which is a session tool rather than a hook
+# capability. So a block carries the question in its text: the hook refuses, and
+# the message tells the session what to ask and what to do with each answer. The
+# push stays blocked either way; the session only chooses which option runs.
 _exloom_block() {
   local action="$1" detail="$2"
   cat >&2 <<EOF

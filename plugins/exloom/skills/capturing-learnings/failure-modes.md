@@ -40,4 +40,4 @@ The failure modes this skill exists to prevent.
 
 **What actually happens:** The file now has two instructions on the same topic. A reader follows the first one they find, which may be the outdated one. The contradiction propagates until someone notices the file disagrees with itself.
 
-**The correction:** Follow the "When a Learning Contradicts Existing Content" section above. Update in place, quote the before/after in the PR, never leave both versions.
+**The correction:** Follow "When a Learning Contradicts Existing Content" in [SKILL.md](SKILL.md). Update in place, quote the before and after in the PR, and never leave both versions standing.

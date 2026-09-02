@@ -67,8 +67,9 @@
 
 ## What a revert will not undo (Tier 3)
 
-Two lines, both facts about this diff, both answerable before merge. Not a
-recovery plan and not a task for a later reader.
+A committed runbook, and two lines. Both lines are facts about this diff and both
+are answerable before merge. Not a recovery plan, and not a task for a later
+reader.
 
 - Runbook path: <path to committed runbook.md>
 - **What reverting does not fix** - the state a revert leaves in the new shape:

@@ -150,9 +150,11 @@ Execution is a series of micro-decisions. Most are straightforward — the plan 
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 See [worked-example.md](worked-example.md).
+
 ## Integration
 
 This skill sits at the center of the plan-execute-verify pipeline. Understanding where it connects prevents gaps in the workflow.

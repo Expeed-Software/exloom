@@ -152,9 +152,9 @@ _exloom_policy_did_you_mean() {   # _exloom_policy_did_you_mean <bad-key>
 #   _EXLOOM_POL_FINGERPRINT     sha of the policy content
 # On failure: _EXLOOM_POL_ERR holds a complete, printable message.
 #
-# Loading is idempotent and cached per HEAD — the hooks call this from several
-# places on one push, and re-reading a git object each time is the sort of cost
-# that turned a 10-second suite into a 5-minute one once already.
+# Loading is idempotent and cached per HEAD. The hooks call this from several
+# places on a single push, and a git object read per call is expensive enough on
+# Windows to be worth avoiding.
 exloom_policy_load() {
   local head content line indent key val path depth
   local -a stack=()
@@ -309,15 +309,14 @@ exloom_policy_fingerprint() {
 # The caller merges this with the built-in tier by taking the maximum. There is
 # no path by which a repository rule lowers anything.
 #
-# The file list is an ARGUMENT rather than stdin on purpose. A function reading
-# stdin has to be called through a pipe, a pipe runs it in a subshell, and every
-# reason it recorded dies with that subshell — leaving a tier with no stated
-# cause, which is the one thing this feature exists to provide.
-# The tier also lands in _EXLOOM_POL_TIER, so a caller can read the answer AND
-# the reasons without a command substitution — `x="$(exloom_policy_tier ...)"`
-# runs this in a subshell and the reasons die with it. That is the same trap the
-# stdin version had, one level up, and it is silent both times: you get a tier
-# with no stated cause and nothing says why.
+# NOTHING HERE MAY RUN IN A SUBSHELL, and both of the obvious calling styles put
+# it in one. Reading the file list from stdin forces a pipe; assigning the result
+# with `x="$(exloom_policy_tier …)"` forces a command substitution. Either way the
+# reasons recorded in the global die with the subshell, and the caller is left
+# holding a tier with no stated cause — the one thing this exists to provide.
+#
+# So the file list is an ARGUMENT, and the tier is published through
+# _EXLOOM_POL_TIER as well as printed. Call it plainly and read both globals.
 exloom_policy_tier() {
   local files="${1:-}" tier best="" glob f
   _EXLOOM_POL_REASONS=""; _EXLOOM_POL_TIER=""

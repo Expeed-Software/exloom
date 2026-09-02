@@ -8,14 +8,16 @@ What follows is a condensed but structurally complete plan. A real plan would ha
 
 ---
 
-**Acceptance Criteria:**
+**Acceptance Criteria** — taken from `docs/exloom/specs/F-024-orders-csv-export.md`, not written here. The plan cites; the spec defines.
 
-1. An "Export CSV" button appears on the `/orders` page, right-aligned in the filter bar
-2. Clicking the button downloads a CSV file of the currently filtered orders
-3. CSV includes columns: `order_id`, `date`, `customer_name`, `total`, `status`
-4. Export respects the currently active filters (date range, status, search term)
-5. Export handles 100k rows without browser timeout (streaming response, no full buffering)
-6. Empty result set produces a CSV with headers only, no error dialog
+| Ref | Criterion |
+|---|---|
+| `F-024/R-1/AC-1` | An "Export CSV" button appears on `/orders`, right-aligned in the filter bar |
+| `F-024/R-1/AC-2` | Clicking it downloads a CSV of the currently filtered orders |
+| `F-024/R-2/AC-1` | The CSV carries the columns `order_id`, `date`, `customer_name`, `total`, `status` |
+| `F-024/R-2/AC-2` | The export respects the active filters — date range, status, search term |
+| `F-024/R-3/AC-1` | 100k rows export without a browser timeout: streamed, never fully buffered |
+| `F-024/R-4/AC-1` | An empty result set produces a CSV with headers only, and no error dialog |
 
 **Non-Goals:**
 
@@ -75,6 +77,7 @@ A: No. This is a non-goal for v1. Streaming means the browser shows its native d
 **Tasks (showing 4 of ~9 total):**
 
 **Task 1: Create streaming CSV service**
+- Serves: `F-024/R-2/AC-1`, `F-024/R-3/AC-1`
 - File: Create `backend/app/services/order_export.py`
 - Pattern: Follow service structure from `backend/app/services/order_service.py` — class with injected repository
 - What to do: Implement `OrderExportService` with a `generate_csv_rows(filters)` generator method. Use `csv.writer` writing to `io.StringIO`, yielding each row as a string. First yield is the header row: `order_id,date,customer_name,total,status`.
@@ -82,19 +85,22 @@ A: No. This is a non-goal for v1. Streaming means the browser shows its native d
 - Commit: `feat(orders): add streaming CSV generation service`
 
 **Task 2: Add export endpoint**
+- Serves: `F-024/R-1/AC-2`, `F-024/R-2/AC-2`, `F-024/R-3/AC-1`
 - File: Modify `backend/app/api/orders.py` — add new route after the existing `get_orders` route (line ~45)
 - What to do: Add `GET /api/orders/export` that accepts the same query params as `get_orders` (`date_from`, `date_to`, `status`, `search`). Inject `OrderExportService`, call `generate_csv_rows(filters)`, wrap in `StreamingResponse(media_type="text/csv")`. Set header: `Content-Disposition: attachment; filename="orders-export-{iso_timestamp}.csv"`.
 - Validation: `curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/orders/export"` returns `200`
 - Commit: `feat(orders): add CSV export endpoint with streaming response`
 
 **Task 3: Write export endpoint tests**
+- Serves: `F-024/R-2/AC-1`, `F-024/R-2/AC-2`, `F-024/R-4/AC-1`
 - File: Create `tests/api/test_order_export.py`
 - Pattern: Follow `tests/api/test_orders.py` — same `authenticated_client` fixture, same database seeding approach
 - What to do: Write 5 tests: (1) authenticated GET returns 200 with `text/csv` content type, (2) response body contains correct CSV header row, (3) filter params are applied (seed 3 orders, filter to 1, assert 1 data row), (4) empty result returns header row only, (5) unauthenticated GET returns 401
-- Validation: `pytest tests/api/test_order_export.py -v` — all 5 tests pass
+- Validation: `pytest tests/api/test_order_export.py -v` — all 5 tests pass. Name each test after the criterion it covers, e.g. `def test_F024_R4_AC1_empty_result_returns_header_only():`, so the proof run records which criteria the suite actually proved.
 - Commit: `test(orders): add CSV export endpoint tests`
 
 **Task 4: Add export button to orders page**
+- Serves: `F-024/R-1/AC-1`, `F-024/R-1/AC-2`
 - File: Modify `frontend/src/app/orders/orders.component.html` — insert after the filter bar closing div (line ~28)
 - What to do: Add `<button class="btn btn-outline" (click)="onExportCsv()">Export CSV</button>` inside the filter bar, right-aligned using the existing `ml-auto` utility class pattern from the page header.
 - File: Modify `frontend/src/app/orders/orders.component.ts` — add `onExportCsv()` method
@@ -104,6 +110,7 @@ A: No. This is a non-goal for v1. Streaming means the browser shows its native d
 
 Notice what this example plan does:
 
+- Every task cites the criteria it serves, by ref — a task that cites nothing is scope creep, and writing the citation is where you notice
 - Every task names exact files with paths, not descriptions
 - Every task has a validation command with specific expected output
 - Every edge case has a decision — handle it or mark it out of scope

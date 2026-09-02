@@ -78,8 +78,8 @@ For every finding, ask: "what reviewer or test should have caught this?" If the 
 
 Extract every claim the change asserts beyond its own lines — then go and check each one against the tree:
 
-- **Universal statements in docs, javadoc, comments, READMEs, CHANGELOGs.** "Every built-in factory routes through this method." "All inputs are sanitised here." "This is the only entry point." Grep for the counterexample. One real case: eight javadocs said every built-in factory routed through one method while two reference factories a file away echoed raw, and a sibling class had no sanitiser at all. The diff was clean and L1 passed it twice.
-- **"Fixed the class" claims.** If the change or its checklist says a whole class of defect is now closed, verify the class is closed. Fixing the instance and *claiming* the class is the same lie in a different place, and it has shown up on two consecutive branches.
+- **Universal statements in docs, javadoc, comments, READMEs, CHANGELOGs.** "Every built-in factory routes through this method." "All inputs are sanitised here." "This is the only entry point." Grep for the counterexample. A claim like this is repeated across many files while one or two call sites a directory away do the opposite — and the diff that added the claim is itself clean, so a per-file review passes it.
+- **"Fixed the class" claims.** If the change or its checklist says a whole class of defect is now closed, verify the class is closed. Fixing the instance and *claiming* the class is the same lie in a different place.
 - **Migration and compatibility claims.** "Backwards compatible", "no callers affected", "safe to roll back" — each is checkable, and each is believed by the next reader without checking.
 
 A false claim is a **blocking** finding even when the code is correct, because it routes every future reader wrong and nothing downstream re-checks it. Cite the claim's location and the file that falsifies it.
@@ -102,7 +102,7 @@ Note that a docs-only or comment-only change scores Tier 0 by file extension and
 - <brief note on what you verified and found nothing>
 
 ## Reviewer's meta-notes
-- <which of the seven questions surfaced the most issues>
+- <which of the eight questions surfaced the most issues>
 - <any gap in the earlier review gates this reveals>
 ```
 
@@ -119,11 +119,10 @@ Put them in separate sections. **PRE-EXISTING findings are NEVER blocking** and
 never affect your verdict. Write them as backlog entries — one line, enough to open
 a ticket from — and move on.
 
-Why this rule exists, from a real branch: a reviewer reported a genuine
-guardrail-dropping bug that predated the branch. The author fixed it because "the
-branch already touched that method". That fix needed its own fixes, and the branch
-finished three features larger than the bug it was opened for. The reviewer was
-right about the bug and wrong to let it block; the cost was four review rounds.
+A pre-existing bug reported as blocking gets fixed because "the branch already
+touches that method" — then that fix needs its own fixes, and the branch finishes
+several features larger than the defect it was opened for. Being right about the
+bug and wrong to let it block are entirely compatible.
 
 If you cannot tell which it is, diff the file against the merge base. Do not guess,
 and do not default to IN-SCOPE.
@@ -137,11 +136,11 @@ finding cannot be fixed without building something new, say exactly that and sto
 **"this needs new infrastructure" is itself the finding**, and the decision to build
 it belongs to the author and their ticket, not to you.
 
-The failure this prevents, from a real branch: rather than fix a third instance of a
-defect, the author built a detector for the whole class. The reasoning — "the fix is
-the check, not the instances" — is defensible in the abstract, which is exactly why
-it was persuasive. It converted a run of sloppiness into an engineering project, and
-the detector produced defects of its own across four further rounds.
+The failure this prevents: rather than fix the third instance of a defect, the
+author builds a detector for the whole class. The reasoning — "the fix is the
+check, not the instances" — is defensible in the abstract, which is exactly why it
+is persuasive. It converts a run of sloppiness into an engineering project, and
+the detector arrives as new unreviewed code with defects of its own.
 
 ## 3. Blocking findings come from the checklist. Everything else is advisory.
 
@@ -176,8 +175,8 @@ findings, naming, comments, test names, advisory items and pre-existing entries 
 NOT justify re-running you. Say so explicitly, because the author will otherwise
 treat every line you wrote as work.
 
-By round nine an open list is typically stale comments, test parameter names and a
-javadoc sentence — cosmetic work that reads as progress and is not.
+Late in a long review the open list is typically stale comments, test parameter
+names and a javadoc sentence — cosmetic work that reads as progress and is not.
 
 Your findings degrade in severity as rounds go on. That is a property of you, not
 evidence the code is getting worse. If this round produced no blocking in-scope

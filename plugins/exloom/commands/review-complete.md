@@ -51,7 +51,7 @@ Each receipt carries `"round_needed"`, read from the `ROUND NEEDED AFTER FIX:` l
 grep -h '"round_needed"' .claude/reviews/<branch>.verdicts/*.json
 ```
 
-If that holds, ship. Do not run another round to be thorough — an extra round on an approved commit produces thinner findings that then get treated as work, which is the specific way a two-round change becomes a nine-round one.
+If that holds, ship. Do not run another round to be thorough — an extra round on an approved commit produces thinner findings, and thin findings get treated as work. That is the specific way a two-round change becomes a nine-round one.
 
 `"round_needed":"UNKNOWN"` means the reviewer gave no such line, and counts as `YES`: a reviewer that did not answer has not told you the loop can stop. Re-dispatch that one reviewer rather than the whole set.
 
@@ -65,7 +65,8 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 - **Proof that the change is tested: `proof.json` receipt present, `"result":"PROVED"`, covering the reviewed commit.** Written only by:
 
   ```bash
-  bash "${CLAUDE_PLUGIN_ROOT}/scripts/prove-change-is-tested.sh"
+  PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"
+  bash "$PROVE"
   ```
 
   It runs the suite three times — at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass). A `NOT_PROVED` receipt does not satisfy the gate; fix the tests rather than re-running.
@@ -149,7 +150,7 @@ The dispatch prompt is an address, not a briefing.
 
 Two reasons. Anything the expensive reviewers say about a commit you are about to change is stale before you read it — dispatching all of them up front means paying for reviews of code that no longer exists. And because their approval no longer expires when you fix something, running them last is what makes their approval cover very nearly the code you ship: the only lines they miss are fixes made in response to their own findings.
 
-The gate prints how far behind they are (`approved 9e1d992 — 3 commit(s) have landed since`). That is a fact for whoever reads the PR, not a block. If the number is large, you dispatched them too early.
+The gate prints how far behind they are (`approved <sha> — 3 commit(s) have landed since`). That is a fact for whoever reads the PR, not a block. If the number is large, you dispatched them too early.
 
 - Reversal proof missing → ask which test exercises the rollback; if none exists, say so plainly and offer to write it rather than accepting prose.
 
@@ -227,7 +228,7 @@ Then fill the **Provenance** section — who and what produced this change:
   `origin/main`, then `origin/master`, then `origin/dev`); if there is no base, use
   the repository's first commit.
 - **Attested:** today's date.
-- **Policy fingerprint:** the output of `exloom_policy_fingerprint` (source the plugin's `hooks/lib.sh` first), or `none` if the repo has no `.exloom.yml`. This binds the review to the *policy* that was in force, not only to the code — so a later reader can tell that a change was reviewed under a policy the repo has since changed.
+- **Policy fingerprint:** the output of `exloom_policy_fingerprint` (source the installed `hooks/lib.sh` first — resolve it with the same `find … | sort -V | tail -1`), or `none` if the repo has no `.exloom.yml`. This binds the review to the *policy* that was in force, not only to the code — so a later reader can tell that a change was reviewed under a policy the repo has since changed.
 
 ```
 ## Provenance
@@ -268,7 +269,7 @@ signed-provenance repo.
 
 Print:
 
-> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now claim done and run `git push` / open a PR. The Stop hook and PreToolUse hook will no longer block.
+> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now run `git push` or open a PR; the push gate will no longer block this branch.
 
 ## Rules
 

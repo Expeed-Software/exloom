@@ -43,13 +43,18 @@ If there are no orphans, say so and stop.
 
 Offer the user three choices for the orphan set:
 
-1. **Archive** (default, recommended) — move each orphan checklist under `.claude/reviews/archive/` preserving its relative path:
+1. **Archive** (default, recommended) — move each orphan checklist under `.claude/reviews/archive/` preserving its relative path, **together with its evidence**:
    ```bash
    mkdir -p "$(dirname ".claude/reviews/archive/<b>.md")"
    git mv ".claude/reviews/<b>.md" ".claude/reviews/archive/<b>.md"
+   # the receipts and any bypass record belong with the checklist they document
+   [ -d ".claude/reviews/<b>.verdicts" ] && git mv ".claude/reviews/<b>.verdicts" ".claude/reviews/archive/<b>.verdicts"
+   [ -f ".claude/reviews/<b>.bypass.json" ] && git mv ".claude/reviews/<b>.bypass.json" ".claude/reviews/archive/<b>.bypass.json"
    ```
-   Archiving keeps the evidence in-tree and in history while clearing the active directory. The gate only ever reads `.claude/reviews/<current-branch>.md`, so archived files never affect enforcement.
-2. **Delete** — `git rm ".claude/reviews/<b>.md"`. The checklist remains in git history; only the working tree loses it.
+   Move all three or none. A checklist archived without its receipts leaves the evidence stranded under the active directory, where the next reader cannot tell which branch it belonged to.
+
+   Archiving keeps everything in-tree and in history while clearing the active directory. The gate only ever reads `.claude/reviews/<current-branch>.md`, so archived files never affect enforcement.
+2. **Delete** — `git rm` the checklist and the same two companions. They remain in git history; only the working tree loses them.
 3. **Cancel** — do nothing.
 
 Wait for an explicit choice. Do not default to acting.
