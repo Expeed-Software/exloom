@@ -1,7 +1,6 @@
 # Tasks Must Be Bite-Sized — planning-for-handoff
 
-Extracted from SKILL.md so the skill loads lean.
-
+How to size a task, and why the size matters.
 
 Each task should be one atomic change the executor can complete, validate, and commit in a single focused sitting. The size signal is atomicity, not a stopwatch — one logical change with one validation step. (As a rough feel, that is often on the order of minutes, not an afternoon; do not treat any specific minute count as a rule.) This is a forcing function against hidden ambiguity: if a task sprawls into many unrelated changes, it contains decisions the author did not make, edge cases the author did not address, and complexity the author did not decompose.
 

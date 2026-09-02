@@ -1,7 +1,6 @@
 # Worked Example — executing-handoff-plans
 
-Extracted from SKILL.md so the skill loads lean. This is a full worked example.
-
+One execution taken from start to finish.
 
 The following walks through a complete execution from start to finish. Pay attention to the three deviations — they show all three handling paths: a self-resolved mechanical change (logged anyway), a paused design decision, and a specification conflict that required author input. Each is logged as its own entry, demonstrating the core discipline: log first, resolve second, never improvise.
 

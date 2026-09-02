@@ -1,7 +1,6 @@
 # Failure Modes — capturing-learnings
 
-Extracted from SKILL.md so the skill loads lean.
-
+The failure modes this skill exists to prevent.
 
 ### 1. "I'll remember this, no need to capture it"
 

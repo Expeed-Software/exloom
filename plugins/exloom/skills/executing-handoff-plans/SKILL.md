@@ -101,7 +101,7 @@ Commit message format should include the plan reference and task number. Example
 
 All tasks are complete. Run `exloom:auditing-plan-fidelity`.
 
-It does mechanically what this section used to ask you to do by hand: it compares the plan's file list against the diff, checks the spec's criteria against the tasks in both directions, and reads the Deviation Log for entries left open. Three of those are set differences. A model re-reading its own work finds fewer of them than `comm` does, and asking for both spends the tokens twice.
+It compares the plan's file list against the diff, checks the spec's criteria against the tasks in both directions, and reads the Deviation Log for entries left open. Three of those are set differences, and a model re-reading its own work finds fewer of them than `comm` does — so do not also check them by hand.
 
 The one thing to bring to it that it cannot compute: **a paused deviation is not a resolved one.** If you logged something and moved on without settling it, say so now rather than letting the audit find an entry with no resolution.
 

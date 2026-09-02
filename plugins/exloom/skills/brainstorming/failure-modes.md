@@ -1,7 +1,6 @@
 # Failure Modes — brainstorming
 
-Extracted from SKILL.md so the skill loads lean. This is the failure modes this skill exists to prevent — thought pattern, why it feels right, what actually happens, and the correction.
-
+The failure modes this skill exists to prevent: thought pattern, why it feels right, what actually happens, and the correction.
 
 ### 1. "This is too simple for brainstorming"
 

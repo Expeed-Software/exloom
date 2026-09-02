@@ -1,7 +1,6 @@
 # Worked Example — brainstorming
 
-Extracted from SKILL.md so the skill loads lean. This is a full worked example.
-
+One request taken through every step.
 
 **Scenario:** Developer says "I need to add real-time notifications to our
 dashboard."

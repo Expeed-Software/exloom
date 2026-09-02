@@ -1,7 +1,6 @@
 # Worked Example — planning-for-handoff
 
-Extracted from SKILL.md so the skill loads lean. This is a full worked example.
-
+One feature taken through every step.
 
 **Scenario:** Add CSV export to the orders page in an existing app (Angular frontend, FastAPI backend, PostgreSQL database). This is a brownfield feature — the app already has an orders listing page with filters, a reports module with a streaming PDF endpoint, and a shared download utility on the frontend.
 

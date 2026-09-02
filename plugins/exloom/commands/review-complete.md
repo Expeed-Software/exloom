@@ -70,7 +70,7 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 
   It runs the suite three times — at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with the change and tests together (must pass). A `NOT_PROVED` receipt does not satisfy the gate; fix the tests rather than re-running.
 
-  This applies to **every tier from 1 up**, including Tiers 2 and 3. It was enforced by the hooks and named in none of the tier lists, so a session could fill this file correctly, tick every box, commit, and then be blocked at push by a check nothing had mentioned.
+  This applies to **every tier from 1 up**, including Tiers 2 and 3.
 
 ### Tier 2 required (Tier 1 +)
 - Adversarial review: `adversarial-reviewer.json` receipt present, findings listed with category, resolution per finding. This dispatch also carries the cross-layer contract check (fields / endpoints / events / columns / config keys); paste the grep output and resolve the orphan list.
@@ -78,14 +78,15 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 ### Tier 3 required (Tier 2 +)
 - Security review: `security-auditor.json` receipt present, tool output pasted, findings dispositioned.
 - Runbook path filled and the file exists at that path.
-- **Stop the bleeding** filled with an exact command or action, not a description. This one always exists - reverting a deploy, flipping a flag, disabling a route.
-- **What that does not fix** filled. `nothing` is a valid answer and must be stated rather than left blank; the common real answers are rows already rewritten, messages already sent, events consumers already received, caches rebuilt, credentials rotated.
-- **How that state is recovered** filled. Three shapes are acceptable and no others: a named backup *plus how the author verified a restore works*; a replay or repair procedure; or `NOT RECOVERABLE` with the reason shipping anyway was right.
-  - An unverified backup is not a recovery plan. "We have nightly backups" does not answer it; "restored last night's dump into staging on 2026-09-01" does.
-  - `NOT RECOVERABLE` is legitimate - a migration that drops values, an email already sent - and is not an escape hatch to argue with. It is the author making a one-way door explicit. Check only that the reason is stated; do not push back on it.
-- Both Tier 3 boxes ticked.
+- **What reverting does not fix** filled. `nothing` is a valid answer and must be stated rather than left blank; the common real answers are rows already rewritten, messages already sent, events consumers already received, caches rebuilt, credentials rotated.
+- **What would recover it** filled: a named mechanism, or `NOT RECOVERABLE` with the reason shipping anyway is right.
+  - `NOT RECOVERABLE` is legitimate - a migration that drops values, an email already sent - and is not an escape hatch to argue with. Check only that the reason is stated; do not push back on it.
+  - Do **not** ask whether the recovery has been tested, whether the backup restores, or who will verify it at deploy. That needs an environment this branch does not have, and the checklist is read between now and merge and never again.
+- The Tier 3 box ticked.
 
-Do **not** ask for a single "rollback command". It answers whether the *code* can be reverted, which is nearly always yes, while implying the *effects* were handled - and reverting a deploy while the database, the queue and a third party are all in the new state is how one incident becomes two.
+Do **not** ask for a single "rollback command". It answers whether the *code* can be reverted, which is nearly always yes, while implying the *effects* were handled.
+
+**Every line you require must be answerable by the person standing here**: an author, on a feature branch, before merge, from the diff in front of them. If a line needs a different role or a different environment, it does not belong in this document. If it defers something, it must name the system that now owns it - a ticket, something with a trigger.
 
 ## Step 3 — Verify section content is real, not placeholder
 

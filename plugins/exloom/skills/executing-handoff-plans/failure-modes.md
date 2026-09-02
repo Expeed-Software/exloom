@@ -1,7 +1,6 @@
 # Failure Modes — executing-handoff-plans
 
-Extracted from SKILL.md so the skill loads lean. This is the failure modes this skill exists to prevent — thought pattern, why it feels right, what actually happens, and the correction.
-
+The failure modes this skill exists to prevent: thought pattern, why it feels right, what actually happens, and the correction.
 
 These are the five most common ways execution goes wrong. Each one feels reasonable in the moment — that is what makes them dangerous. The pattern across all five: the executor substitutes their own judgment for the plan's specification, and the substitution is invisible to everyone except the executor. By the time anyone else notices, the damage is done.
 

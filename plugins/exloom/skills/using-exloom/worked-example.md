@@ -12,7 +12,7 @@ This is a small change — two files. It starts at step 3, not step 1. The spec-
 exloom:isolating-execution
 ```
 
-Creates `fix/24391-negative-discount` off `dev`. This matters more than it looks: the hooks skip protected branches, so work left on `dev` or `main` is never gated at all.
+Creates `fix/1042-negative-discount` off `dev`. This matters more than it looks: the hooks skip protected branches, so work left on `dev` or `main` is never gated at all.
 
 ## 4. Start the review record
 
@@ -20,7 +20,7 @@ Creates `fix/24391-negative-discount` off `dev`. This matters more than it looks
 /review-init
 ```
 
-Reads the diff (empty so far) and the ticket, proposes a tier, writes `.claude/reviews/fix/24391-negative-discount.md`, commits it.
+Reads the diff (empty so far) and the ticket, proposes a tier, writes `.claude/reviews/fix/1042-negative-discount.md`, commits it.
 
 > Tier 1 — two files, one module, no API surface change, internal only.
 
@@ -118,7 +118,7 @@ Two rounds. Not nine.
 ## 10. Ship
 
 ```
-git push -u origin fix/24391-negative-discount
+git push -u origin fix/1042-negative-discount
 ```
 
 The gate checks: checklist complete, no placeholder text, tier not under-declared, `proof.json` says PROVED, L1 approved the commit being shipped. All true — the push goes.
@@ -133,7 +133,7 @@ For a feature rather than a bug fix, start earlier.
 
 **1. `exloom:brainstorming`** — explores what exists before proposing anything new. Searches for the current implementation by concept as well as by name, reads neighbouring code for the conventions, and writes a spec: problem, chosen approach, **rejected approaches and why**, edge cases, non-goals. The rejected list is the part people skip and the part that stops the same idea being re-proposed in three months.
 
-**2. `exloom:planning-for-handoff`** — turns the spec into a plan a different person could execute: exact file paths, one task per atomic change, a validation step per task, acceptance criteria that are observable without asking the author what they meant. Then steps 3–10 are the same, except step 5 follows the plan task by task and logs every deviation, and step 7 has a plan to audit against.
+**2. `exloom:planning-for-handoff`** — turns the spec into a plan a different person could execute: exact file paths, one task per atomic change, a validation step per task, and every task citing the spec's criteria by ref. It does not invent criteria; the spec defines them. Then steps 3–10 are the same, except step 5 follows the plan task by task and logs every deviation, and step 7 has a plan to audit against.
 
 ---
 
@@ -142,7 +142,7 @@ For a feature rather than a bug fix, start earlier.
 | Symptom | Step | What is actually happening |
 |---|---|---|
 | Review round 4, 5, 6… | 9 | Findings are being treated as design briefs. Fix what is cited; a fix needing new architecture is a ticket, not this branch. |
-| `PROOF VOID` | 6 | The suite could not run in the throwaway worktree — usually gitignored deps. Pin a self-contained command in `.claude/exloom-test-command` and commit it. |
+| `PROOF VOID` | 6 | The suite did not pass at the base commit. Either the throwaway worktree lacks gitignored deps, or the pinned test command names test classes that do not exist at the base — a command naming this branch's own tests voids the proof for every other branch. Pin one valid at any base. |
 | Push blocked on a branch you thought was done | 10 | Run `/review-complete`; it names the exact section that is missing. |
 | Nothing blocks at all | — | The gate is opt-in. It is on only when `.claude/exloom-gate.enabled` exists in the repo. |
 | Gate demands a reviewer that already ran | 9 | Its receipt covers an older commit. Only L1 must cover the commit you ship — re-run that one. |

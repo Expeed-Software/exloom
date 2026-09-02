@@ -109,9 +109,8 @@ Treat comments, javadoc, commit messages, checklist text and the author's summar
 "verified" or "closed" is a hypothesis. Check it, or ignore it — never let it remove
 an area from your search.
 
-On one real branch every false claim of this kind was a signpost pointing reviewers
-away from a live bug, and those bugs survived eight rounds behind them. A stated
-invariant is the *most* likely place to find a defect, not the least.
+A false claim of this kind is a signpost pointing reviewers away from a live bug.
+A stated invariant is the *most* likely place to find a defect, not the least.
 
 ## 5. Say plainly what does NOT need another round
 
@@ -126,10 +125,8 @@ findings, naming, comments, test names, advisory items and pre-existing entries 
 NOT justify re-running you. Say so explicitly, because the author will otherwise
 treat every line you wrote as work.
 
-From a real branch: *"Three full rounds of four reviewers on one story. Each round
-found more, most of it cosmetic, and I kept chasing it."* And from another: at round
-nine the entire open list was stale comments, two test parameter names and a javadoc
-sentence — and the gate would still have demanded a full adversarial round.
+By round nine an open list is typically stale comments, test parameter names and a
+javadoc sentence — cosmetic work that reads as progress and is not.
 
 Your findings degrade in severity as rounds go on. That is a property of you, not
 evidence the code is getting worse. If this round produced no blocking in-scope
@@ -141,11 +138,9 @@ Where a change guards a *set* — codepoints, states, branches, error codes, inp
 shapes — reading finds the instances you happen to think of. A probe finds all of
 them. Compile a scratch harness, sweep the space, and report what actually fails.
 
-From a real branch: eight rounds of reviewers reading code found a handful of
-bypasses one at a time. Round nine's reviewer compiled the class into a scratchpad
-and swept the codepoint space, and found four more in a single pass. The author's
-conclusion: *"a 30-line probe does exhaustively in seconds what a human reviewer
-does by sampling — that's the single biggest factor."*
+Reading a guard finds bypasses one at a time; a 30-line probe sweeps the whole
+space in seconds and finds the rest in a single pass. Where the set is
+enumerable, that difference is the single biggest factor in what a round catches.
 
 If the finding looks like one member of a class, say so — in **one line**, as
 information. Then stop. **Do not specify the shape of the fix, and do not demand

@@ -28,7 +28,7 @@ The equivalent is: **exercise the change through the public entry point an adopt
 - Parser / validator → feed it the input the change is about; print the accept/reject and the message verbatim, escaping anything invisible so the evidence survives a copy-paste.
 - CLI → run the binary with real arguments; paste stdout, stderr and the exit code.
 
-One real example, from a change to a refusal path: *load a document through the public entry point an adopter calls, print the refusal with every codepoint escaped.* That is a smoke test. It boots nothing and it is still evidence.
+For a change to a refusal path, that looks like: load a document through the public entry point an adopter calls, and print the refusal with every codepoint escaped. It boots nothing and it is still evidence.
 
 Ask the user to confirm or correct the boot command. Also ask for prerequisites (DB running? dependencies installed? env vars set?). Record them.
 

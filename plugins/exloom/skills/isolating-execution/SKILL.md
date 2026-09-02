@@ -157,8 +157,7 @@ always in service of review, never tidiness alone.
 
 ## Integration
 
-- **Before:** `exloom:executing-handoff-plans`
-  both run this first.
+- **Before:** `exloom:executing-handoff-plans` — run this first.
 - **Pairs with:** `exloom:review-gate` — the feature branch is what the gate
   protects.
 - **At finish:** integrate the branch and (for Level 2) remove the worktree.

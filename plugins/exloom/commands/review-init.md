@@ -11,7 +11,15 @@ You are initializing your org's review checklist for the current branch. Execute
 
 Run:
 - `git rev-parse --abbrev-ref HEAD` — the branch name (refuse to proceed if it is `main`, `master`, `dev`, or `develop`; tell the user the protocol only applies to feature branches).
-- `git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || git merge-base HEAD origin/dev` — the fork point.
+- The fork point — the merge-base **nearest** to HEAD, not the first candidate that resolves. Where `main` is a release branch and `dev` is the branch work merges into, taking `main` puts the whole release gap in the diff and every branch derives Tier 3. Compute it against each of `origin/main`, `origin/master`, `origin/dev`, `origin/develop` that exists and keep the one fewest commits from HEAD:
+
+  ```bash
+  for r in origin/main origin/master origin/dev origin/develop; do
+    git rev-parse --verify --quiet "$r" >/dev/null || continue
+    mb=$(git merge-base HEAD "$r") || continue
+    echo "$(git rev-list --count "$mb..HEAD") $mb"
+  done | sort -n | head -1
+  ```
 - `git diff --stat <fork-point>...HEAD` — the blast-radius summary.
 - `git diff --name-only <fork-point>...HEAD` — the list of changed files.
 
@@ -66,12 +74,10 @@ find ~/.claude/plugins -path '*exloom*/templates/review-checklist.md' | sort -V 
 ```
 
 **`| head -1` is wrong here and silently gives you a stale template.** Several
-plugin versions stay in the cache, and `find` returns them path-sorted, so
-`head -1` picks the *lowest* version number — on one real machine, 1.4.0. A
-session following that instruction gets a checklist with no test-contract
-fidelity line, no Re-finds section and no Provenance block, then fills it in
-honestly and is blocked by a gate checking for sections its template never had.
-`sort -V | tail -1` takes the highest version.
+plugin versions stay in the cache and `find` returns them path-sorted, so
+`head -1` picks the *lowest* version. The checklist it copies is missing sections
+the gate checks for, so the branch is blocked by a check its template never
+mentioned. `sort -V | tail -1` takes the highest version.
 
 Sanity-check the file you copied: it must contain `## Re-finds` and
 `## Provenance`. If it does not, you have an old template.

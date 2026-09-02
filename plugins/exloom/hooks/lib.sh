@@ -626,7 +626,7 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
     actionable=1
   else
     local unfilled
-    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|rows rewritten|restore from the backup)' || true)"
+    unfilled="$(printf '%s\n' "$content" | grep -cE '<(paste output|exact command|exact steps|expected-result|file:line|category \+ file:line|list|severity \+|what is missing|PROVED / NOT_PROVED|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*)' || true)"
     if [[ "${unfilled:-0}" -gt 0 ]]; then
       lines+=("  checklist     ${unfilled} placeholder line(s) still unfilled")
       actionable=1
@@ -1249,7 +1249,7 @@ Run /review-complete — it names each tier-required section still missing."
 
   # Placeholder scan, scoped to the sections that apply to the declared tier.
   local placeholder_re drop scan
-  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*)>'
+  placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*)>'
   drop=''
   if   [[ "$eff_tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
   elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'

@@ -172,11 +172,10 @@ requirement, and money, permissions or deletion with no `unwanted` requirement
 anywhere. **Fix the errors. Judge the warnings** — one you disagree with is a
 warning to ignore, not a document to contort.
 
-**This step used to be five prose checks and a linter.** The prose checks were
-"scan for placeholders", "check internal consistency", "check for ambiguity" —
-things a model does unprompted, so instructing them again spends tokens without
-changing the spec. What was left is the part that is not self-review: a script
-that either exits 0 or does not.
+This step is the linter and nothing else. Scanning for placeholders, checking
+internal consistency, checking for ambiguity — a model does those unprompted, and
+instructing them again spends tokens without changing the spec. What is left is
+the part that is not self-review: a script that either exits 0 or does not.
 
 ### Step 8: User Reviews, Then Transition
 

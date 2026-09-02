@@ -63,34 +63,22 @@
 - New dependencies verified real (not hallucinated / typo-squatted): <list, or N/A>
 - Note: first pass only — not a security guarantee.
 
-## Recovery plan (Tier 3)
+## What a revert will not undo (Tier 3)
 
-Answer all three. "Rollback" is two questions, and asking only for a command
-answers the easy one while implying the hard one is handled: reverting the code
-is nearly always possible, undoing its effects frequently is not. Reverting a
-deploy while the database, the queue and a third party are all in the new state
-is how one incident becomes two.
+Two lines, both facts about this diff, both answerable before merge. Not a
+recovery plan and not a task for a later reader.
 
 - Runbook path: <path to committed runbook.md>
-- **Stop the bleeding** — the exact command or action that halts the damage:
-  `<exact command>`
-  Revert the deploy, flip the flag, disable the route. This one always exists.
-- **What that does NOT fix** — state left behind that reverting the code leaves
-  in the new shape: <rows rewritten, emails sent, events consumers already
-  received, caches rebuilt, credentials rotated, or "nothing">
-- **How that state is recovered** — <restore from the backup named below and
-  how you verified you can restore it / replay from X / repaired by hand, with
-  the procedure / NOT RECOVERABLE, and why shipping anyway was the right call>
+- **What reverting does not fix** - the state a revert leaves in the new shape:
+  <rows rewritten / messages sent / events already consumed / caches rebuilt / credentials rotated / nothing>
+- **What would recover it**:
+  <the mechanism, e.g. restore the database from backup / replay from X / repaired by hand with this procedure / NOT RECOVERABLE and why shipping anyway is right>
 
 - [ ] Runbook file exists at the path above (deploy order, health checks, signals to watch, failure modes)
-- [ ] The stop-the-bleeding action has been run at least once, somewhere that is not production
 
 NOT RECOVERABLE is a legitimate answer and sometimes the only true one - a
-migration that drops values, an email already sent. It is a decision to take
-deliberately, not a field to work around. If it is the answer, the runbook says
-which backup is taken before deploy and who confirmed it restores.
-
-
+migration that drops values, an email already sent. It exists so a one-way door
+is a decision on the record, not a discovery made during an incident.
 
 ## Re-finds (the same finding reported in more than one round)
 

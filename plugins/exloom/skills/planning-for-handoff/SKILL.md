@@ -31,7 +31,7 @@ Follow these 9 steps in order. Each exists because skipping it causes a specific
 
 **What to do.** Copy the spec's criteria refs into the plan. Do not write new ones.
 
-**Why this is step 2 and not "write criteria".** Until 4.8.0 this step said *write acceptance criteria first*, while the spec format had no criteria section at all — so planning consumed something brainstorming never produced. The criteria were invented here, by whoever wrote the plan, and traced back to nothing the user had approved. That is how a branch ends up correctly implementing a definition of "done" nobody agreed to.
+**Why taking them, not writing them.** A criterion invented at plan time traces back to nothing the user approved, and nothing downstream can tell it apart from scope creep. That is how a branch ends up correctly implementing a definition of "done" nobody agreed to.
 
 The criteria live in the spec as `F-012/R-3/AC-2`. The plan's job is to say which tasks satisfy which of them, not to decide what "done" means — that decision was made and approved at brainstorming.
 
@@ -103,7 +103,7 @@ comm -3 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$SPEC" | sort -u)         <(gr
 
 A criterion in the spec that no task cites is **forgotten scope** — approved and not built. A ref in the plan the spec does not define is a criterion **invented at plan time**, carrying an authority nobody granted it. A task citing nothing is **scope creep**.
 
-**This is the whole step, and it used to be three.** The other two were a placeholder scan and a name-consistency check — both things a model does unprompted, and telling it to do them again buys nothing but tokens. This one stays because it is not self-review: it compares two documents and returns a set difference. A machine finds it; reading twice does not.
+**This is the whole step.** A placeholder scan and a name-consistency check are things a model does unprompted; instructing them buys nothing but tokens. This check is not self-review — it compares two documents and returns a set difference. A machine finds it; reading twice does not.
 
 ## Acceptance Criteria Are Not Optional
 

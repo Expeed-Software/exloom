@@ -7,39 +7,39 @@ description: Use when closing work — when claiming done / complete / ready / s
 
 **This is exloom's one enforced mechanism — the rest of exloom is guidance.** When the gate is turned on, a `PreToolUse` hook run by the Claude Code harness — not by the model — *physically blocks* a `git push` or PR (shell **and** GitHub MCP) until the tier's evidence is in `.claude/reviews/<branch>.md`. That is the difference between *hoping* review happened and *knowing* it did, and it is the part of exloom you cannot reproduce by prompting.
 
-**One gate, at push.** Earlier versions also blocked completion claims with a `Stop` hook, froze the working tree during review, and gated the first source edit on an approved plan. All of that is gone. The `Stop` hook matched natural-language phrases, which drifts with every model release; the freeze and plan gates interrupted work far more often than they caught anything. Blocking the push is the one point where stopping is worth more than it costs.
+**One gate, at push.** Nothing blocks a completion claim, freezes the working tree during review, or gates the first source edit. Blocking the push is the one point where stopping is worth more than it costs.
 
 Enforcement is text-based command/tool matching plus the checklist's git checks: it catches the common `git push` / `gh pr create` forms and the listed GitHub MCP tools. A deliberately obfuscated shell command or a raw API call can still evade it, and a benign command that literally contains the words `git push` can occasionally be over-blocked (bypass with `EXLOOM_REVIEW_SKIP=1`, or rephrase). It is a cooperating-team gate, not an adversarial security boundary.
 
 ## Why this exists
 
-Consider a large, multi-batch refactor that passed every review it was given — per-batch code-quality reviews, per-batch spec-compliance reviews, plan-deviation passes, contract-integration checks, and a full adversarial review. Every gate said APPROVED. Then one question — "how do I test this?" — surfaced a structural gap: the UI was persisting a field that no backend code ever read. The gap was invisible to every previous review because each reviewer worked from documents, specs, or single-layer code reads. Nobody booted the application. Nobody traced a value from a UI action through to an observable runtime effect. This is the failure mode the gate exists to prevent — and it is common, not exotic.
+A change can pass every review it is given and still be broken, because reviews that work from documents, specs, or single-layer code reads share one blind spot: nobody boots the application, and nobody traces a value from a user action through to an observable effect. A field the UI persists that no backend code reads survives all of them. That failure is common, not exotic.
 
-The retrospective was clear about which gates carried signal. L1 found real bugs every batch. L2 tended to rubber-stamp when the author wrote both the spec and the code. Final passes were almost entirely performative. Per-plan contract checks caught within-layer issues but were blind to the UI ↔ backend seam. The two things that would have caught the gap — an actual smoke test and a hostile adversarial pass focused on cross-layer contracts — were either skipped or too narrowly scoped.
+Two things catch it, and neither is a document review: a real smoke test, and a hostile pass aimed specifically at cross-layer contracts. Reviews that grade the author's own spec against the author's own code tend to rubber-stamp; per-layer contract checks are blind to the seam between layers.
 
-This protocol encodes those lessons. Every change, regardless of size, needs an L1 code review and a real smoke test (booted system, executed user action, observed result). Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a recovery plan that says what reverting does not fix. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse to let you declare done or push without it filled.
+So: every change, regardless of size, needs an L1 code review and a real smoke test — booted system, executed user action, observed result. Anything user-facing or cross-module also needs a cross-layer contract grep and a hostile adversarial review. Anything touching data migration, flags, or production needs a runbook and a statement of what reverting does not fix. The checklist at `.claude/reviews/<branch>.md` is the artifact, committed with the PR; the hooks refuse the push without it filled.
 
-## If you have used exloom before, four rules changed
+## Four rules people expect that do not exist
 
-Read this even if you think you know the protocol. Sessions carrying older priors re-impose the removed rules on themselves, and every one of them is a round multiplier.
+Sessions impose these on themselves and each one is a round multiplier.
 
-| Rule you may remember | Status now |
+| Not a rule | What is true |
 |---|---|
-| Every required reviewer must approve the **same commit** | **Removed in 4.1.0.** Only `l1-reviewer` must cover the commit you ship. Adversarial and security must have run and approved *anywhere* on the branch; a later fix does not invalidate them. Requiring simultaneity is what produced 7–12 round branches — N reviewers chasing a target that moves each time one of them is answered. |
-| The working tree is **frozen** while a reviewer reads it | **Removed in 4.0.0.** There is no freeze marker and no state machine. Do not invent one. |
-| A source edit is blocked until a **plan is approved** | **Removed in 4.0.0.** There is no plan gate. |
-| A finding should be fixed **across its whole class**, with a test proving the class is closed | **Removed in 4.2.0.** A reviewer may note that a finding looks like one of a class; it may not demand a general fix. Fixing the instance and tracking the class in a ticket is a normal answer. |
+| Every required reviewer must approve the **same commit** | Only `l1-reviewer` must cover the commit you ship. Adversarial and security must have run and approved *anywhere* on the branch; a later fix does not invalidate them. Requiring simultaneity means N reviewers chase a target that moves each time one of them is answered. |
+| The working tree is **frozen** while a reviewer reads it | There is no freeze marker and no state machine. Do not invent one. |
+| A source edit is blocked until a **plan is approved** | There is no plan gate. |
+| A finding must be fixed **across its whole class**, with a test proving the class is closed | A reviewer may note that a finding looks like one of a class; it may not demand a general fix. Fixing the instance and tracking the class in a ticket is a normal answer. |
 
 If you find yourself enforcing something on this branch that exloom does not ask for, stop. Self-imposed process is the most common cause of a branch that will not converge, and it is invisible in the checklist afterwards.
 
 ## Lanes: the tier is derived, the lane is chosen
 
-Added in 4.7.0, and the reason is the same one behind every row in that table. exloom shipped one lane and it was the strictest one — the same ten steps for a null check as for a subsystem. Tiers scale *review depth*, derived from the diff. They never scaled *ceremony*, and ceremony is what a small change cannot afford.
+Tiers scale *review depth* and are derived from the diff. They do not scale *ceremony*, and ceremony is what a small change cannot afford — so the lane is a separate axis, chosen rather than derived.
 
 `**Lane:**` in the checklist, defaulting to a committed `.claude/exloom-lane`, else `standard`:
 
 - **`sprint`** — no spec, no plan, no fidelity audit; the reviewer set is capped at Tier 1. Branch, build, prove, smoke, L1, push.
-- **`standard`** — the full flow. Unchanged, and still the default, so nothing about an existing repo shifts under it.
+- **`standard`** — the full flow, and the default.
 - **`certified`** — standard, with **no escape hatches** and a signed checklist commit.
 
 **A lane may not weaken a safety check.** The proof receipt, the smoke test, the tier derived from the diff, receipt forgery-resistance, and the security auditor when the *surface* demands it are identical in all three. A lane changes how much happens before the code and which reviewers the ceremony asks for after it — never whether the evidence is real.
@@ -63,8 +63,7 @@ Two things are **not** self-attested, and they are deliberately the two that dec
 
 Reading a reviewer agent's instructions and performing the review yourself produces no receipt. That is intentional — the gate cannot tell a careful self-review from a skipped one, so it only counts what it can observe.
 
-- **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction. Before this, a reviewer that returned nine blocking findings satisfied the gate exactly as well as one that approved: the mechanism enforced attendance, not review.
-  Receipts written before exloom recorded verdicts carry no verdict key and are **grandfathered** — they still count, so installing this version does not block work already in flight.
+- **The verdict.** A receipt records what the reviewer *concluded*, read from the `VERDICT: APPROVED` / `VERDICT: REJECTED (n items)` line every reviewer agent is required to emit. `REJECTED` does not satisfy the gate, and neither does `UNKNOWN` (no readable verdict line) — a gate may not guess in the permissive direction. A receipt carrying no verdict key at all still counts, so a branch already in flight is never stranded.
 
 - **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
   Two rules make the receipt worth having: the pinned `.claude/exloom-test-command` must be **committed**, because its contents are `eval`d; and an unresolvable `--base` is refused rather than recorded.
@@ -77,7 +76,7 @@ Reading a reviewer agent's instructions and performing the review yourself produ
 
 **Only L1 has to cover the commit you ship.** The other reviewers must have run and approved somewhere on this branch; a later fix does not invalidate them. Requiring all of them to approve the *same* commit is what produces a long review loop: a fix cancels the approvals of reviewers that were already satisfied, so every round starts over. Fix a finding, re-run L1, push.
 
-**After three passes, the user is asked — by Claude Code, not by the session.** A pass is a distinct commit that L1 reviewed. At the third, the hook returns a `permissionDecision: "ask"`, so the harness shows its own prompt carrying the report:
+**After three passes, the user decides.** A pass is a distinct commit that L1 reviewed. At the third the gate blocks and hands the session a report — findings per pass, which reviewers are outstanding, and a recommendation:
 
 ```
 Review has run 4 passes on this branch (cap 3).
@@ -94,7 +93,7 @@ Reviewer status:
 RECOMMENDATION: MERGE — no critical findings are open.
 ```
 
-You are then asked, with named options and the recommended one first:
+The session then asks you, with named options and the recommended one first:
 
 - **Fix `OrderTotal.java:12`, `PromotionMapper.java:142`, then re-review** — the open Criticals, by cite
 - **Merge as-is** — the open items are acceptable
@@ -105,8 +104,6 @@ Pick one and the session carries it out. The recommendation comes from open Crit
 **The second option is fix-then-re-review, not "run another pass."** A pass does not fix anything — re-reviewing a commit nobody changed returns the previous pass's findings and spends a round doing it. If the last pass ran against the same code as the one before it, the report says so instead of counting it.
 
 Once you choose merge, the answer is recorded in the checklist and the branch stops asking.
-
-Two earlier versions of this are worth knowing about, because both failed in ways the current one is shaped around. The first wrote "ask the user" to stderr, which only the model reads — a session wrote its own approval line and pushed. The second routed the decision to Claude Code's own approve/cancel prompt, which the model genuinely cannot forge — but cancel is a refusal of the push, not an answer, so the push died with nothing to act on and you had to retype your intent. Named options only exist as a session tool, so the gate blocks and hands the session the question.
 
 Change the cap by committing `.claude/exloom-max-rounds` with a number. Committed only, because raising it weakens the gate and that belongs in a diff.
 
@@ -139,7 +136,7 @@ Implementer resolves every Critical and Important, records resolution in the che
 
 ### Step 2 — Smoke test (all tiers) — EVIDENCE REQUIRED
 
-This is the step that would have caught the persisted-but-unread-field gap above. It has a strict definition:
+This is the step that catches a persisted-but-unread field. It has a strict definition:
 
 > **Smoke test** = the operator booted the system, performed the exact user-facing action that exercises the change, and observed the user-visible result. Unit tests passing is NOT a smoke test. Compilation succeeding is NOT a smoke test. Reading code is NOT a smoke test.
 
@@ -178,26 +175,19 @@ Dispatch the `security-auditor` agent. It runs the repo's security scanners — 
 
 This is a **first pass, not a guarantee** — it never certifies code "secure," only "no issues found by the checks that ran." A Critical or High finding blocks the change until it is fixed or risk-accepted in writing. The full method lives in the `security-auditor` agent.
 
-### Step 6 - Recovery plan (Tier 3 only)
+### Step 6 - What a revert will not undo (Tier 3 only)
 
-The review proves the code is safe to *merge*. So every item here is a property of the diff - something a reviewer can check at this commit. Verification against a deployed environment is deliberately **not** recorded here: this document is written once and read at merge, the gate binds it to a SHA and cannot bind it to the state of a running system, and a slot demanding evidence the gate cannot check is where fabrication goes.
-
-**This section used to ask for a "rollback command" and a "reversal proof".** That is one field doing two jobs, and it answers the easy one. Reverting the *code* is nearly always possible; undoing its *effects* frequently is not. Worse, a field that assumes every change can be undone leaves an author whose change genuinely cannot with three options - write a command that does not work, bypass the gate, or argue with it - and all three are worse than the truth.
-
-So it asks three questions instead, and all three are answerable for every change:
+Two lines. Both are facts about the diff, and both are answerable by the person standing here: an author, on a feature branch, before merge.
 
 - **Runbook path** - a markdown doc committed alongside the change: deploy order, health checks, signals to watch, common failure modes. The file must exist; `/review-complete` checks.
-- **Stop the bleeding** - the exact command or action that halts the damage. Revert the deploy, flip the flag, disable the route. This one always exists, and the box asks that it has been run at least once somewhere that is not production.
-- **What that does not fix** - the state reverting the code leaves in the new shape. Rows already rewritten, emails already sent, events consumers already received, caches rebuilt, credentials rotated. `nothing` is a valid answer and must be written rather than left blank.
-- **How that state is recovered** - a named backup *and how you verified a restore works*, a replay or repair procedure, or `NOT RECOVERABLE` with the reason shipping anyway was right.
+- **What reverting does not fix** - the state a revert leaves in the new shape. Rows already rewritten, messages already sent, events consumers already received, caches rebuilt, credentials rotated. `nothing` is a valid answer and must be written rather than left blank.
+- **What would recover it** - the mechanism, or `NOT RECOVERABLE` with the reason shipping anyway is right.
 
-Two things that answer is strict about.
+`NOT RECOVERABLE` is legitimate and for some changes the only true answer. It is not an escape hatch and reviewers should not argue with it. It exists so a one-way door is a decision on the record rather than a discovery made during an incident.
 
-**An unverified backup is not a recovery plan.** "We have nightly backups" is a belief about infrastructure. "Restored last night's dump into staging on 2026-09-01" is a fact about this change.
+Do not ask here whether the recovery has been tested, whether a backup restores, or who will check at deploy. That needs an environment a feature branch does not have. **The checklist is read between now and merge and never again**, so a line addressed to a later reader is a concern dropped while writing a sentence that makes it look handled.
 
-**`NOT RECOVERABLE` is a legitimate answer**, and for some changes the only true one - a migration that drops values, an email already sent. It is not an escape hatch and reviewers should not argue with it. It exists so a one-way door is a decision somebody makes on the record, rather than a discovery made during an incident.
-
-The failure this replaces is specific: reverting a deploy while the database, the queue and a third party are all in the new state turns one incident into two, and the old field made that look handled.
+**Every line must be answerable by the person standing where the gate is, at the moment it fires.** If it needs a different role or a different environment, it does not belong. If it defers something, it must name the system that now owns it — a ticket, something with a trigger. `DEFERRED — tracked in PROJ-421` moves ownership somewhere real; "verify before deploy" names nothing and owns nothing.
 
 ## Checklist template
 
@@ -214,7 +204,8 @@ The canonical template lives at `templates/review-checklist.md` in this plugin. 
 ### Doesn't catch (known blind spots)
 
 - **Performance regressions not visible in a single smoke run.** Load testing is out of scope.
-- **Mid-flight state corruption during a cutover.** A flag cutover leaves some tenants on the old code path reading new-schema rows. A Tier 3 reversal test proves the schema reverses; it does not prove the system stays coherent *while* traffic is split across both paths. That is a property of a running deployment, and only a staged rollout with real traffic observation will surface it.
+- **Mid-flight state corruption during a cutover.** A flag cutover leaves some tenants on the old code path reading new-schema rows. Naming what a revert does not fix does not prove the system stays coherent *while* traffic is split across both paths. That is a property of a running deployment, and only a staged rollout with real traffic observation will surface it.
+- **Code that lands after the adversarial pass.** Adversarial must approve somewhere on the branch, not on the tip, so fix commits made after it are never seen by it — and those are the commits most likely to touch the seam it exists to catch. This is deliberate: requiring it to re-approve every fix is what makes a branch never converge. It is still a real gap.
 - **Security vulnerabilities in *unchanged* code** — the security review (Step 5) covers THIS change's security surface, not the pre-existing system. Audit the whole codebase separately.
 - **Third-party API contract drift** — if Stripe changes its webhook body and nothing in the diff triggers the change, the gate won't notice.
 - **Race conditions that don't reproduce in single-operator smoke tests.**
@@ -248,4 +239,4 @@ It is **evidence, not compliance certification**, and a branch-level declaration
 
 **Invoke these yourself, with the Skill tool.** They are not instructions for the user to type. Reading them and performing the steps by hand produces the same checklist file but none of the receipts, so the gate will block the push — the commands exist to cause events, not to describe them.
 
-The `Stop` hook refuses to let you claim done without the checklist complete. The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) without it — so switching from the shell to the MCP integration doesn't bypass the gate. All honor `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.
+The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the common GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) without the checklist complete — so switching from the shell to the MCP integration doesn't bypass the gate. They honour `EXLOOM_REVIEW_SKIP=1` for emergencies, logged to stderr.

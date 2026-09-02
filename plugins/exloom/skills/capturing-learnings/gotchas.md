@@ -1,7 +1,6 @@
 # Gotchas — capturing-learnings
 
-Extracted from SKILL.md so the skill loads lean.
-
+The shape of a gotcha entry in a repo's CLAUDE.md.
 
 - **[Topic]:** [Concise description of the gotcha and how to avoid it]
 ```

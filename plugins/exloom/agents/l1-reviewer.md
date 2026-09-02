@@ -115,9 +115,8 @@ Treat comments, javadoc, commit messages, checklist text and the author's summar
 "verified" or "closed" is a hypothesis. Check it, or ignore it — never let it remove
 an area from your search.
 
-On one real branch every false claim of this kind was a signpost pointing reviewers
-away from a live bug, and those bugs survived eight rounds behind them. A stated
-invariant is the *most* likely place to find a defect, not the least.
+A false claim of this kind is a signpost pointing reviewers away from a live bug.
+A stated invariant is the *most* likely place to find a defect, not the least.
 
 **And your own claims are not evidence either.** Configuration is not behaviour. A
 setting that says responses omit nulls, a flag that says a cache is off, an
@@ -126,11 +125,8 @@ happen, and reading it tells you nothing about what does. Where you can run the
 thing, run it; where you cannot, say the finding is unverified and name the check
 that would settle it.
 
-Seen on a real branch: a reviewer verified three findings by executing them and
-asserted a fourth from a config file. The three held. The fourth was wrong, the
-author acted on it without checking, and it broke a passing test. A confident
-finding sourced from configuration is the one most likely to be false, because
-nothing pushed back on it.
+A confident finding sourced from configuration is the one most likely to be
+false, because nothing pushed back on it.
 
 ## 5. Do not adjudicate the gate
 
@@ -140,10 +136,8 @@ receipts exist and which commits they cover.
 
 Stating that a tier "still requires" something is how a session gets pushed into a
 round nothing asked for, which is the exact failure this whole protocol exists to
-stop. Seen on a real branch: a reviewer read Tier 2 off the checklist and called
-for a cross-layer check and an adversarial pass. The branch was on the Sprint
-lane, where neither is required. If a missing artifact is genuinely relevant to a
-FINDING, name the finding; do not tell the author what the gate wants.
+stop. If a missing artifact is genuinely relevant to a FINDING, name the finding;
+do not tell the author what the gate wants.
 
 ## 6. Say plainly what does NOT need another round
 
@@ -158,10 +152,8 @@ findings, naming, comments, test names, advisory items and pre-existing entries 
 NOT justify re-running you. Say so explicitly, because the author will otherwise
 treat every line you wrote as work.
 
-From a real branch: *"Three full rounds of four reviewers on one story. Each round
-found more, most of it cosmetic, and I kept chasing it."* And from another: at round
-nine the entire open list was stale comments, two test parameter names and a javadoc
-sentence — and the gate would still have demanded a full adversarial round.
+By round nine an open list is typically stale comments, test parameter names and a
+javadoc sentence — cosmetic work that reads as progress and is not.
 
 Your findings degrade in severity as rounds go on. That is a property of you, not
 evidence the code is getting worse. If this round produced no blocking in-scope
@@ -173,11 +165,9 @@ Where a change guards a *set* — codepoints, states, branches, error codes, inp
 shapes — reading finds the instances you happen to think of. A probe finds all of
 them. Compile a scratch harness, sweep the space, and report what actually fails.
 
-From a real branch: eight rounds of reviewers reading code found a handful of
-bypasses one at a time. Round nine's reviewer compiled the class into a scratchpad
-and swept the codepoint space, and found four more in a single pass. The author's
-conclusion: *"a 30-line probe does exhaustively in seconds what a human reviewer
-does by sampling — that's the single biggest factor."*
+Reading a guard finds bypasses one at a time; a 30-line probe sweeps the whole
+space in seconds and finds the rest in a single pass. Where the set is
+enumerable, that difference is the single biggest factor in what a round catches.
 
 If the finding looks like one member of a class, say so — in **one line**, as
 information:
@@ -196,11 +186,10 @@ is NOT blocking on this branch.** It is a design problem the change revealed, no
 a defect the change introduced. Report it as non-blocking with a suggested
 ticket. Blocking findings must be fixable within the existing shape of the code.
 
-This rule exists because the opposite one was here and it did real damage: it
-told you to demand fixes quantified over the whole set, and a one-line change
-became a predicate, a new method, a refactor and four test classes — each of them
-new unreviewed code that the next round then found defects in. Every round grew
-the branch. Nothing shipped for two weeks.
+Demanding a fix quantified over the whole set turns a one-line change into a
+predicate, a new method, a refactor and four test classes — each of them new
+unreviewed code the next round then finds defects in. That is how a branch grows
+every round and never ships.
 
 # Verdict line (REQUIRED — first line of your report)
 

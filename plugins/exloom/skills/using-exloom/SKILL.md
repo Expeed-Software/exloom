@@ -16,7 +16,7 @@ The model already plans, tests, and self-reviews without being told. What a team
 | Proof receipt | `scripts/prove-change-is-tested.sh` | do the tests actually fail without this change |
 | Review checklist + receipts | `/review-init` → `/review-complete` | who reviewed, at which commit, with what verdict |
 
-Nothing here instructs you how to think about code. If a skill would only tell you to be careful, it was removed.
+Nothing here instructs you how to think about code. A skill that would only tell you to be careful does not belong.
 
 ## Quick start — a feature, start to finish
 
@@ -76,7 +76,7 @@ See `worked-example.md` in this skill for one real change taken through all ten 
 
 **The three execution skills are the scope discipline.** `executing-handoff-plans` says write what the plan describes — *not more, not less, not differently* — and log every deviation instead of improvising. `auditing-plan-fidelity` then compares the shipped diff against the plan and reports drift: files changed that no task called for, acceptance criteria quietly altered. `isolating-execution` puts the work on a feature branch, which is what makes the gate apply at all — the hooks skip protected branches.
 
-They were cut in 4.0.0 as "technique the model already does" and restored in 4.4.0. That was a misjudgement: a check that compares work against an artifact is not technique, because the model is the thing being checked. Their absence is a large part of how one-line changes grew into features.
+A check that compares work against an artifact is not technique the model already does, because the model is the thing being checked. Without them, one-line changes grow into features.
 
 Invoke one when it applies. Do not invoke one for a conversational reply, a factual answer, or a trivial mechanical edit.
 
@@ -93,7 +93,7 @@ Invoke one when it applies. Do not invoke one for a conversational reply, a fact
 
 ## Cost shape
 
-Three reviewers remain, and the effort levels are deliberate:
+Three reviewers, and the effort levels are deliberate:
 
 - `l1-reviewer` — **low** effort, cheap enough to run per commit.
 - `adversarial-reviewer` — **medium**, once, before push. Carries the cross-layer contract check.

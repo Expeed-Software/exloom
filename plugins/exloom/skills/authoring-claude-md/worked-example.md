@@ -1,7 +1,6 @@
 # Worked Example — authoring-claude-md
 
-Extracted from SKILL.md so the skill loads lean. This is a full worked example.
-
+One repo taken through every step.
 
 **Scenario:** Brownfield mode on an existing Node.js Express API with TypeScript. The developer just joined this project and found it has no CLAUDE.md.
 

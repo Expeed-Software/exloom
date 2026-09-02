@@ -1,7 +1,6 @@
 # Failure Modes — auditing-plan-fidelity
 
-Extracted from SKILL.md so the skill loads lean. This is the failure modes this skill exists to prevent — thought pattern, why it feels right, what actually happens, and the correction.
-
+The failure modes this skill exists to prevent: thought pattern, why it feels right, what actually happens, and the correction.
 
 These are the most common ways auditors get the audit wrong. Each follows the same pattern: a plausible-sounding shortcut that undermines the audit's purpose.
 

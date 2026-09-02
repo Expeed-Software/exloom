@@ -36,10 +36,8 @@ If the learning only applies to a single codebase and would confuse or mislead d
 
 Edit the repo's `CLAUDE.md` directly. Add it to the most specific applicable section. If no section fits, add a "Gotchas" section at the bottom.
 
-```markdown
-## Gotchas
+See [gotchas.md](gotchas.md) for the entry shape.
 
-See [gotchas.md](gotchas.md).
 ## When a Learning Contradicts Existing Content
 
 Sometimes the learning is not new information — it is a correction. A shared doc, CLAUDE.md, or skill already says something, and your learning shows it is wrong, outdated, or incomplete. Handle this as an update, not an addition. Adding a contradicting entry alongside the old one creates two conflicting instructions, and the reader cannot tell which is current.
@@ -89,6 +87,7 @@ Do not capture these as learnings — they create noise:
 ## Failure Modes
 
 See [failure-modes.md](failure-modes.md).
+
 ## Worked Example
 
 **Scenario:** A developer spends an afternoon debugging why integration tests hang in CI but pass locally. Root cause: the rate limiter uses a real Redis connection in tests, and CI has no Redis, so the connection attempt blocks until timeout. The fix is a test config flag. Now they capture the learning.

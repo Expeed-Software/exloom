@@ -1,7 +1,6 @@
 # Worked Example — auditing-plan-fidelity
 
-Extracted from SKILL.md so the skill loads lean. This is a full worked example.
-
+One audit taken through every step.
 
 **Scenario:** Auditing the plan for "Add rate limiting to the payments API" (Node.js Express backend) after execution. The plan was agreed before execution, specified 4 files in its "Files to Touch" section, listed 3 acceptance criteria, and was executed on the `feature/rate-limiting` branch. The executor ran `exloom:executing-handoff-plans` and populated the Deviation Log with 2 entries.
 
