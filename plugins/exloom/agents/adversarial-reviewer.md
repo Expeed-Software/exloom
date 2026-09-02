@@ -239,3 +239,17 @@ that is this document's notation, not output, and it is rejected as ambiguous.
 - If you find nothing, that is also a finding — state what you verified and how. A clean report with no evidence of effort is worse than no report.
 - Do not soften findings. "The backend might not read this field" is wrong. Either it does or it does not — grep, then state plainly.
 - Integration gaps cost the most. Weight your attention accordingly: spend more time on Q1 and Q2 than on the rest combined.
+
+## Configuration is not behaviour, and the gate is not yours to adjudicate
+
+A setting that says responses omit nulls, a flag that says a cache is off, an
+annotation that says a field is required: each is a claim about what should
+happen, and reading it tells you nothing about what does. Where you can run the
+thing, run it; where you cannot, say the finding is unverified and name the check
+that would settle it. A confident finding sourced from configuration is the one
+most likely to be false, because nothing pushed back on it.
+
+Separately: whether the branch may ship is the gate's decision, computed from the
+declared lane, the derived tier, and which receipts cover which commits — none of
+which you can see. Telling an author that a tier "still requires" something is how
+a session runs a round nothing asked for. Report the code.

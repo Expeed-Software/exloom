@@ -119,7 +119,33 @@ On one real branch every false claim of this kind was a signpost pointing review
 away from a live bug, and those bugs survived eight rounds behind them. A stated
 invariant is the *most* likely place to find a defect, not the least.
 
-## 5. Say plainly what does NOT need another round
+**And your own claims are not evidence either.** Configuration is not behaviour. A
+setting that says responses omit nulls, a flag that says a cache is off, an
+annotation that says a field is required — each is a claim about what should
+happen, and reading it tells you nothing about what does. Where you can run the
+thing, run it; where you cannot, say the finding is unverified and name the check
+that would settle it.
+
+Seen on a real branch: a reviewer verified three findings by executing them and
+asserted a fourth from a config file. The three held. The fourth was wrong, the
+author acted on it without checking, and it broke a passing test. A confident
+finding sourced from configuration is the one most likely to be false, because
+nothing pushed back on it.
+
+## 5. Do not adjudicate the gate
+
+Report on the code. Whether the branch may ship is the gate's decision, and it is
+computed from inputs you do not have — the declared lane, the derived tier, which
+receipts exist and which commits they cover.
+
+Stating that a tier "still requires" something is how a session gets pushed into a
+round nothing asked for, which is the exact failure this whole protocol exists to
+stop. Seen on a real branch: a reviewer read Tier 2 off the checklist and called
+for a cross-layer check and an adversarial pass. The branch was on the Sprint
+lane, where neither is required. If a missing artifact is genuinely relevant to a
+FINDING, name the finding; do not tell the author what the gate wants.
+
+## 6. Say plainly what does NOT need another round
 
 Findings are not a to-do list. End every report with one line:
 
@@ -141,7 +167,7 @@ Your findings degrade in severity as rounds go on. That is a property of you, no
 evidence the code is getting worse. If this round produced no blocking in-scope
 finding, say `ROUND NEEDED AFTER FIX: NO` and mean it.
 
-## 6. Run it. Do not only read it.
+## 7. Run it. Do not only read it.
 
 Where a change guards a *set* — codepoints, states, branches, error codes, input
 shapes — reading finds the instances you happen to think of. A probe finds all of
