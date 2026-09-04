@@ -252,6 +252,28 @@ exloom_push_target_branches() {
 # "more than one module" need stack knowledge the hook does not have, and stay
 # with the skill as judgment.
 
+# exloom_recorded_base <tip>
+#   Prints the branch this branch's checklist says it forked from, or nothing.
+#
+# Read from the checklist at <tip>, so it must be committed to count - the same
+# rule the tier, the lane and every receipt live under. A value that names no ref
+# here is ignored by the caller, which falls back to the built-in candidates and
+# so to a FURTHER base and a HIGHER tier. That is the safe direction for a typo.
+exloom_recorded_base() {   # exloom_recorded_base <tip>
+  local tip="$1" branch file val
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
+  file=".claude/reviews/${branch}.md"
+  val="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null \
+         | sed -n 's/^\*\*Base branch:\*\*[[:space:]]*//p' | head -1 \
+         | tr -d '\r' | tr -d '[:space:]')"
+  # `auto` is the template's shipped value and means "derive it": not an answer,
+  # and deliberately not a `<placeholder>`, because an unstated base is a valid
+  # end state rather than a gap somebody must fill.
+  case "${val:-}" in ''|'<'*|auto|AUTO|Auto) return 0 ;; esac
+  printf '%s' "$val"
+}
+
 # The fork point: the NEAREST candidate base wins, not the first that resolves.
 # Where `main` is a release branch and `dev` the integration branch, taking main
 # puts the whole release gap into the diff and every branch derives Tier 3.
@@ -268,9 +290,36 @@ exloom_fork_point() {   # exloom_fork_point <tip>
     printf '%s' "$_EXLOOM_FP"; return 0
   fi
 
-  local cand mb dist best="" best_dist="" existing
+  local cand mb dist best="" best_dist="" existing recorded=""
+
+  # A branch may record the base it actually forked from, in its own checklist.
+  # Without it the derivation guesses from a fixed list of integration-branch
+  # names, and a repo that calls its integration branch anything else forks from
+  # `main` instead - inheriting every file changed in the gap as though this
+  # branch had touched it, and citing a path the diff does not contain.
+  #
+  # Recorded per branch and never repo-wide: a hotfix off a release branch and a
+  # feature off the integration branch have different answers.
+  #
+  # It is read from the COMMITTED checklist, so it travels in the diff a reviewer
+  # reads. That visibility is the whole safety argument: a stated base can lower
+  # the derived tier, so it has to be as legible as a bypass receipt rather than
+  # silently changing what the gate asks for.
+  recorded="$(exloom_recorded_base "$tip")"
   existing="$(git for-each-ref --format='%(refname:short)'                 refs/remotes/origin refs/heads 2>/dev/null)"
-  for cand in origin/main origin/master origin/dev origin/develop               origin/development origin/trunk main master dev develop; do
+
+  if [[ -n "$recorded" ]]; then
+    case "
+${existing}
+" in
+      *"
+${recorded}
+"*) ;;
+      *) echo "exloom: the checklist records base branch '${recorded}', which is not a ref here - deriving from the built-in candidates instead" >&2
+         recorded="" ;;
+    esac
+  fi
+  for cand in $recorded origin/main origin/master origin/dev origin/develop               origin/development origin/trunk main master dev develop; do
     case "
 ${existing}
 " in *"

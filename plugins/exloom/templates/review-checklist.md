@@ -2,6 +2,7 @@
 
 **Tier:** [0 | 1 | 2 | 3]
 **Tier rationale:** <one sentence>
+**Base branch:** auto
 **Tier derived from:**
 <one line per rule that matched, as `path` → `rule` → source; or `built-in defaults only`>
 **Lane:** standard

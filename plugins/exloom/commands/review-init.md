@@ -14,12 +14,14 @@ Run:
 - The fork point — the merge-base **nearest** to HEAD, not the first candidate that resolves. Where `main` is a release branch and `dev` is the branch work merges into, taking `main` puts the whole release gap in the diff and every branch derives Tier 3. Compute it against each of `origin/main`, `origin/master`, `origin/dev`, `origin/develop` that exists and keep the one fewest commits from HEAD:
 
   ```bash
-  for r in origin/main origin/master origin/dev origin/develop; do
-    git rev-parse --verify --quiet "$r" >/dev/null || continue
-    mb=$(git merge-base HEAD "$r") || continue
-    echo "$(git rev-list --count "$mb..HEAD") $mb"
-  done | sort -n | head -1
+  LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
+  . "$LIB"; exloom_fork_point HEAD
   ```
+
+  This is the same function the push gate runs, so it already honours a base
+  recorded in the checklist. Do not reimplement the candidate list here - a copy
+  of it drifts, and this command exists to agree with the gate. Step 2a confirms
+  the answer with the user.
 - `git diff --stat <fork-point>...HEAD` — the blast-radius summary.
 - `git diff --name-only <fork-point>...HEAD` — the list of changed files.
 
@@ -57,6 +59,51 @@ exloom_derive_tier HEAD; exloom_tier_reasons
 ```
 
 If that disagrees with the rules above, it is right and they are the summary — it is the same function the push gate runs.
+
+## Step 2a - Confirm the base branch
+
+The tier is derived from the diff between the base and this branch. So the base
+decides what counts as "changed", and a wrong one puts somebody else's commits in
+your diff - the tier then cites a path this branch never touched.
+
+exloom guesses from a fixed list of integration-branch names. A repo that calls
+its integration branch anything else - `dev-deploy`, `release/x`, an internal
+convention - is guessed wrong every time, and there is no way for it to know.
+
+Show what it picked, what the alternatives are, and what each would mean. Compute
+the distance for every remote branch:
+
+```bash
+for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
+  mb=$(git merge-base HEAD "$r" 2>/dev/null) || continue
+  echo "$(git rev-list --count "$mb..HEAD") $r"
+done | sort -n | head -6
+```
+
+Offer the nearest few plus any that look like integration branches, with the
+count beside each, and let the user type one that is not listed:
+
+```
+  origin/dev-deploy     3 commits back
+  origin/main          57 commits back   <- currently used
+```
+
+**Do not auto-pick the nearest.** A colleague who branched off this branch is
+nearer than any integration branch, and choosing it would shrink the diff to
+almost nothing and derive Tier 0 for a change that earns more. The arithmetic is
+shown; the person decides.
+
+Write the answer into the checklist's `**Base branch:**` field. The gate reads it
+back from the committed checklist at push time and derives from it.
+
+**Say plainly what that means**, because it is the one field here that can lower
+a tier: a stated base changes what the gate sees. That is why it lives in the
+checklist and travels in the diff a reviewer reads, rather than in a config file
+nobody opens. If the user names a branch that makes the change look much smaller,
+ask once whether that is really where the work forked.
+
+The template ships the field as `auto`, which means "derive it". Leave it there
+if the guess was right - that is a complete answer, not an unfinished one.
 
 ## Step 2b — Propose a lane
 
@@ -101,6 +148,7 @@ go back and take the highest version.
 Substitute:
 
 - `<branch-name>` → actual branch.
+- `**Base branch:**` -> the branch confirmed in Step 2a, or leave `auto` if the derived one was right.
 - `[0 | 1 | 2 | 3]` → the confirmed tier.
 - Tier rationale line → the user's confirmed rationale.
 - **Tier derived from** → the output of `exloom_tier_reasons`, one line per rule, as `` `path` → `rule` → source ``. If the tier came from the built-in rules with no repository policy in play, write `built-in defaults only`. Get it by sourcing the hook library and running the derivation:

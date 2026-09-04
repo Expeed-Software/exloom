@@ -1552,6 +1552,78 @@ ok "...where the old rule would have derived 3 off the migration" \
 ok "...and the nearest-base diff does not contain it at all" \
    "$(git diff --name-only "$(exloom_fork_point HEAD)" HEAD | grep -c 'db/migrations' || true)" "0"
 
+# A repo whose integration branch is not one of the guessed names. The candidate
+# list cannot be made long enough to cover every convention, so a branch may
+# record the one it actually forked from - in its own checklist, where a reviewer
+# reads it, because a stated base changes what the gate sees.
+subrepo forkrecorded noorigin
+mkdir -p .claude/reviews/feat
+printf 'r1\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+FR_FORK="$(git rev-parse HEAD)"
+mkdir -p db/migrations && printf 'create table t;\n' > db/migrations/001.sql
+git add -A >/dev/null 2>&1; git commit -qm "someone elses migration" >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -q -b dev-deploy "$FR_FORK"
+printf 'i\n' > src/i.java; git add -A >/dev/null 2>&1; git commit -qm integ >/dev/null 2>&1
+git update-ref refs/remotes/origin/dev-deploy HEAD
+git checkout -q -b feat/rec
+printf 'class Mine {}\n' > src/Mine.java
+printf '**Tier:** 1\n' > .claude/reviews/feat/rec.md
+git add -A >/dev/null 2>&1; git commit -qm mine >/dev/null 2>&1
+
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "an unguessable integration branch is missed, as before" \
+   "$(exloom_fork_point HEAD)" "$FR_FORK"
+
+printf '**Tier:** 1\n**Base branch:** origin/dev-deploy\n' > .claude/reviews/feat/rec.md
+git add -A >/dev/null 2>&1; git commit -qm rec >/dev/null 2>&1
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "a recorded base branch is honoured" \
+   "$(exloom_fork_point HEAD)" "$(git rev-parse origin/dev-deploy)"
+# The point of honouring it: the foreign commit leaves the diff, so the tier
+# stops citing a path this branch never touched.
+ok "...so the diff no longer carries the other branch's migration" \
+   "$(git diff --name-only "$(exloom_fork_point HEAD)" HEAD | grep -c 'db/migrations' || true)" "0"
+
+# It has to be COMMITTED, like every other thing the gate reads. An uncommitted
+# edit that silently changed the derived tier would defeat the reason it lives in
+# the checklist rather than in a config file.
+printf '**Tier:** 1\n**Base branch:** origin/main\n' > .claude/reviews/feat/rec.md
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "an uncommitted change to the field is not read" \
+   "$(exloom_fork_point HEAD)" "$(git rev-parse origin/dev-deploy)"
+git checkout -q -- .claude/reviews/feat/rec.md
+
+# A name that resolves to nothing falls back to the built-in candidates, which
+# derive from a FURTHER base and so a HIGHER tier. Safe direction for a typo.
+printf '**Tier:** 1\n**Base branch:** origin/does-not-exist\n' > .claude/reviews/feat/rec.md
+git add -A >/dev/null 2>&1; git commit -qm bogus >/dev/null 2>&1
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "an unresolvable recorded base falls back" "$(exloom_fork_point HEAD)" "$FR_FORK"
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "...and says so rather than failing silently" \
+   "$(exloom_fork_point HEAD 2>&1 >/dev/null | grep -c 'not a ref here')" "1"
+
+# The template ships `auto`, meaning "derive it". It is deliberately not a
+# <placeholder>: leaving the base unstated is a valid end state, not a gap
+# somebody must fill, so it must not read as an unfinished checklist.
+printf '**Tier:** 1
+**Base branch:** auto
+' > .claude/reviews/feat/rec.md
+git add -A >/dev/null 2>&1; git commit -qm shipped >/dev/null 2>&1
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "the shipped auto value derives as before" "$(exloom_fork_point HEAD)" "$FR_FORK"
+# A leftover placeholder is ignored too, for a checklist written before the
+# field existed and edited by hand afterwards.
+printf '**Tier:** 1
+**Base branch:** <origin/whatever>
+' > .claude/reviews/feat/rec.md
+git add -A >/dev/null 2>&1; git commit -qm ph >/dev/null 2>&1
+unset _EXLOOM_FP _EXLOOM_FP_TIP
+ok "a leftover placeholder is ignored" "$(exloom_fork_point HEAD)" "$FR_FORK"
+
+cd "$WORK" || exit 1
+
 # A repo where main IS the integration branch must be unaffected.
 subrepo forkpoint_mainonly noorigin
 printf 'a\n' > src/a.txt; git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
