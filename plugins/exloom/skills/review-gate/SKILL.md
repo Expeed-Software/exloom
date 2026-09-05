@@ -36,7 +36,7 @@ Tiers scale *review depth* and are derived from the diff. They do not scale *cer
 - **`standard`** — the full flow, and the default.
 - **`certified`** — standard, with **no workflow-step escape hatches** and a signed checklist commit. A skip recorded under `## Escape hatches used` blocks the push here, where other lanes accept it as documented. The `EXLOOM_REVIEW_SKIP=1` override is unaffected — it works on every lane and always writes a bypass receipt.
 
-**A lane may not weaken a safety check.** The proof receipt, the smoke test, the tier derived from the diff, receipt forgery-resistance, and the security auditor when the *surface* demands it are identical in all three.
+**A lane may not weaken a safety check.** The proof receipt where enabled, the smoke test, the tier derived from the diff, receipt forgery-resistance, and the security auditor when the *surface* demands it are identical in all three.
 
 **Sprint is refused at Tier 3**, and **a Sprint branch that turns out to matter gets `/harden`, not a rewrite** — it recovers the spec from the diff that now exists, flips the lane, and names what the higher bar requires. Nothing is regenerated and no ref changes.
 
@@ -58,7 +58,7 @@ Four things are **not** self-attested, and they are deliberately the ones that d
 
   **A receipt carrying no verdict at all is a launch, not a review.** It says a reviewer started; it does not say what it found, and "we do not know what it found" is not approval. Earlier versions accepted these so that upgrading would not strand branches in flight, but that exemption also admitted receipts whose review outcome was never *captured* — refusing costs a single re-dispatch, accepting ships code nobody has been shown to have reviewed. The fix is almost always to dispatch the reviewer **without a name**: a named subagent reports through the mailbox rather than the tool result the hook reads.
 
-- **Proof that the change is tested.** From Tier 1 up, the gate requires a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
+- **Proof that the change is tested.** Where the repo has a committed `.claude/exloom-proof.enabled`, the gate requires from Tier 1 up a `proof.json` receipt reading `PROVED` and covering the reviewed commit, written only by `scripts/prove-change-is-tested.sh`. It runs the suite at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). "I added tests" is an author claim; a test that passes with and without the change is the normal way that claim is false while being sincerely made.
 
   Two rules make the receipt worth having: the pinned `.claude/exloom-test-command` must be **committed**, because its contents are `eval`d; and an unresolvable `--base` is refused rather than recorded.
 

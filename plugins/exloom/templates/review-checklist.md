@@ -38,7 +38,7 @@
 - Actual observed result: `<paste output / screenshot link>`
 - [ ] Test passed
 
-## Proof the change is tested (Tier 1+)
+## Proof the change is tested (Tier 1+, where `.claude/exloom-proof.enabled` is committed)
 - Proof receipt: `proof.json` (written only by `scripts/prove-change-is-tested.sh` — not by hand)
 - Test command used: `<exact command, or "detected">`
 - Result: `<PROVED / NOT_PROVED>`

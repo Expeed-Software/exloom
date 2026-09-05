@@ -1441,6 +1441,12 @@ exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4"
   local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0
 
+  # Opt-in per repo: the proof runs the suite in a clean worktree, which holds
+  # tracked files only, so it cannot run where the suite needs untracked local
+  # state to start.
+  [[ -f ".claude/exloom-proof.enabled" ]] || return 0
+  git ls-files --error-unmatch ".claude/exloom-proof.enabled" >/dev/null 2>&1 || return 0
+
   vdir="$(exloom_verdict_dir "$checklist")"
   file="${vdir}/proof.json"
   content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"

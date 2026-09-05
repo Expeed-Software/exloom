@@ -25,7 +25,7 @@ Read `**Lane:**` from the checklist. Absent, the repo default applies (committed
 
 Three things Sprint does **not** change, because they are safety and not ceremony:
 
-- the proof receipt (Tier 1+),
+- the proof receipt, where the repo has enabled it,
 - the tier derived from the diff — an under-declared tier still blocks,
 - the security auditor when the diff's *surface* demands it (a dependency manifest, a deserialization entry point).
 
@@ -62,7 +62,7 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 ### Tier 1 required
 - L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test: boot command filled, user action filled, expected result filled, actual observed result filled with real evidence (not `<paste output>` placeholder, not empty). "Test passed" ticked.
-- **Proof that the change is tested: `proof.json` receipt present, `"result":"PROVED"`, covering the reviewed commit.** Written only by:
+- **Proof that the change is tested — only when the repo has a committed `.claude/exloom-proof.enabled`.** Then: `proof.json` receipt present, `"result":"PROVED"`, covering the reviewed commit. Written only by:
 
   ```bash
   PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"

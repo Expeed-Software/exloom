@@ -331,11 +331,16 @@ echo "== proof receipt (the tested-ness check cannot be skipped by forgetting) =
 git checkout -q -b feat/proof main
 CP=".claude/reviews/feat/proof.md"; mkdir -p "$(dirname "$CP")"
 CPD="$(exloom_verdict_dir "$CP")"; mkdir -p "$CPD"
-printf 'a\n' > src/p.go; git add -A; git commit -qm p
-RP="$(git rev-parse HEAD)"
 pchk() { exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; echo $?; }
 
-ok "no proof receipt -> blocked" "$(pchk)" "2"
+ok "without the marker the proof is not required" "$(pchk)" "0"
+: > .claude/exloom-proof.enabled
+ok "an untracked marker does not enable it" "$(pchk)" "0"
+git add -A; git commit -qm enable
+
+printf 'a\n' > src/p.go; git add -A; git commit -qm p
+RP="$(git rev-parse HEAD)"
+ok "a committed marker enables it, and no receipt blocks" "$(pchk)" "2"
 
 printf '{"check":"change-is-tested","result":"NOT_PROVED","head":"%s"}\n' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm p2
@@ -1074,6 +1079,7 @@ proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
   # receipt-minting branch is dead code — and a fixture that never reaches the
   # code it names is worse than none, because it reports green.
   : > .claude/exloom-gate.enabled
+  : > .claude/exloom-proof.enabled
   printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
   printf '%s\n' "$3" > src/calc.sh
   printf '%s\n' "$2" > tests/calc_test.sh
