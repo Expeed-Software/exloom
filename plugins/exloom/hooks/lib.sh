@@ -1431,6 +1431,63 @@ line each, in <agent>.findings.jsonl."
   return 2
 }
 
+# ---------- remedy choices the author may not make alone ----------
+# exloom_check_choices <checklist> <tip> <action>
+#
+# A reviewer that offers two remedies and leaves the choice open has handed over
+# a design decision, not a defect. Blocks until the checklist records an answer
+# for each open cite, under "## Remedy choices" as:
+#
+#     - path/to/file.ext:12 - CHOSE: <the option, in the user's words>
+#
+# The options put to the person come from the receipt, which the session cannot
+# write by hand, so the question cannot be narrowed to the answer the author
+# already prefers.
+exloom_check_choices() {   # exloom_check_choices <checklist> <tip> <action>
+  local checklist="$1" tip="$2" action="$3"
+  local vdir listing f content line cite opts open="" answers
+
+  vdir="$(exloom_verdict_dir "$checklist")"
+  listing="$(MSYS_NO_PATHCONV=1 git show "${tip}:${vdir}" 2>/dev/null | grep 'choices.jsonl' || true)"
+  [[ -n "$listing" ]] || return 0
+
+  answers="$(MSYS_NO_PATHCONV=1 git show "${tip}:${checklist}" 2>/dev/null              | awk '/^## Remedy choices/{f=1;next} /^## /{f=0} f' || true)"
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${vdir}/${f}" 2>/dev/null || true)"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      cite="$(printf '%s' "$line" | sed -n 's/.*"cite"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      [[ -n "$cite" ]] || continue
+      printf '%s' "$answers" | grep -qF -- "$cite" && continue
+      opts="$(printf '%s' "$line" | sed -n 's/.*"options"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      open="${open}  ${cite}
+${opts}
+"
+    done <<< "$content"
+  done <<< "$listing"
+
+  [[ -n "$open" ]] || return 0
+
+  _exloom_block "$action" "A reviewer left the remedy open, and the choice is not yours to make.
+
+${open}
+These are the reviewer's own words, read from its receipt.
+
+STOP AND ASK THE USER. Use AskUserQuestion, one question per cite, and state for
+each option what it COSTS - which acceptance criterion it gives up, or which
+caller stops working. An option that gives up a criterion is a change to what was
+agreed, not a fix: say so and let them decide.
+
+Record the answer in ${checklist} under '## Remedy choices' as
+
+  - <cite> - CHOSE: <their words>
+
+then apply it."
+  return 2
+}
+
 # ---------- proof-of-testedness receipt ----------
 # exloom_check_proof <checklist> <tip> <reviewed-sha> <action>
 # Returns 0 when a PROVED receipt covers the reviewed commit; prints a BLOCK
@@ -1746,6 +1803,11 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     if [[ "$tier" -ge 1 ]]; then
       exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" || return 2
     fi
+
+    # A remedy the reviewer left open is a decision, not a defect, and it is
+    # checked before the re-find rule so the person is asked once rather than
+    # after another round has been spent on it.
+    exloom_check_choices "$checklist" "$tip" "$action" || return 2
 
     # Re-finds: the same defect reported across rounds means the fix was
     # instance-level. Needs a recorded disposition, not another patch.

@@ -93,6 +93,20 @@ tracking the class is a normal answer, not a lesser one.
 
 none
 
+## Remedy choices
+
+A reviewer that offers more than one remedy and leaves the choice open has handed
+over a decision. It is answered by the person the work is for, not by whoever is
+closing the round, and the answer goes here before the fix is applied, one line
+per cite:
+
+    - src/thing.ts:88 - CHOSE: the option they picked, in their own words
+
+An option that gives up an acceptance criterion is a change to what was agreed,
+not a fix. Say so when asking.
+
+none
+
 ## Escape hatches used
 - [ ] None (default)
 

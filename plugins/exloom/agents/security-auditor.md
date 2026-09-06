@@ -175,6 +175,24 @@ which does NOT count as approval — so omitting it blocks the author rather tha
 waving them through. Do not write the two options on one line separated by `|`;
 that is this document's notation, not output, and it is rejected as ambiguous.
 
+
+## Remedy choices
+
+When more than one remedy would close a finding and they are not equivalent -
+different callers affected, different capability given up, different contract
+changed - do NOT pick one and do NOT bury the alternatives in prose. Emit one
+line per open choice, in this exact shape:
+
+    - CHOICE path/to/file.ext:88 :: first remedy, stated plainly :: second remedy, stated plainly
+
+exloom records these and refuses the push until the person the work is for has
+answered each one. State the options by what they COST, not by what they change:
+"runs with skills can no longer use bash" is a decision somebody can make;
+"refuse the combination at validation" is not.
+
+If one remedy is clearly correct and the others are not, do not use this - report
+the finding and say which fix is right.
+
 # Rules
 
 - Never output "secure" or "no vulnerabilities." Only "no issues found by <these checks>."

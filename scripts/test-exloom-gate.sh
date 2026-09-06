@@ -326,6 +326,54 @@ git add -A; git commit -qm r2
 ok "old APPROVED does not vouch for a new REJECTED" "$(chk)" "2"
 git checkout -q feat/x
 
+echo "== a remedy the reviewer left open is not the author's to pick =="
+
+subrepo choices noorigin
+CH=".claude/reviews/feat/ch.md"; mkdir -p "$(dirname "$CH")"
+CHD="$(exloom_verdict_dir "$CH")"; mkdir -p "$CHD"
+printf 'a
+' > src/c.go
+printf '**Tier:** 1
+' > "$CH"
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+cchk() { exloom_check_choices "$CH" HEAD "test" >/dev/null 2>&1; echo $?; }
+
+ok "no choices recorded -> nothing to answer" "$(cchk)" "0"
+
+printf '{"round":1,"agent":"adversarial-reviewer","cite":"src/c.go:12","options":"widen the read root :: refuse the combination","head":"h","at":"t"}
+' > "$CHD/adversarial-reviewer.choices.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm rec >/dev/null 2>&1
+ok "an unanswered choice blocks the push" "$(cchk)" "2"
+ok "...and the block carries the reviewer's own options"    "$(exloom_check_choices "$CH" HEAD test 2>&1 >/dev/null | grep -c 'refuse the combination')" "1"
+
+printf '**Tier:** 1
+
+## Remedy choices
+- src/c.go:12 - CHOSE: widen the read root
+' > "$CH"
+git add -A >/dev/null 2>&1; git commit -qm answer >/dev/null 2>&1
+ok "a recorded answer clears it" "$(cchk)" "0"
+
+# The answer has to name the cite it answers, or one decision would silently
+# close every open choice on the branch.
+printf '{"round":1,"agent":"l1-reviewer","cite":"src/other.go:4","options":"one :: two"}
+' > "$CHD/l1-reviewer.choices.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm second >/dev/null 2>&1
+ok "an answer to one cite does not answer another" "$(cchk)" "2"
+
+# Uncommitted, like every other thing the gate reads.
+printf '**Tier:** 1
+
+## Remedy choices
+- src/c.go:12 - CHOSE: widen the read root
+- src/other.go:4 - CHOSE: one
+' > "$CH"
+ok "an uncommitted answer does not count" "$(cchk)" "2"
+git add -A >/dev/null 2>&1; git commit -qm both >/dev/null 2>&1
+ok "...and counts once committed" "$(cchk)" "0"
+
+cd "$WORK" || exit 1
+
 echo "== proof receipt (the tested-ness check cannot be skipped by forgetting) =="
 
 git checkout -q -b feat/proof main

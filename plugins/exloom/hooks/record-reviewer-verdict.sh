@@ -408,6 +408,31 @@ if [[ $n_found -gt 0 ]]; then
   echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
 fi
 
+# ---------- a remedy with more than one answer is not the author's to pick ----------
+# Format, one per line:
+#
+#     - CHOICE path/to/file.ext:12 :: first remedy :: second remedy
+#
+# Written here rather than left in prose so the gate can require an answer, and
+# so the options put to the person are the reviewer's words out of a file the
+# session cannot write by hand.
+CHOICES_FILE="${VDIR}/${AGENT}.choices.jsonl"
+n_choice=0
+while IFS= read -r cline; do
+  case "$cline" in *CHOICE*) ;; *) continue ;; esac
+  case "$cline" in *"::"*) ;; *) continue ;; esac
+  ccite="$(printf '%s' "$cline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
+  [[ -n "$ccite" ]] || continue
+  copts="$(printf '%s' "${cline#*::}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr -cd 'A-Za-z0-9 ,.:;()/_@=+-' | cut -c1-400)"
+  [[ -n "$copts" ]] || continue
+  printf '{"round":%s,"agent":"%s","cite":"%s","options":"%s","head":"%s","at":"%s"}\n' "$ROUND" "$AGENT" "$ccite" "$copts" "$HEAD_SHA" "$STAMP" >> "$CHOICES_FILE" 2>/dev/null || break
+  n_choice=$((n_choice + 1))
+done <<< "$SCAN"
+
+if [[ $n_choice -gt 0 ]]; then
+  echo "exloom: ${AGENT} left ${n_choice} remedy choice(s) open - recorded in ${VDIR}/${AGENT}.choices.jsonl. The gate will not pass until each is answered by the user." >&2
+fi
+
 # ---------- do not append a line that adds nothing ----------
 # SubagentStop fires on EVERY turn the reviewer stops on, not only its last one.
 # A reviewer that reads eight files stops eight times, and only the final stop

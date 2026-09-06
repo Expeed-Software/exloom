@@ -41,7 +41,7 @@ For every reviewer a tier requires, "was it dispatched?" is answered by the rece
 ls .claude/reviews/<branch>.verdicts/
 ```
 
-A receipt only counts if it names a commit with no code changes between it and the reviewed tip — if you fixed findings after a review, that reviewer must run again. Receipts must be committed alongside the checklist.
+Which commit a receipt must name depends on the reviewer. **`l1-reviewer` must cover the shipped commit**: if code changed after its review, it runs again. **Every other reviewer needs only to have run and approved somewhere on this branch** — a later fix does not invalidate it, and re-running it is not required. Receipts must be committed alongside the checklist.
 
 ### When to stop reviewing
 
