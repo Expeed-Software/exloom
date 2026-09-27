@@ -319,23 +319,33 @@ ${recorded}
          recorded="" ;;
     esac
   fi
-  for cand in $recorded origin/main origin/master origin/dev origin/develop               origin/development origin/trunk main master dev develop; do
-    case "
+  # origin first: a local branch can sit near HEAD and shrink the diff.
+  local pass cands
+  for pass in origin local; do
+    if [[ "$pass" == "origin" ]]; then
+      cands="$recorded origin/main origin/master origin/dev origin/develop origin/development origin/trunk"
+    else
+      cands="main master dev develop development trunk"
+    fi
+    for cand in $cands; do
+      case "
 ${existing}
 " in *"
 ${cand}
 "*) ;; *) continue ;; esac
-    mb="$(git merge-base "$tip" "$cand" 2>/dev/null)" || continue
-    [[ -n "$mb" ]] || continue
-    dist="$(git rev-list --count "${mb}..${tip}" 2>/dev/null)" || continue
-    [[ "$dist" =~ ^[0-9]+$ ]] || continue
-    if [[ -z "$best_dist" || "$dist" -lt "$best_dist" ]]; then
-      best="$mb"; best_dist="$dist"
-      # Nothing can be nearer than the tip itself.
-      [[ "$dist" -eq 0 ]] && break
-    fi
+      mb="$(git merge-base "$tip" "$cand" 2>/dev/null)" || continue
+      [[ -n "$mb" ]] || continue
+      dist="$(git rev-list --count "${mb}..${tip}" 2>/dev/null)" || continue
+      [[ "$dist" =~ ^[0-9]+$ ]] || continue
+      if [[ -z "$best_dist" || "$dist" -lt "$best_dist" ]]; then
+        best="$mb"; best_dist="$dist"
+        [[ "$dist" -eq 0 ]] && break
+      fi
+    done
+    [[ -n "$best" ]] && break
   done
   [[ -n "$best" ]] || return 1
+  [[ "$pass" == "local" ]] && echo "exloom: no origin/ base branch here; deriving from a local branch, which may be nearer HEAD than the real base" >&2
   _EXLOOM_FP_TIP="$tip"; _EXLOOM_FP="$best"
   printf '%s' "$best"
 }

@@ -2816,6 +2816,18 @@ for p in docs/guide.txt README notes/x.md; do
   ok "$p -> docs-only" "$(sp "$p")" "0"
 done
 
+section "the base comes from origin, not from a local branch near HEAD"
+
+subrepo localbase
+mkdir -p src/auth; printf 'x\n' > src/auth/login.go; git add -A >/dev/null 2>&1; git commit -qm auth >/dev/null 2>&1
+git branch -f main HEAD
+printf 'y\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/null 2>&1
+ok "a local main moved up to HEAD does not shrink the diff" "$(exloom_derive_tier HEAD 2>/dev/null)" "3"
+subrepo localonly noorigin
+printf 'y\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/null 2>&1
+ok "with no origin, a local base is used" "$(exloom_derive_tier HEAD 2>/dev/null)" "1"
+ok "...with a warning" "$(exloom_derive_tier HEAD 2>&1 >/dev/null | grep -c 'no origin/' | head -1)" "1"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
