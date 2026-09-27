@@ -997,7 +997,7 @@ _exloom_ruled() {   # _exloom_ruled <rulings> <cite> <need_quote>
     [[ "$line" == *"$2"* ]] || continue
     pre="${line%%"$2"*}"; rest="${line#*"$2"}"
     [[ "$pre" =~ [A-Za-z0-9_./-]$ || "$rest" =~ ^[0-9] ]] && continue
-    printf '%s' "$rest" | grep -qE '(^|[^A-Za-z])(PARKED|FIXED|DEFERRED[[:space:]]+#?[A-Za-z]*[A-Za-z0-9_-]*[0-9])' || continue
+    printf '%s' "$rest" | grep -qE '^[`[:space:]]*(—|–|-|:)?[[:space:]]*(PARKED|FIXED|DEFERRED[[:space:]]+#?[A-Za-z]*[A-Za-z0-9_-]*[0-9])' || continue
     if [[ "$3" == "1" ]]; then
       printf '%s' "$rest" | grep -qE '"[^"]{3,}"|“[^”]{3,}”' || continue
     fi

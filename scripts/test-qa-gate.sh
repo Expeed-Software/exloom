@@ -175,8 +175,8 @@ pf() {   # pf <expected:pass|exit> <name> <command>
   if [[ "$got" == "$1" ]]; then echo "  PASS  [$1] $2"; PASS=$((PASS + 1))
   else echo "  FAIL  [expected $1, got $got] $2"; FAIL=$((FAIL + 1)); fi
 }
-pf pass "curl -d (an implicit POST)" 'curl -s -d @case.json https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1'
-pf pass "az rest --method post" 'az rest --method post --uri https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case'
+pf pass "curl -d reaches the full check" 'curl -s -d @case.json https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1'
+pf pass "az rest --method post reaches the full check" 'az rest --method post --uri https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case'
 pf exit "an ordinary command" 'ls -la && git status'
 
 echo ""

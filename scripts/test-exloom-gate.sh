@@ -2471,6 +2471,10 @@ rule '- src/one.go:10 — PARKED: a different line'
 rule '- src/one.go:2 — PARKED: fine'
 ok "a ruling on src/one.go:10 does not rule src/one.go:1" "$(ruchk)" "2"
 unrule
+rule '- src/one.go:1 — not FIXED yet'
+rule '- src/one.go:2 — PARKED: fine'
+ok "the disposition must follow the cite, not appear anywhere" "$(ruchk)" "2"
+unrule
 rule '    - src/one.go:1 — PARKED: an indented example'
 rule '    - src/one.go:2 — PARKED: an indented example'
 ok "an indented example line is not a ruling" "$(ruchk)" "2"
