@@ -103,9 +103,9 @@ Required reviewers: l1-reviewer, adversarial-reviewer, security-auditor
 If `exloom_tier_reasons` is empty and the tier is 0 or 1, say so — "no rule
 matched; Tier 1 is the floor" is an answer, and an empty section is not.
 
-On a protected branch, or with no fork point, `exloom_derive_tier` returns
-nothing. Say that the tier cannot be derived here and why, rather than printing
-a blank.
+With no fork point `exloom_derive_tier` prints nothing and returns 1, and the
+push gate blocks until the checklist records `**Base branch:**`. With an empty
+diff it returns 2. Say which of the two applies, rather than printing a blank.
 
 ## Rules
 

@@ -2771,6 +2771,25 @@ git add -A >/dev/null 2>&1; git commit -qm forged >/dev/null 2>&1
 ok "the gate ignores a receipt line from another agent" \
    "$(exloom_check_verdicts "$NC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
 
+section "no base branch blocks; an empty diff passes"
+
+subrepo nobase noorigin
+git branch -m main production >/dev/null 2>&1
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+exloom_derive_tier HEAD >/dev/null 2>&1; ok "no base branch -> derive returns 1" "$?" "1"
+NBC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$NBC")"
+printf '**Tier:** 1\n**Base branch:** auto\n\n## Final verdict\n- [x] All required gates passed for declared tier\n- [x] Checklist committed\n- [x] Ready to ship\n\nReviewed code commit: %s\n' "$(git rev-parse HEAD)" > "$NBC"
+git add -A >/dev/null 2>&1; git commit -qm cl >/dev/null 2>&1
+ok "...and the gate blocks, asking for the base branch" \
+   "$(exloom_validate_checklist "$NBC" HEAD 1 test 2>&1 >/dev/null | grep -c 'Base branch:' | head -1)" "1"
+sed -i 's/^\*\*Base branch:\*\* auto/**Base branch:** production/' "$NBC"
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+ok "a recorded base clears that block" \
+   "$(exloom_validate_checklist "$NBC" HEAD 1 test 2>&1 >/dev/null | grep -c 'cannot find the branch' | head -1)" "0"
+git branch main production; git checkout -q -b feat/empty main
+exloom_derive_tier HEAD >/dev/null 2>&1; ok "an empty diff -> derive returns 2" "$?" "2"
+git checkout -q feat/plan
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

@@ -58,7 +58,7 @@ LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)
 exloom_derive_tier HEAD; exloom_tier_reasons
 ```
 
-If that disagrees with the rules above, it is right and they are the summary — it is the same function the push gate runs.
+If that disagrees with the rules above, it is right and they are the summary — it is the same function the push gate runs. If it prints nothing and returns 1, exloom found no base branch; Step 2a is then required, because the push gate blocks until `**Base branch:**` names one. A return of 2 means the branch has no diff yet.
 
 ## Step 2a - Confirm the base branch
 

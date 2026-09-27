@@ -246,8 +246,8 @@ exloom_push_target_branches() {
 # Over-declaration is always allowed — going one tier higher is the documented
 # response to uncertainty.
 #
-# Echoes 0-3 and returns 0; returns 1 when the tier cannot be derived (no fork
-# point, no diff) so the caller can fail open. Deliberately encodes only rules
+# Echoes 0-3 and returns 0; returns 1 when there is no fork point (the gate
+# blocks and asks for a base) and 2 when the diff is empty (nothing to check). Deliberately encodes only rules
 # that are unambiguous from a file list — "frontend AND backend changed" and
 # "more than one module" need stack knowledge the hook does not have, and stay
 # with the skill as judgment.
@@ -363,7 +363,7 @@ exloom_derive_tier() {
   [[ -n "$base" ]] || return 1
   # Review artifacts are not the change under review.
   files="$(git diff --name-only "$base" "$tip" -- . ':(exclude).claude/reviews' 2>/dev/null)"
-  [[ -n "$files" ]] || return 1
+  [[ -n "$files" ]] || return 2
 
   # Repository policy runs alongside the built-in rules, never instead of them.
   # The effective tier is the highest anything matched, so a repo can teach the
@@ -1879,9 +1879,19 @@ Re-run /review-complete to review the current tip."
     fi
 
     # The declared tier must not be below the tier the diff itself derives to.
-    # Fail open when it cannot be derived (no fork point / no diff).
-    local derived
-    if derived="$(exloom_derive_tier "$tip")" && [[ "$derived" =~ ^[0-3]$ ]]; then
+    local derived drc
+    derived="$(exloom_derive_tier "$tip")"; drc=$?
+    if [[ $drc -eq 1 ]]; then
+      _exloom_block "$action" "exloom cannot find the branch this one forked from, so it cannot derive the tier.
+None of origin/main, origin/master, origin/dev, origin/develop, origin/development,
+origin/trunk or their local names exists here.
+
+Add the base to ${checklist}, e.g.
+  **Base branch:** origin/production
+and commit it."
+      return 2
+    fi
+    if [[ $drc -eq 0 && "$derived" =~ ^[0-3]$ ]]; then
       if [[ "$tier" -lt "$derived" ]]; then
         _exloom_block "$action" "$checklist declares Tier ${tier}, but this diff derives to Tier ${derived}.
 
