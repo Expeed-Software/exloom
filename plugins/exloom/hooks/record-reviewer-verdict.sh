@@ -299,6 +299,28 @@ case "$RLINE" in
   NO)  ROUND_NEEDED="NO" ;;
 esac
 
+# ---------- verify mode: a re-review of the fix range only ----------
+# `MODE: VERIFY <from>..<to>` in the report. New findings count only on lines the
+# range adds or changes, and only at Critical/Important; the rest are recorded
+# OUT-OF-SCOPE, which the gate never asks a ruling for.
+MODE="full"; RANGE=""; FIX_LINES=""
+MFROM="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+  | sed -n 's/^MODE:[[:space:]]*VERIFY[[:space:]]*\([0-9a-fA-F]\{7,40\}\)\.\..*/\1/p' | tail -1)"
+if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)"; then
+  MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
+  FIX_LINES="$(git -c core.quotepath=false diff -U0 "$MFROM" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
+           /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i)}')"
+fi
+_in_fix() {   # _in_fix <cite> — is the cited line one the fix range added or changed?
+  local p="${1%:*}" l="${1##*:}" f
+  while IFS= read -r f; do
+    [[ -n "$f" && "${f##*:}" == "$l" ]] || continue
+    [[ "$p" == "${f%:*}" || "$p" == */"${f%:*}" ]] && return 0
+  done <<< "$FIX_LINES"
+  return 1
+}
+
 # ---------- findings become data, not chat ----------
 # Parsed against the shipped output format, which is:
 #
@@ -354,6 +376,11 @@ while IFS= read -r fline; do
       case "$head_txt" in *nothing\ to\ flag*) cur_sev="" ;; esac
       continue ;;
   esac
+  not_addressed=0
+  if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*(NOT[[:space:]]+)?ADDRESSED'; then
+    printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*NOT[[:space:]]+ADDRESSED' || continue
+    not_addressed=1
+  fi
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   if [[ -z "$cite" ]]; then
     # No cite: if the line names a severity, remember it for the lines that
@@ -388,11 +415,21 @@ while IFS= read -r fline; do
   # A non-blocking line is LOW whatever else it says.
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac
   sev="${cur_sev:-${line_sev:-$item_sev}}"
+  if [[ $not_addressed -eq 1 ]]; then
+    sev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | tail -1 \
+           | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    [[ -n "$sev" ]] || sev="MED"
+  fi
   [[ -n "$sev" ]] || continue
 
   scope="$cur_scope"
   printf '%s' "$fline" | grep -qiE 'PRE-EXISTING' && scope="PRE-EXISTING"
   printf '%s' "$fline" | grep -qiE 'IN-SCOPE'     && scope="IN-SCOPE"
+  if [[ $not_addressed -eq 1 ]]; then
+    scope="IN-SCOPE"
+  elif [[ "$MODE" == "verify" && "$scope" == "IN-SCOPE" ]] && { [[ "$sev" == "LOW" ]] || ! _in_fix "$cite"; }; then
+    scope="OUT-OF-SCOPE"
+  fi
 
   file="${cite%%:*}"
   # Fingerprint from the text AFTER the cite is removed. Keeping the cite lets a
@@ -493,8 +530,9 @@ if _recorded_for_head "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND_NEE
   exit 0
 fi
 
-printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
-  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" \
+RANGE_FIELD=""; [[ -n "$RANGE" ]] && RANGE_FIELD=",\"range\":\"${RANGE}\""
+printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s"%s}\n' \
+  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" "$MODE" "$RANGE_FIELD" \
   >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
 
 # The exit condition, stated where the session will read it. APPROVED with every

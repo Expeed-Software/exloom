@@ -2491,6 +2491,61 @@ printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"
 git add -A >/dev/null 2>&1; git commit -qm blind >/dev/null 2>&1
 ok "a REJECTED review with no findings recorded cannot be ruled away" "$(ruchk)" "2"
 
+section "verify mode: a re-review covers only the fix range"
+
+subrepo verify
+VC=".claude/reviews/feat/plan.md"; VV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$VV"
+printf '# checklist\n\n## Rulings\n' > "$VC"
+printf 'l1\nl2\nl3\nl4\nl5\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+VA="$(git rev-parse HEAD)"
+vfeed() {   # vfeed <report>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+vfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:2 — IN-SCOPE — null dereference
+ROUND NEEDED AFTER FIX: YES'
+ok "a full review records mode full" "$(grep -c '"mode":"full"' "$VV/l1-reviewer.json")" "1"
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'l1\nl2 fixed\nl3\nl4\nl5\nl6\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+VB="$(git rev-parse HEAD)"
+vfeed "VERDICT: REJECTED (2 items)
+MODE: VERIFY ${VA}..${VB}
+## Previous findings
+- src/a.go:2 — ADDRESSED
+## Critical (must fix before merge)
+- src/a.go:4 — IN-SCOPE — a line the fix did not touch
+- src/a.go:6 — IN-SCOPE — a line the fix added
+ROUND NEEDED AFTER FIX: YES"
+ok "a verify review records its mode and range" \
+   "$(tail -1 "$VV/l1-reviewer.json" | grep -c "\"mode\":\"verify\",\"range\":\"${VA}..${VB}\"")" "1"
+ok "a finding outside the fix range is recorded out of scope" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:4' | grep -c 'OUT-OF-SCOPE')" "1"
+ok "a finding inside the fix range stays in scope" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:6' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "an ADDRESSED finding is not recorded again" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep -c 'src/a.go:2')" "0"
+git add -A >/dev/null 2>&1; git commit -qm r2 >/dev/null 2>&1
+vchk() { exloom_check_verdicts "$VC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null; }
+ok "the in-range finding blocks" "$(vchk | grep -c 'src/a.go:6')" "1"
+ok "...and the out-of-range one is not asked for a ruling" "$(vchk | grep -c 'src/a.go:4')" "0"
+printf -- '- src/a.go:6 — FIXED: removed the added line\n' >> "$VC"
+git add -A >/dev/null 2>&1; git commit -qm rule >/dev/null 2>&1
+ok "ruling the in-range finding passes; the out-of-range one cannot reject" \
+   "$(exloom_check_verdicts "$VC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${VA}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:2 — NOT ADDRESSED: still dereferences null
+ROUND NEEDED AFTER FIX: YES"
+ok "a NOT ADDRESSED finding is recorded in scope with its earlier severity" \
+   "$(grep "\"head\":\"$(git rev-parse HEAD)\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep '"scope":"IN-SCOPE"' | grep -c '"severity":"HIGH"')" "1"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

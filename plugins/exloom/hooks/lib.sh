@@ -1008,12 +1008,18 @@ _exloom_ruled() {   # _exloom_ruled <rulings> <cite> <need_quote>
 
 # Echoes the cites of the in-scope findings a REJECTED review recorded at <sha>
 # that have no ruling. Returns 0 when all are ruled, 1 when some are not, and 2
-# when the review recorded no findings at all.
+# when the review recorded no findings at all. A verify review whose findings all
+# fall outside its fix range has nothing in scope, so nothing to rule.
 _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
-  local findings rulings fline cite sev nq out=""
-  findings="$(MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.findings.jsonl" 2>/dev/null \
-    | grep -F "\"head\":\"${4}\"" | grep -vF '"scope":"PRE-EXISTING"')"
-  [[ -n "$findings" ]] || return 2
+  local all findings rulings fline cite sev nq out=""
+  all="$(MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.findings.jsonl" 2>/dev/null \
+    | grep -F "\"head\":\"${4}\"")"
+  [[ -n "$all" ]] || return 2
+  findings="$(printf '%s\n' "$all" | grep -vF -e '"scope":"PRE-EXISTING"' -e '"scope":"OUT-OF-SCOPE"')"
+  if [[ -z "$findings" ]]; then
+    printf '%s\n' "$all" | grep -qF '"scope":"OUT-OF-SCOPE"' && return 0
+    return 2
+  fi
   rulings="$(exloom_rulings "$1" "$2")"
   while IFS= read -r fline; do
     cite="$(printf '%s' "$fline" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')"

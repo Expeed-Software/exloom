@@ -155,6 +155,15 @@ however large its fix. Say plainly that the fix is architectural and that the
 branch should not ship until it lands. Do not use this exception for hardening,
 defence-in-depth, or a theoretical weakness with no demonstrated path.
 
+# Verify mode (when the prompt says "Verify fixes")
+
+The prompt gives your previous findings and a fix range. Review only that range:
+
+- First line: the verdict. Second line: `MODE: VERIFY <from>..<to>`, copying the range from the prompt.
+- Under `## Previous findings`, one line per earlier finding: `- <path>:<line> — ADDRESSED` or `- <path>:<line> — NOT ADDRESSED: <what is still wrong>`.
+- Report a new finding only if it is at your blocking severity and on a line the fix range adds or changes. Anything else is out of scope: leave it out.
+- REJECTED only if an earlier finding is NOT ADDRESSED or a new in-range finding is at your blocking severity.
+
 # Verdict line (REQUIRED — first line of your report)
 
 Begin your report with EXACTLY one of:

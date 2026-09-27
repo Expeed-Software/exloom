@@ -151,6 +151,16 @@ L1 already reported and these are being handled, so do not re-report them:
   <file:line> — <one line each>
 ```
 
+**From round 2, re-dispatch in verify mode.** The reviewer checks its own earlier findings and the fix, not the whole branch again:
+
+```
+Verify fixes on branch <branch>. Fix range: <last-reviewed-sha>..<sha>
+Previous findings:
+<the finding lines of its last report, verbatim>
+```
+
+`<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. The receipt records the mode and the range. A new finding outside the fix range is recorded out of scope and never needs a ruling.
+
 **That is the whole prompt.** Do not summarise your change, do not explain your reasoning, do not say which areas you think matter, do not name a severity, and do not say what you have already checked.
 
 This is not brevity for its own sake. A reviewer that reads your framing reviews your framing. Tell it where you think the risk is and it looks there; tell it what you already verified and it believes you. The agent files already carry the full instruction set — what to check, in what order, what counts as blocking, and `## 4. The author's claims are not evidence`, which explicitly instructs the reviewer to treat your comments, commit messages and summaries as unverified assertions. A long brief is you doing the reviewer's job for it, worse, and then being told what you already believed.
