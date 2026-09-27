@@ -81,7 +81,41 @@ git checkout -q -b feat/x
 # shellcheck source=/dev/null
 . "$LIB_ABS"
 
-echo "== tier derivation (declared tier cannot go below this) =="
+section() { echo "== $1 =="; }
+
+deny() { printf '%s' "$1" | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?; }
+
+PROVE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+
+proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
+  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null
+  git config user.email t@e.com; git config user.name t
+  # The gate marker and a feature branch are REQUIRED, not decoration:
+  # prove-change-is-tested.sh returns before writing a receipt when either is
+  # missing. Without them a fixture asserts exit codes on a path where the
+  # receipt-minting branch is dead code — and a fixture that never reaches the
+  # code it names is worse than none, because it reports green.
+  : > .claude/exloom-gate.enabled
+  : > .claude/exloom-proof.enabled
+  printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
+  printf '%s\n' "$3" > src/calc.sh
+  printf '%s\n' "$2" > tests/calc_test.sh
+  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+  git checkout -q -b feat/proof 2>/dev/null
+  # Sets a global rather than echoing: `$(proofrepo ...)` would run the whole
+  # function in a subshell and its `cd` would not survive, so the fixture files
+  # would land in the wrong directory.
+  BASESHA="$(git rev-parse HEAD)"
+}
+prove() { bash "$PROVE" --base "$1" >/dev/null 2>&1; echo $?; }
+# The exit code is the smaller half of the contract. What the gate actually reads
+# is the receipt, so assert on that too — an exit code alone cannot distinguish
+# "proved" from "wrote nothing and happened to return 0".
+proofres() { sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' \
+               ".claude/reviews/feat/proof.verdicts/proof.json" 2>/dev/null | tail -1; }
+
+section "tier derivation (declared tier cannot go below this)"
 
 printf 'a\n' > README.md; git add -A; git commit -qm docs
 ok "docs-only -> 0" "$(exloom_derive_tier HEAD)" "0"
@@ -132,7 +166,7 @@ printf 'a
 ok "authz -> 3" "$(exloom_derive_tier HEAD)" "3"
 git checkout -q feat/x
 
-echo "== verdict receipts (dispatch is recorded, not claimed) =="
+section "verdict receipts (dispatch is recorded, not claimed)"
 
 CHECK=".claude/reviews/feat/x.md"
 mkdir -p "$(dirname "$CHECK")"
@@ -182,7 +216,7 @@ exloom_check_verdicts "$C2" 1 HEAD "$R2" "test" 2>/dev/null
 ok "uncommitted receipt -> blocked" "$?" "2"
 git checkout -q feat/x
 
-echo "== staleness by change class (a typo fix must not demand another round) =="
+section "staleness by change class (a typo fix must not demand another round)"
 
 # Invalidating a review on ANY code change, combined with fixing findings,
 # guarantees another round after every round — the loop has no terminating state.
@@ -260,7 +294,7 @@ exloom_check_verdicts "$CC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null
 ok "behavioural commit after review -> review invalidated" "$?" "2"
 git checkout -q feat/x
 
-echo "== code-reviewer verdicts (a REJECTED review does not satisfy the gate) =="
+section "code-reviewer verdicts (a REJECTED review does not satisfy the gate)"
 
 # A receipt states a conclusion or it states nothing. REJECTED and UNKNOWN both
 # fail the gate, and a line with no verdict key at all records a launch rather
@@ -326,7 +360,7 @@ git add -A; git commit -qm r2
 ok "old APPROVED does not vouch for a new REJECTED" "$(chk)" "2"
 git checkout -q feat/x
 
-echo "== a remedy the reviewer left open is not the author's to pick =="
+section "a remedy the reviewer left open is not the author's to pick"
 
 subrepo choices noorigin
 CH=".claude/reviews/feat/ch.md"; mkdir -p "$(dirname "$CH")"
@@ -374,7 +408,7 @@ ok "...and counts once committed" "$(cchk)" "0"
 
 cd "$WORK" || exit 1
 
-echo "== proof receipt (the tested-ness check cannot be skipped by forgetting) =="
+section "proof receipt (the tested-ness check cannot be skipped by forgetting)"
 
 git checkout -q -b feat/proof main
 CP=".claude/reviews/feat/proof.md"; mkdir -p "$(dirname "$CP")"
@@ -441,9 +475,7 @@ ok "hand-writing a proof receipt -> denied" \
   "$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/proof.verdicts/proof.json"}}' | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?)" "2"
 git checkout -q feat/x
 
-echo "== protect-verdicts hook (a receipt cannot be written by hand) =="
-
-deny() { printf '%s' "$1" | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?; }
+section "protect-verdicts hook (a receipt cannot be written by hand)"
 
 ok "Write to a receipt -> denied" \
   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.verdicts/l1-reviewer.json"}}')" "2"
@@ -462,7 +494,7 @@ ok "reading a receipt -> allowed" \
 ok "unrelated command -> allowed" \
   "$(deny '{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}')" "0"
 
-echo "== protection: state file and wholesale deletion =="
+section "protection: state file and wholesale deletion"
 
 # Guarding `.verdicts/` alone is not enough: `rm -rf .claude/reviews` and
 # `git clean -fdx` name neither the directory nor the state file, and either one
@@ -473,7 +505,7 @@ ok "rm -rf of the reviews tree -> denied"   "$(deny '{"tool_name":"Bash","tool_i
 ok "git clean -fdx -> denied"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"git clean -fdx"}}')" "2"
 ok "reading the state file -> allowed"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"cat .claude/reviews/feat/x.state"}}')" "0"
 
-echo "== remediation commands in block messages must actually run =="
+section "remediation commands in block messages must actually run"
 
 # ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is
 # NOT set in the Bash environment. A remediation command built from it fails with
@@ -513,7 +545,7 @@ ok "...while the manifest, where it IS interpolated, still uses it" \
    "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "5"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
-echo "== record-reviewer-verdict hook (a real dispatch writes one) =="
+section "record-reviewer-verdict hook (a real dispatch writes one)"
 
 git checkout -q -b feat/rec main
 RVD=".claude/reviews/feat/rec.verdicts"
@@ -543,7 +575,7 @@ ok "gate off -> receipt writes allowed" \
   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.verdicts/l1-reviewer.json"}}')" "0"
 mv .claude/gate-off .claude/exloom-gate.enabled
 
-echo "== verdicts (a dispatch is not a review) =="
+section "verdicts (a dispatch is not a review)"
 
 # A receipt that records only that a reviewer RAN enforces attendance, not
 # review: a REJECTED report would open the gate exactly like an approval. The
@@ -584,7 +616,7 @@ and I could not complete the review.'
 ok "echoed format template is not an approval" \
    "$(grep -c '"verdict":"APPROVED"' "$VF" 2>/dev/null | head -1)" "0"
 
-echo "== classifier: real code the old version called non-behavioural =="
+section "classifier: real code the old version called non-behavioural"
 
 # Each case below is a line a naive comment-stripper reads as inert. Getting any
 # of them wrong keeps a stale reviewer receipt "covering" a commit whose
@@ -640,7 +672,7 @@ printf '# a different python comment\nx = 1\n' > csrc/p.py
 ok "Python # comment change -> NOT behavioural" "$(beh pycmt "$CB")" "no"
 git checkout -q feat/x
 
-echo "== reviewer output parsed as the shipped agents actually print it =="
+section "reviewer output parsed as the shipped agents actually print it"
 
 # Fixtures copied from agents/l1-reviewer.md's own "Output format — strict"
 # block. Severity sits on the HEADING and the finding line carries only a cite;
@@ -697,7 +729,7 @@ ok "echoed template does not win over the real verdict" "$(vof)" "REJECTED"
 
 cd "$WORK" || exit 1
 
-echo "== classifier: near-misses of the comment-marker rules =="
+section "classifier: near-misses of the comment-marker rules"
 
 # Each case sits one character away from a rule above it. These are the shapes a
 # marker-based classifier gets wrong once it has been made to handle the obvious
@@ -730,7 +762,7 @@ printf 'cat <<EOF\n# heading TWO CHANGED\nEOF\n' > r2/e.sh
 ok "heredoc body in .sh -> behavioural" "$(r2beh heredoc "$RB")" "yes"
 git checkout -q feat/x
 
-echo "== verdict decoration: every form an LLM actually emits =="
+section "verdict decoration: every form an LLM actually emits"
 
 subrepo vdec
 printf '# plan\n- src/one.go\n' > docs/plans/p.md
@@ -762,7 +794,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 ok "'Critical (cleanup...)' still records findings" \
    "$(grep -c . "$VVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-echo "== proof: the three-run protocol =="
+section "proof: the three-run protocol"
 
 PRV="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
 prv() { local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
@@ -790,7 +822,7 @@ ok "genuine behavioural test -> PROVED" "$(prvrun "$PB")" "0"
 ok "--cmd false -> PROOF VOID" \
    "$(bash "$PRV" --base "$PB" --cmd false >/dev/null 2>&1; echo $?)" "2"
 
-echo "== re-find disposition: next-line keyword, and legacy checklists =="
+section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
 LD=".claude/reviews/feat/plan.verdicts"; mkdir -p "$LD"
@@ -811,7 +843,7 @@ ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
 
 cd "$WORK" || exit 1
 
-echo "== round-3 blockers: forgery, binding, writing ABOUT the guarded path =="
+section "round-3 blockers: forgery, binding, writing ABOUT the guarded path"
 
 # Matching command TEXT rather than command TARGETS denies anything that merely
 # MENTIONS the guarded path — a commit message about the guard, a note written
@@ -834,7 +866,7 @@ ok "a redirect INTO the path -> still denied" \
 ok "a quoted target -> still denied" \
    "$(deny "$(jbash "echo x | tee \"${GV}\"")")" "2"
 
-echo "== a shell redirection is not a refspec =="
+section "a shell redirection is not a refspec"
 
 # `git push origin 2>&1` must not parse as a push of a branch named `2>&1`. It
 # would make the block message tell the author to run /review-init for a branch
@@ -852,7 +884,7 @@ ok "git push origin feat/z 2>&1 -> feat/z"       "$(pt 'git push origin feat/z 2
 ok "git push origin HEAD -> HEAD"                "$(pt 'git push origin HEAD')" "HEAD"
 ok "git push origin other-branch -> other-branch" "$(pt 'git push origin other-branch')" "other-branch"
 
-echo "== SubagentStop: the verdict is captured at COMPLETION =="
+section "SubagentStop: the verdict is captured at COMPLETION"
 
 # PostToolUse fires at launch and carries no report; SubagentStop fires on
 # completion and carries it verbatim. Listening only to the first records every
@@ -905,7 +937,7 @@ ok "a pre-verdict receipt is no longer grandfathered" "$LRC" "2"
 ok "...and the block names the fix, not just the refusal" \
    "$(printf '%s' "$LOUT" | grep -c 'without a name')" "1"
 
-echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
+section "ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists"
 
 # The payload of an async launch, verbatim. It carries no report at all, because
 # the reviewer has not run yet.
@@ -979,7 +1011,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 ok "a real report with no VERDICT line -> still UNKNOWN" \
    "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$ADV/l1-reviewer.json" 2>/dev/null | tail -1)" "UNKNOWN"
 
-echo "== payload shape: the field the harness actually sends =="
+section "payload shape: the field the harness actually sends"
 
 # The harness delivers a Task result as `tool_response`, a content-block array.
 # A fixture feeding `tool_output` as a bare string tests a shape nothing emits,
@@ -1000,7 +1032,7 @@ ok "tool_output bare string (older shape) -> still read" \
    "$(shape_verdict '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_output":"VERDICT: APPROVED"}')" \
    "APPROVED"
 
-echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
+section "CONTRACT: every shipped agent's own output block, through the real parser"
 
 # The producer and the consumer are separate files, and nothing else checks that
 # they agree. This drives EVERY agent's documented Output-format block through the
@@ -1071,7 +1103,7 @@ VERDICT: REJECTED (1 items)'
 ok "adversarial: '## Non-blocking' is not recorded as blocking severity" \
    "$(grep -c '"severity":"HIGH"' "$CVD/adversarial-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-echo "== CONTRACT: every template placeholder is enforced, every alternation is written =="
+section "CONTRACT: every template placeholder is enforced, every alternation is written"
 
 TPL="$(cd "$(dirname "$LIB_ABS")/../templates" && pwd)/review-checklist.md"
 PRE="$(sed -n "s/^  placeholder_re='\(.*\)'$/\1/p" "$LIB_ABS")"
@@ -1110,40 +1142,11 @@ ok "every scripts/*.sh named in a hook exists in the plugin" "$BAD" "0"
 
 cd "$WORK" || exit 1
 
-echo "== prove-change-is-tested (author-side, before review) =="
+section "prove-change-is-tested (author-side, before review)"
 
 # The three shapes this check exists to catch before review starts: a decorative
 # assertion, a write-path test with no read-path test, and a test task that
 # reports UP-TO-DATE and never runs.
-PROVE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
-
-proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
-  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
-  git init -q -b main . 2>/dev/null
-  git config user.email t@e.com; git config user.name t
-  # The gate marker and a feature branch are REQUIRED, not decoration:
-  # prove-change-is-tested.sh returns before writing a receipt when either is
-  # missing. Without them a fixture asserts exit codes on a path where the
-  # receipt-minting branch is dead code — and a fixture that never reaches the
-  # code it names is worse than none, because it reports green.
-  : > .claude/exloom-gate.enabled
-  : > .claude/exloom-proof.enabled
-  printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
-  printf '%s\n' "$3" > src/calc.sh
-  printf '%s\n' "$2" > tests/calc_test.sh
-  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
-  git checkout -q -b feat/proof 2>/dev/null
-  # Sets a global rather than echoing: `$(proofrepo ...)` would run the whole
-  # function in a subshell and its `cd` would not survive, so the fixture files
-  # would land in the wrong directory.
-  BASESHA="$(git rev-parse HEAD)"
-}
-prove() { bash "$PROVE" --base "$1" >/dev/null 2>&1; echo $?; }
-# The exit code is the smaller half of the contract. What the gate actually reads
-# is the receipt, so assert on that too — an exit code alone cannot distinguish
-# "proved" from "wrote nothing and happened to return 0".
-proofres() { sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' \
-               ".claude/reviews/feat/proof.verdicts/proof.json" 2>/dev/null | tail -1; }
 
 # A. A test that genuinely notices the change -> PROVED.
 proofrepo good 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
@@ -1179,7 +1182,7 @@ ok "no worktree left behind" "$(git worktree list | grep -c exloom-proof || true
 
 cd "$WORK" || exit 1
 
-echo "== the loop-termination signal is recorded, not just emitted =="
+section "the loop-termination signal is recorded, not just emitted"
 
 # Every agent emits `ROUND NEEDED AFTER FIX:` as a mandatory closing line. It is
 # the signal that lets a loop terminate, so it has to be recorded rather than
@@ -1211,7 +1214,7 @@ ok "decorated form still read" \
 ok "no line at all -> UNKNOWN, never silently NO" \
    "$(rn 'VERDICT: APPROVED')" "UNKNOWN"
 
-echo "== one dispatch leaves one receipt line, not eighteen =="
+section "one dispatch leaves one receipt line, not eighteen"
 
 # SubagentStop fires on EVERY turn a reviewer stops on, not only its last. A
 # reviewer that reads eight files stops eight times, and the seven intermediate
@@ -1280,7 +1283,7 @@ ok "a new commit gets its own line" "$(lines)" "5"
 
 cd "$WORK" || exit 1
 
-echo "== lanes: rigour earned by stakes, not imposed by process =="
+section "lanes: rigour earned by stakes, not imposed by process"
 
 # Tiers scale review DEPTH and are derived from the diff. They do not scale
 # CEREMONY, and ceremony is what a small change cannot afford — a single strict
@@ -1361,7 +1364,7 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
-echo "== a javadoc paragraph break is not a pointer dereference =="
+section "a javadoc paragraph break is not a pointer dereference"
 
 # A bare `*` line is how every javadoc block separates paragraphs. It strips to
 # `*`, which does not match the `'* '*` continuation case (that needs a trailing
@@ -1399,7 +1402,7 @@ ok "...and a pointer dereference is still code" \
 
 cd "$WORK" || exit 1
 
-echo "== a receipt goes to the repo the REVIEW is about, not the session's cwd =="
+section "a receipt goes to the repo the REVIEW is about, not the session's cwd"
 
 # A reviewer dispatched at a worktree completes while the session's cwd is
 # elsewhere. Resolving the repo from cwd alone finds no gate marker there and
@@ -1447,7 +1450,7 @@ ok "...and names what to do about it" \
 
 cd "$WORK" || exit 1
 
-echo "== the round a finding belongs to is derived, never read from a state file =="
+section "the round a finding belongs to is derived, never read from a state file"
 
 # The round has to come from the receipts themselves. Reading it from a state
 # file nothing writes lands every finding in round 0, and two things then fail
@@ -1478,7 +1481,7 @@ ok "open criticals counts DEFECTS, not finding lines" \
 
 cd "$WORK" || exit 1
 
-echo "== the gate says where it stands at every completion, not only at the end =="
+section "the gate says where it stands at every completion, not only at the end"
 
 # A session that hand-dispatches reviewers gets the same findings as the command,
 # so the two feel equivalent, and nothing contradicts that until the push is
@@ -1535,7 +1538,7 @@ ok "the status never changes the hook's exit code" \
 
 cd "$WORK" || exit 1
 
-echo "== reading a receipt is not writing one =="
+section "reading a receipt is not writing one"
 
 # Matching a bare `>` anywhere in the command denies two read-only forms:
 #
@@ -1571,7 +1574,7 @@ ok "touching the gate marker is denied"       "$(pv 'touch .claude/exloom-gate.e
 
 cd "$WORK" || exit 1
 
-echo "== the fork point is the NEAREST branch, not the first one named =="
+section "the fork point is the NEAREST branch, not the first one named"
 
 # Taking the FIRST candidate that resolves — origin/main, else master, else dev —
 # breaks in a repo that keeps main as a RELEASE branch and dev as the integration
@@ -1691,7 +1694,7 @@ ok "no candidate branch at all -> fails rather than guessing a base" \
 
 cd "$WORK" || exit 1
 
-echo "== criterion coverage is produced by the runner, never by a test's name =="
+section "criterion coverage is produced by the runner, never by a test's name"
 
 # The criterion-to-test join, done without a per-framework adapter: the ref goes
 # in the TEST NAME, and every runner that matters emits JUnit XML. One parser
@@ -1754,7 +1757,7 @@ ok "...and the run says so out loud, rather than dropping it silently" \
 ok "the receipt records a PROVED result alongside the criteria" \
    "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$PJ" | tail -1)" "PROVED"
 
-echo "== an additive change is provable by mutation, not by absence =="
+section "an additive change is provable by mutation, not by absence"
 
 # The three-run proof is structurally unsatisfiable for a purely additive change:
 # every test exercising a new API fails to COMPILE at base. Refusing to call that
@@ -1847,7 +1850,7 @@ ok "...and it is not recorded as a mutation result" \
 
 cd "$WORK" || exit 1
 
-echo "== the spec linter: structural errors block, judgement calls warn =="
+section "the spec linter: structural errors block, judgement calls warn"
 
 # The line between ERROR and WARN is the whole design. Errors are structural and
 # a machine cannot be wrong about them; warns are judgement and a machine
@@ -2000,7 +2003,7 @@ ok "a CRLF spec lints identically" "$(lintrc)" "0"
 
 cd "$WORK" || exit 1
 
-echo "== the proof binds the COMMAND it proved, not just its own presence =="
+section "the proof binds the COMMAND it proved, not just its own presence"
 
 # The receipt records the hash of the pinned test command, and the gate compares
 # it. Without that comparison a repo could prove with a real suite, then point
@@ -2020,7 +2023,7 @@ printf 'true\n' > .claude/exloom-test-command
 git add -A >/dev/null 2>&1; git commit -qm swap >/dev/null 2>&1
 ok "test command swapped after the proof -> blocked" "$(prf)" "2"
 
-echo "== security review is triggered by SURFACE, not only by tier =="
+section "security review is triggered by SURFACE, not only by tier"
 
 # Dependency and deserialization changes derive to Tier 1 or 2, so requiring
 # security-auditor by tier alone would never reach them — and the skill promises
@@ -2054,7 +2057,7 @@ ok "ordinary source -> NOT a security surface (no over-block)" \
 
 cd "$WORK" || exit 1
 
-echo "== test-vs-source classification: a production package named spec/ =="
+section "test-vs-source classification: a production package named spec/"
 
 # A production package can be named `spec`. If `*/spec/*` matched inside
 # src/main, the proof would revert part of a production package and keep the
@@ -2076,7 +2079,7 @@ ok "js .spec.ts -> test"     "$(istest 'src/order.spec.ts')" "test"
 ok "go _test.go -> test"     "$(istest 'internal/order/order_test.go')" "test"
 ok "plain source -> source"  "$(istest 'internal/order/order.go')" "source"
 
-echo "== the shipped template must not block a branch that filled it honestly =="
+section "the shipped template must not block a branch that filled it honestly"
 
 # A placeholder example left in the document BODY blocks every branch: a
 # developer who correctly used no escape hatch leaves the line alone, and the
@@ -2099,7 +2102,7 @@ done
 ok "no placeholder example outside a comment in Escape hatches" \
    "$(awk '/^## Escape hatches used/,/^## Provenance/' "$TPL" | grep -v '^ *<!--' | grep -vE '^ ' | grep -c '<step name>' | head -1)" "0"
 
-echo "== reviewers are decoupled: only L1 must cover the shipped commit =="
+section "reviewers are decoupled: only L1 must cover the shipped commit"
 
 # Requiring every reviewer to approve the SAME commit is what stops a loop
 # converging: a fix cancels approvals from reviewers that were already satisfied,
@@ -2134,7 +2137,7 @@ ok "...and it names the agent that is behind" \
 ok "...while L1, which covers the tip, is NOT reported behind" \
    "$(exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | grep -c 'l1-reviewer approved' | head -1)" "0"
 
-echo "== the round cap: three rounds, then a person decides =="
+section "the round cap: three rounds, then a person decides"
 
 subrepo roundcap
 RC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$RC")"
@@ -2259,7 +2262,7 @@ ok "4 rounds all APPROVED -> still asks (a counter only goes up)" "$(rchk)" "2"
 ok "...and the report says every reviewer is satisfied" \
    "$(capmsg | grep -c 'every required reviewer is satisfied' | head -1)" "1"
 
-echo "== the cap is configurable, but only from a COMMITTED file =="
+section "the cap is configurable, but only from a COMMITTED file"
 
 ok "default cap" "$(exloom_max_rounds)" "3"
 printf '5\n' > .claude/exloom-max-rounds
@@ -2267,7 +2270,7 @@ ok "uncommitted config is ignored" "$(exloom_max_rounds)" "3"
 git add -A >/dev/null 2>&1; git commit -qm cap >/dev/null 2>&1
 ok "committed config is honoured" "$(exloom_max_rounds)" "5"
 
-echo "== a pipeline that records nothing is not a clean branch =="
+section "a pipeline that records nothing is not a clean branch"
 
 # When receipt capture degrades, every line records a launch and no conclusion,
 # and every mechanism downstream reads blank and renders blank as fine: the cap
@@ -2308,7 +2311,7 @@ git add -A >/dev/null 2>&1; git commit -qm real >/dev/null 2>&1
 ok "one real verdict clears the blindness" \
    "$(exloom_evidence_blind "$BCL" HEAD >/dev/null 2>&1 && echo blind || echo ok)" "ok"
 
-echo "== the cap override answers the round question, and only that =="
+section "the cap override answers the round question, and only that"
 
 # Checked below the receipt evaluation, not above it. Returning early would let a
 # recorded 'merge as-is' waive the requirement that reviewers ran at all — which
@@ -2337,7 +2340,7 @@ git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
 exloom_check_verdicts "$CCL" 1 HEAD "$(git rev-parse HEAD)" "push" >/dev/null 2>&1
 ok "...but ships once the reviewers are real" "$?" "0"
 
-echo "== the status line stops driving the loop at the cap =="
+section "the status line stops driving the loop at the cap"
 
 # exloom_gate_status runs after every reviewer completes, and a fix commit always
 # leaves the L1 receipt behind the tip — so an unconditional "covers an earlier
@@ -2415,7 +2418,7 @@ ok "under the cap it still reports a stale receipt" \
    "$(printf '%s' "$UOUT" | grep -c 'covers an earlier commit')" "1"
 ok "...and does not say STOP" "$(printf '%s' "$UOUT" | grep -c 'STOP -')" "0"
 
-echo "== the bypass leaves a trace =="
+section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
 # announcement on stderr scrolls past, so without a committed trace nothing can
@@ -2456,7 +2459,7 @@ rm -f .claude/exloom-gate.enabled "$BP"
 printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
 ok "no receipt in a repo with the gate off" "$([[ -f "$BP" ]] && echo yes || echo no)" "no"
 
-echo "== the status line judges coverage the way the GATE does =="
+section "the status line judges coverage the way the GATE does"
 
 # A status line stricter than the check it reports on sends people to re-run a
 # reviewer the gate is content with. Once its demands are known to be inflated,
