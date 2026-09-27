@@ -975,6 +975,58 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
   return 0
 }
 
+# Top-level `- ` items under `## Rulings` in the committed checklist. An
+# indented line is an example, not a ruling.
+exloom_rulings() {   # exloom_rulings <checklist> <tip>
+  MSYS_NO_PATHCONV=1 git show "${2}:${1}" 2>/dev/null | tr -d '\r' \
+    | awk '/^## Rulings[[:space:]]*$/{f=1; next} /^## /{f=0} f && /^- /'
+}
+
+_exloom_print_rulings() {   # _exloom_print_rulings <checklist> <tip>
+  local r; r="$(exloom_rulings "$1" "$2")"
+  [[ -n "$r" ]] || return 0
+  echo "exloom: rulings recorded in $1:" >&2
+  printf '%s\n' "$r" | sed 's/^/  /' >&2
+}
+
+# Does a ruling line name <cite> with a disposition? DEFERRED needs a ticket id
+# with a digit in it; <need_quote> 1 also needs the user's words in quotes.
+_exloom_ruled() {   # _exloom_ruled <rulings> <cite> <need_quote>
+  local line pre rest
+  while IFS= read -r line; do
+    [[ "$line" == *"$2"* ]] || continue
+    pre="${line%%"$2"*}"; rest="${line#*"$2"}"
+    [[ "$pre" =~ [A-Za-z0-9_./-]$ || "$rest" =~ ^[0-9] ]] && continue
+    printf '%s' "$rest" | grep -qE '(^|[^A-Za-z])(PARKED|FIXED|DEFERRED[[:space:]]+#?[A-Za-z]*[A-Za-z0-9_-]*[0-9])' || continue
+    if [[ "$3" == "1" ]]; then
+      printf '%s' "$rest" | grep -qE '"[^"]{3,}"|“[^”]{3,}”' || continue
+    fi
+    return 0
+  done <<< "$1"
+  return 1
+}
+
+# Echoes the cites of the in-scope findings a REJECTED review recorded at <sha>
+# that have no ruling. Returns 0 when all are ruled, 1 when some are not, and 2
+# when the review recorded no findings at all.
+_exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
+  local findings rulings fline cite sev nq out=""
+  findings="$(MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.findings.jsonl" 2>/dev/null \
+    | grep -F "\"head\":\"${4}\"" | grep -vF '"scope":"PRE-EXISTING"')"
+  [[ -n "$findings" ]] || return 2
+  rulings="$(exloom_rulings "$1" "$2")"
+  while IFS= read -r fline; do
+    cite="$(printf '%s' "$fline" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')"
+    sev="$(printf '%s' "$fline" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    [[ -n "$cite" ]] || continue
+    nq=0; [[ "$5" == "1" && "$sev" == "HIGH" ]] && nq=1
+    _exloom_ruled "$rulings" "$cite" "$nq" || out="${out}${cite} (${sev})"$'\n'
+  done <<< "$findings"
+  [[ -z "$out" ]] && return 0
+  printf '%s' "$out" | sort -u
+  return 1
+}
+
 # exloom_check_verdicts <checklist> <tier> <tip> <reviewed-sha> <action>
 #
 # Only the L1 reviewer's approval must cover the shipped commit. The others must
@@ -990,8 +1042,10 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
   local vdir agent file content sha ok approved_at behind seen_verdict dispatch_only
+  local last_kind last_sha unruled ruling_notes="" ruled=0 need_quote=0
   local -a missing=() stale=() unapproved=() launched=()
   vdir="$(exloom_verdict_dir "$checklist")"
+  [[ "$tier" -ge 3 || "$lane" == "certified" ]] 2>/dev/null && need_quote=1
 
   # Security review is triggered by SURFACE as well as by tier — see
   # exloom_security_surface. Computed once here rather than in the tier lookup,
@@ -1010,7 +1064,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""; last_kind=""; last_sha=""
 
     # A receipt with no verdict is NOT accepted, whatever wrote it.
     #
@@ -1043,10 +1097,23 @@ exloom_check_verdicts() {
       # verdict or it records a launch; only the first is evidence.
       case "$rline" in
         *'"verdict":"APPROVED"'*) seen_verdict=1; ok=1; approved_at="$sha"; break ;;
-        *'"verdict":"REJECTED"'*|*'"verdict":"UNKNOWN"'*) seen_verdict=1; rejected=1 ;;
+        *'"verdict":"REJECTED"'*) seen_verdict=1; rejected=1; last_kind=REJECTED; last_sha="$sha" ;;
+        *'"verdict":"UNKNOWN"'*)  seen_verdict=1; rejected=1; last_kind=UNKNOWN ;;
         *) dispatch_only="$sha" ;;
       esac
     done < <(printf '%s\n' "$content")
+    if [[ $ok -ne 1 && "$last_kind" == "REJECTED" ]]; then
+      unruled="$(_exloom_unruled_findings "$checklist" "$tip" "$agent" "$last_sha" "$need_quote")"
+      case $? in
+        0) ok=1; ruled=1 ;;
+        2) ruling_notes="${ruling_notes}  ${agent}: no findings were recorded for its REJECTED review, so none
+    can be ruled on. Re-dispatch it.
+" ;;
+        *) ruling_notes="${ruling_notes}  ${agent}: findings with no ruling:
+$(printf '%s\n' "$unruled" | sed 's/^/    /')
+" ;;
+      esac
+    fi
     if [[ $ok -ne 1 ]]; then
       if   [[ $rejected -eq 1 ]];        then unapproved+=( "$agent" )
       elif [[ -n "$dispatch_only" ]];    then launched+=( "$agent" )
@@ -1097,6 +1164,7 @@ exloom_check_verdicts() {
   if [[ "$rounds" -ge "$max" ]] && exloom_cap_override "$checklist" "$tip"; then
     if [[ -z "$outstanding" ]]; then
       echo "exloom: shipping at ${rounds} passes on a decision recorded in ${checklist}." >&2
+      _exloom_print_rulings "$checklist" "$tip"
       return 0
     fi
     _exloom_block "$action" "A round-cap decision is recorded in ${checklist}, but it does not
@@ -1107,7 +1175,7 @@ review this', and these reviewers have not:
 
 
 ${outstanding}
-$(exloom_evidence_blind_note "$checklist" "$tip" || true)
+${ruling_notes}$(exloom_evidence_blind_note "$checklist" "$tip" || true)
 Fix the reviewers listed above, or remove the cap decision if it was made on a
 report that showed them as satisfied."
     return 2
@@ -1185,7 +1253,8 @@ recommended one first, and do NOT decide it yourself:
 Then carry out what they choose:
   fix     -> make the fix, commit it, re-dispatch l1-reviewer, come back here
   merge   -> record their answer in ${checklist} under 'Escape hatches used' as
-             '- User approved at round cap — <their words>', commit it, push again
+             '- User approved at round cap — <their words>', add a ruling for
+             each open finding under '## Rulings', commit it, push again
   show    -> print the findings from ${vdir}/*.findings.jsonl and ask again
 
 Do not record that answer unless they actually gave it. Re-running the reviewers
@@ -1194,7 +1263,10 @@ return here with the same findings."
     return 2
   fi
 
-  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 && ${#launched[@]} -eq 0 ]]; then return 0; fi
+  if [[ ${#missing[@]} -eq 0 && ${#stale[@]} -eq 0 && ${#unapproved[@]} -eq 0 && ${#launched[@]} -eq 0 ]]; then
+    _exloom_print_rulings "$checklist" "$tip"
+    return 0
+  fi
 
   local detail="Tier ${tier} requires a verdict receipt from each of: $(exloom_required_reviewers "$tier" "$sec_extra")."
   # Say which lane set that bar. A Sprint branch is asked for one reviewer where
@@ -1225,10 +1297,17 @@ subagent dispatched with a NAME, which routes its report to the mailbox instead
 of the tool result exloom reads. Dispatch it again without a name."
   [[ ${#unapproved[@]} -gt 0 ]] && detail="${detail}
 
-Reviewed the current code, but did NOT approve it (fix the findings, then re-run):
+Reviewed the current code, but did NOT approve it:
 $(printf '  - %s\n' "${unapproved[@]}")
-A REJECTED verdict is not a passing review, and UNKNOWN means the reviewer's
-report carried no 'VERDICT: APPROVED' line — neither counts as approval."
+UNKNOWN means the report carried no 'VERDICT: APPROVED' line; re-dispatch it.
+A REJECTED review is closed by a ruling on each of its findings, not by another
+round. Put one line per cite under '## Rulings' in ${checklist}:
+  - src/x.go:12 — PARKED: why it can wait
+  - src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it
+  - src/x.go:44 — FIXED: the smallest change, at the cited line
+$( [[ $need_quote -eq 1 ]] && echo "At Tier 3 and on the Certified lane, a ruling on a Critical finding quotes the
+user's words in double quotes.")
+${ruling_notes}"
 
   _exloom_block "$action" "${detail}
 

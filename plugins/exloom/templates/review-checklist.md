@@ -107,6 +107,18 @@ not a fix. Say so when asking.
 
 none
 
+## Rulings
+
+A REJECTED review is closed by a ruling on each finding it recorded, one line
+per cite. At Tier 3 and on the Certified lane, a ruling on a Critical finding
+quotes the user's words in double quotes.
+
+    - src/thing.ts:88 — PARKED: the retry covers it
+    - src/thing.ts:120 — DEFERRED ABC-123: the path is rewritten there
+    - src/thing.ts:140 — FIXED: the null check at the cited line
+
+none
+
 ## Escape hatches used
 - [ ] None (default)
 

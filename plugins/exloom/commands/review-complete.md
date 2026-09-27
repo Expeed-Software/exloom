@@ -55,6 +55,16 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 
 `"round_needed":"UNKNOWN"` means the reviewer gave no such line, and counts as `YES`: a reviewer that did not answer has not told you the loop can stop. Re-dispatch that one reviewer rather than the whole set.
 
+**A REJECTED review is closed by rulings, not by another round.** For each finding the reviewer recorded, add one line under `## Rulings` in the checklist:
+
+```
+- src/x.go:12 — PARKED: why it can wait
+- src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it
+- src/x.go:44 — FIXED: the smallest change, at the cited line
+```
+
+The gate accepts the REJECTED receipt once every in-scope finding has a ruling, and prints all rulings at push. At Tier 3 and on the Certified lane, a ruling on a Critical finding quotes the user's words in double quotes — ask them; do not write it for them. An UNKNOWN verdict, or a REJECTED review that recorded no findings, cannot be ruled on: re-dispatch that reviewer.
+
 ### Tier 0 required
 - L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test / cross-layer / adversarial / runbook sections marked `N/A - Tier 0` (or left with their defaults) are acceptable — Tier 0 only requires L1.
@@ -178,7 +188,7 @@ Applied to a review finding, that means:
 - **A finding is a defect report, not a design brief.** Fix what is cited, at the line that is cited.
 - **Before writing a new file, a new class, a new method, or a new test class in response to a finding — stop and ask.** Say what the finding is, what the minimal fix is, and what you would add beyond it. Let the user choose.
 - **The branch should be roughly the size it was when review started.** If it is growing each round, the fixes are exceeding the findings, and that is the failure — not a sign of thoroughness.
-- **A finding that needs architecture goes to a ticket**, not into this branch. Record it in the checklist as deferred with the ticket, and move on.
+- **A finding that needs architecture goes to a ticket**, not into this branch. Record it under `## Rulings` as `DEFERRED <ticket>`, and move on.
 
 A one-line change should end as a one-line change. Four test classes for one config key is not diligence; it is scope expansion wearing its clothes, and each addition is unreviewed code that generates the next round of findings.
 

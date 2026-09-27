@@ -2235,9 +2235,21 @@ ok "...and the cap report says so, rather than counting it" \
 # to "did anyone approve this".
 printf '\n## Escape hatches used\n- User approved at round cap — approved after 3 passes\n' >> "$RC"
 git add -A >/dev/null 2>&1; git commit -qm userok >/dev/null 2>&1
-ok "the answer does not waive a reviewer that REJECTED the code" "$(rchk)" "2"
+ok "the answer does not waive a REJECTED review with no rulings" "$(rchk)" "2"
 ok "...and says which question it actually answered" \
    "$(capmsg | grep -c 'does not answer' | head -1)" "1"
+REJ="$(sed -n 's/.*"head":"\([0-9a-f]*\)","verdict":"REJECTED".*/\1/p' "$RCV/l1-reviewer.json" | tail -1)"
+printf '{"round":4,"agent":"l1-reviewer","severity":"MED","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"i9","head":"%s","at":"n"}\n' \
+  "$REJ" >> "$RCV/l1-reviewer.findings.jsonl"
+printf '\n## Rulings\n- src/one.go:1 — PARKED: the retry covers it\n' >> "$RC"
+git add -A >/dev/null 2>&1; git commit -qm ruled >/dev/null 2>&1
+ok "...but with a ruling on each open finding the gate passes" "$(rchk)" "0"
+python3 -c "
+import sys,re
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+s=s.replace('\n## Rulings\n- src/one.go:1 — PARKED: the retry covers it\n','\n')
+open(p,'w',encoding='utf-8',newline='').write(s)" "$RC"
+git add -A >/dev/null 2>&1; git commit -qm unruled >/dev/null 2>&1
 
 # With the reviewer satisfied, the same recorded answer ships the branch: the cap
 # is a counter a person answers, and their answer stands.
@@ -2417,6 +2429,63 @@ UOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
 ok "under the cap it still reports a stale receipt" \
    "$(printf '%s' "$UOUT" | grep -c 'covers an earlier commit')" "1"
 ok "...and does not say STOP" "$(printf '%s' "$UOUT" | grep -c 'STOP -')" "0"
+
+section "rulings close a REJECTED review, one finding at a time"
+
+subrepo rulings
+RUC=".claude/reviews/feat/plan.md"; RUV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RUV"
+printf '# checklist\n\n## Rulings\n' > "$RUC"
+printf 'r1\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+RUH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$RUH" > "$RUV/l1-reviewer.json"
+{ printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"c1","head":"%s","at":"n"}\n' "$RUH"
+  printf '{"round":1,"agent":"l1-reviewer","severity":"MED","scope":"IN-SCOPE","cite":"src/one.go:2","fingerprint":"i1","head":"%s","at":"n"}\n' "$RUH"
+  printf '{"round":1,"agent":"l1-reviewer","severity":"MED","scope":"PRE-EXISTING","cite":"src/old.go:9","fingerprint":"p1","head":"%s","at":"n"}\n' "$RUH"
+} > "$RUV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ruchk() { exloom_check_verdicts "$RUC" "${1:-1}" HEAD "$(git rev-parse HEAD)" "test" "${2:-standard}" >/dev/null 2>&1; echo $?; }
+rule() { printf '%s\n' "$1" >> "$RUC"; git add -A >/dev/null 2>&1; git commit -qm rule >/dev/null 2>&1; }
+unrule() { python3 -c "
+import sys
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+open(p,'w',encoding='utf-8',newline='').write(s.split('## Rulings\n')[0]+'## Rulings\n')" "$RUC"
+  git add -A >/dev/null 2>&1; git commit -qm unrule >/dev/null 2>&1; }
+
+ok "no rulings -> REJECTED blocks" "$(ruchk)" "2"
+ok "...and the block names each unruled cite" \
+   "$(exloom_check_verdicts "$RUC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 | grep -cE 'src/one.go:(1|2)' | head -1)" "2"
+rule '- src/one.go:1 — FIXED: the null check at the cited line'
+ok "one of two findings ruled -> still blocks" "$(ruchk)" "2"
+rule '- src/one.go:2 — DEFERRED: later'
+ok "DEFERRED with no ticket is not a ruling" "$(ruchk)" "2"
+rule '- src/one.go:2 — DEFERRED ABC-123: the retry path is rewritten there'
+ok "every in-scope finding ruled -> passes; pre-existing needs none" "$(ruchk)" "0"
+ok "...and the gate prints the rulings" \
+   "$(exloom_check_verdicts "$RUC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 | grep -c 'ABC-123' | head -1)" "1"
+ok "Certified lane: a Critical ruled without the user's words -> blocks" "$(ruchk 1 certified)" "2"
+rule '- src/one.go:1 — PARKED: user said "ship it, the flag is off in prod"'
+ok "...with their words quoted -> passes" "$(ruchk 1 certified)" "0"
+
+unrule
+rule '- src/one.go:10 — PARKED: a different line'
+rule '- src/one.go:2 — PARKED: fine'
+ok "a ruling on src/one.go:10 does not rule src/one.go:1" "$(ruchk)" "2"
+unrule
+rule '    - src/one.go:1 — PARKED: an indented example'
+rule '    - src/one.go:2 — PARKED: an indented example'
+ok "an indented example line is not a ruling" "$(ruchk)" "2"
+
+unrule
+rule '- src/one.go:1 — PARKED: x'
+rule '- src/one.go:2 — PARKED: x'
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"UNKNOWN","round_needed":"UNKNOWN"}\n' "$RUH" >> "$RUV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm unknown >/dev/null 2>&1
+ok "an UNKNOWN verdict cannot be ruled away" "$(ruchk)" "2"
+
+printf 'r2\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r2 >/dev/null 2>&1
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$(git rev-parse HEAD)" >> "$RUV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm blind >/dev/null 2>&1
+ok "a REJECTED review with no findings recorded cannot be ruled away" "$(ruchk)" "2"
 
 section "the bypass leaves a trace"
 
