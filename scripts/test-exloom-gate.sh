@@ -2874,6 +2874,17 @@ for tier in 1 2; do
      "$(exloom_validate_checklist "$TSC" HEAD 1 test 2>&1 >/dev/null | grep -c 'runbook' | head -1)" "0"
 done
 
+section "the proof applies the branch's deletions"
+
+proofrepo replaced 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+printf 'for t in tests/*_test.sh; do bash "$t" || exit 1; done\n' > .claude/exloom-test-command
+git rm -q tests/calc_test.sh; mkdir -p tests
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/new_test.sh
+printf 'echo 5\n' > src/calc.sh
+git add -A >/dev/null 2>&1; git commit -qm replace >/dev/null 2>&1
+ok "a replaced test is removed before the runs, so the change proves" "$(prove "$B")" "0"
+ok "...and the receipt says PROVED" "$(proofres)" "PROVED"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

@@ -334,7 +334,8 @@ fi
 copied=0
 while IFS= read -r t; do
   [[ -z "$t" ]] && continue
-  [[ -f "$t" ]] || continue
+  # A test the branch deleted must not run against the change it was replaced for.
+  [[ -f "$t" ]] || { rm -f "$WT/$t"; copied=$((copied+1)); continue; }
   mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
   cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
 done <<< "$TST"
@@ -366,7 +367,8 @@ fi
 # do not pass on the change they were written for.
 if [[ $rc -ne 0 ]]; then
   while IFS= read -r sf; do
-    [[ -n "$sf" && -f "$sf" ]] || continue
+    [[ -n "$sf" ]] || continue
+    [[ -f "$sf" ]] || { rm -f "$WT/$sf"; continue; }
     mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
     cp "$sf" "$WT/$sf" 2>/dev/null
   done <<< "$SRC"
