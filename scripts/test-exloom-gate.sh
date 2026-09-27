@@ -2790,6 +2790,22 @@ git branch main production; git checkout -q -b feat/empty main
 exloom_derive_tier HEAD >/dev/null 2>&1; ok "an empty diff -> derive returns 2" "$?" "2"
 git checkout -q feat/plan
 
+section "security paths derive Tier 3 whatever their case"
+
+subrepo secpaths
+sp() {   # sp <path> -> derived tier for a branch changing only that path
+  git checkout -q -B "t/$RANDOM" main
+  mkdir -p "$(dirname "$1")"; printf 'x\n' > "$1"; git add -A >/dev/null 2>&1; git commit -qm p >/dev/null 2>&1
+  exloom_derive_tier HEAD 2>/dev/null
+}
+for p in src/OAuth2Config.java src/security/Filter.java src/PasswordEncoder.java src/EncryptionService.java \
+         app/SECRETS.py src/rbac/Roles.go src/HTTPSecurity.java src/IAMPolicy.go src/sso/x.go src/acl.go; do
+  ok "$p -> Tier 3" "$(sp "$p")" "3"
+done
+for p in src/authoring/x.go src/Author.java src/diameter.go src/oracle.go src/decipherable.go; do
+  ok "$p -> not Tier 3" "$(sp "$p")" "1"
+done
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

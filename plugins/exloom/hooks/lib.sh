@@ -406,8 +406,16 @@ exloom_derive_tier() {
     _exloom_tier_reason "$files" '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog' 'data migration'
     printf '3'; return 0
   fi
-  if printf '%s\n' "$files" | grep -Eq '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey'; then
-    _exloom_tier_reason "$files" '(^|[^A-Za-z])[Aa]uth([^A-Za-z]|[A-Z]|$|entic|oriz|z|n)|[Oo]auth|[Tt]enant|[Ss]ecret|[Cc]rypto|[Jj][Ww][Tt]|[Aa]pi[-_]?[Kk]ey' 'auth / tenancy / secrets / crypto'
+  # Matched on the path split at camelCase and lowercased, so OAuth2Config,
+  # PasswordEncoder and SECRETS.py count. token, session and login are left out:
+  # too common in code that is not a security surface.
+  local sec_re='(^|[^a-z])auth([^a-z]|$|entic|oriz|z|n)|oauth|tenant|secret|crypto|jwt|api[-_]?key|(^|[^a-z])(security|password|credential|encrypt|cipher)|(^|[^a-z])(rbac|acl|sso|saml|oidc|iam)([^a-z]|$)'
+  local sec_line sec_hit=""
+  sec_line="$(printf '%s\n' "$files" | sed -e 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g' -e 's/\([A-Z]\)\([A-Z][a-z]\)/\1_\2/g' \
+    | tr '[:upper:]' '[:lower:]' | grep -Enm1 "$sec_re" | cut -d: -f1)"
+  [[ -n "$sec_line" ]] && sec_hit="$(printf '%s\n' "$files" | sed -n "${sec_line}p")"
+  if [[ -n "$sec_hit" ]]; then
+    _EXLOOM_TIER_REASONS="${_EXLOOM_TIER_REASONS}${sec_hit}	auth / tenancy / secrets / crypto	built-in"$'\n'
     printf '3'; return 0
   fi
   # Tier 3 is already the ceiling, so those two exits answer directly. Below it a
