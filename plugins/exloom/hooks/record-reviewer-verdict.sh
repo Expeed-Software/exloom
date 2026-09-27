@@ -84,16 +84,13 @@ else
 fi
 [[ -n "$SUBAGENT" ]] || exit 0
 
-# Which reviewer is this? Suffix match, so both `l1-reviewer` and the namespaced
-# `exloom:l1-reviewer` record against the same canonical name. An agent that is
-# not one of exloom's reviewers leaves no receipt: dispatching a general-purpose
-# agent to "do an L1 review" deliberately does not satisfy the gate, because
-# nothing here can tell what such an agent was actually asked to do.
+# Exact names only: any agent whose name merely ends in `l1-reviewer` could
+# otherwise write a valid receipt.
 AGENT=""
 case "$SUBAGENT" in
-  *l1-reviewer)          AGENT="l1-reviewer" ;;
-  *adversarial-reviewer) AGENT="adversarial-reviewer" ;;
-  *security-auditor)     AGENT="security-auditor" ;;
+  exloom:l1-reviewer)          AGENT="l1-reviewer" ;;
+  exloom:adversarial-reviewer) AGENT="adversarial-reviewer" ;;
+  exloom:security-auditor)     AGENT="security-auditor" ;;
   *) exit 0 ;;
 esac
 

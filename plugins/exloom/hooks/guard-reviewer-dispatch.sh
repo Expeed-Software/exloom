@@ -28,9 +28,9 @@ fi
 
 SUB="$(exloom_tool_input "$HOOK_INPUT" subagent_type)"
 case "$SUB" in
-  *l1-reviewer)          AGENT="l1-reviewer" ;;
-  *adversarial-reviewer) AGENT="adversarial-reviewer" ;;
-  *security-auditor)     AGENT="security-auditor" ;;
+  exloom:l1-reviewer)          AGENT="l1-reviewer" ;;
+  exloom:adversarial-reviewer) AGENT="adversarial-reviewer" ;;
+  exloom:security-auditor)     AGENT="security-auditor" ;;
   *) exit 0 ;;
 esac
 

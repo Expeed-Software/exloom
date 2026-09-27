@@ -1096,6 +1096,7 @@ exloom_check_verdicts() {
       [[ -z "$rline" ]] && continue
       sha="$(printf '%s' "$rline" | sed -n 's/.*"head"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
       [[ -n "$sha" ]] || continue
+      if [[ "$rline" == *'"subagent_type"'* && "$rline" != *'"subagent_type":"exloom:'"$agent"'"'* ]]; then continue; fi
       git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
       # Only L1 must cover the SHIPPED commit. For the others, having run and
       # approved anywhere on this branch is enough — see the header. A

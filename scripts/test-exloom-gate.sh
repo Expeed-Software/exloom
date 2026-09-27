@@ -561,10 +561,10 @@ record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"gene
 ok "general-purpose agent -> no receipt" "$(ls "$RVD" | wc -l | tr -d ' ')" "1"
 
 record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"l1-reviewer"}}'
-ok "unprefixed reviewer name also matches" "$([[ -f "$RVD/l1-reviewer.json" ]] && echo yes || echo no)" "yes"
+ok "an unprefixed reviewer name writes no receipt" "$([[ -f "$RVD/l1-reviewer.json" ]] && echo yes || echo no)" "no"
 
 record '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
-ok "non-Task tool ignored" "$(ls "$RVD" | wc -l | tr -d ' ')" "2"
+ok "non-Task tool ignored" "$(ls "$RVD" | wc -l | tr -d ' ')" "1"
 
 # The whole gate is opt-in; with the marker gone, neither hook does anything.
 mv .claude/exloom-gate.enabled .claude/gate-off
@@ -2753,6 +2753,23 @@ ok "REJECTED then a re-run APPROVED at the same commit -> still blocks" "$(rrchk
 ok "UNKNOWN then APPROVED at the same commit -> passes" "$(rrchk)" "0"
 { rline APPROVED; printf '{"agent":"l1-reviewer","head":"%s","dispatch":true}\n' "$RRH"; } > "$RRV/l1-reviewer.json"
 ok "a launch line after an approval does not change the verdict" "$(rrchk)" "0"
+
+section "only exloom's own reviewers write receipts"
+
+subrepo names
+NV=".claude/reviews/feat/plan.verdicts"; NC=".claude/reviews/feat/plan.md"; mkdir -p "$NV"
+printf '# checklist\n' > "$NC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'x',
+ 'agent_type':'myplugin:l1-reviewer','last_assistant_message':'VERDICT: APPROVED'}))" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "an agent merely named *l1-reviewer writes no receipt" "$([[ -f "$NV/l1-reviewer.json" ]] && echo yes || echo no)" "no"
+printf '{"agent":"l1-reviewer","subagent_type":"myplugin:l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" > "$NV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm forged >/dev/null 2>&1
+ok "the gate ignores a receipt line from another agent" \
+   "$(exloom_check_verdicts "$NC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
 
 section "the bypass leaves a trace"
 
