@@ -2539,12 +2539,21 @@ ok "ruling the in-range finding passes; the out-of-range one cannot reject" \
    "$(exloom_check_verdicts "$VC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
 
 vfeed "VERDICT: REJECTED (1 items)
-MODE: VERIFY ${VA}..$(git rev-parse HEAD)
+MODE: VERIFY ${VB}..$(git rev-parse HEAD)
 ## Previous findings
 - src/a.go:2 — NOT ADDRESSED: still dereferences null
 ROUND NEEDED AFTER FIX: YES"
 ok "a NOT ADDRESSED finding is recorded in scope with its earlier severity" \
    "$(grep "\"head\":\"$(git rev-parse HEAD)\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep '"scope":"IN-SCOPE"' | grep -c '"severity":"HIGH"')" "1"
+printf 'l7\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY $(git rev-parse HEAD)..$(git rev-parse HEAD)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — empty range
+ROUND NEEDED AFTER FIX: YES"
+ok "a verify range that does not start at the last reviewed head is not verify mode" \
+   "$(grep 'src/a.go:1' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
+
 
 section "the ledger: minor findings never enter the fix loop"
 

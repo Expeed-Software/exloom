@@ -306,7 +306,9 @@ esac
 MODE="full"; RANGE=""; FIX_LINES=""
 MFROM="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
   | sed -n 's/^MODE:[[:space:]]*VERIFY[[:space:]]*\([0-9a-fA-F]\{7,40\}\)\.\..*/\1/p' | tail -1)"
-if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)"; then
+LAST_HEAD="$(grep -F '"verdict":' "${VDIR}/${AGENT}.json" 2>/dev/null | tail -1 | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)" \
+   && [[ "$MFROM" == "$LAST_HEAD" && "$MFROM" != "$HEAD_SHA" ]]; then
   MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
   FIX_LINES="$(git -c core.quotepath=false diff -U0 "$MFROM" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
