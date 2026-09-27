@@ -2735,6 +2735,25 @@ ok "a task's verify pass goes to the task receipt, with its range" \
    "$(tail -1 "$BV/l1-reviewer.tasks.json" | grep -c "\"mode\":\"verify\",\"range\":\"${T1}\.\..*\"task\":\"4\"")" "1"
 ok "...and is not a branch round" "$(grep -c '"verify"' "$BV/l1-reviewer.json")" "0"
 
+section "the latest verdict counts, and a same-commit re-run cannot overturn a rejection"
+
+subrepo reroll
+RR=".claude/reviews/feat/plan.md"; RRV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RRV"
+printf '# checklist\n\n## Rulings\n' > "$RR"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+RRH="$(git rev-parse HEAD)"
+rline() { printf '{"agent":"l1-reviewer","head":"%s","verdict":"%s","round_needed":"NO"}\n' "$RRH" "$1"; }
+rrchk() { git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+  exloom_check_verdicts "$RR" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?; }
+{ rline APPROVED; rline REJECTED; } > "$RRV/l1-reviewer.json"
+ok "APPROVED then REJECTED at the same commit -> blocks" "$(rrchk)" "2"
+{ rline REJECTED; rline APPROVED; } > "$RRV/l1-reviewer.json"
+ok "REJECTED then a re-run APPROVED at the same commit -> still blocks" "$(rrchk)" "2"
+{ rline UNKNOWN; rline APPROVED; } > "$RRV/l1-reviewer.json"
+ok "UNKNOWN then APPROVED at the same commit -> passes" "$(rrchk)" "0"
+{ rline APPROVED; printf '{"agent":"l1-reviewer","head":"%s","dispatch":true}\n' "$RRH"; } > "$RRV/l1-reviewer.json"
+ok "a launch line after an approval does not change the verdict" "$(rrchk)" "0"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

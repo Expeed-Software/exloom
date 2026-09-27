@@ -1056,7 +1056,7 @@ _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
   local vdir agent file content sha ok approved_at behind seen_verdict dispatch_only
-  local last_kind last_sha unruled ruling_notes="" ruled=0 need_quote=0
+  local last_kind last_sha rejected_shas unruled ruling_notes="" ruled=0 need_quote=0
   local -a missing=() stale=() unapproved=() launched=()
   vdir="$(exloom_verdict_dir "$checklist")"
   [[ "$tier" -ge 3 || "$lane" == "certified" ]] 2>/dev/null && need_quote=1
@@ -1078,7 +1078,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""; last_kind=""; last_sha=""
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""; last_kind=""; last_sha=""; rejected_shas=""
 
     # A receipt with no verdict is NOT accepted, whatever wrote it.
     #
@@ -1109,13 +1109,21 @@ exloom_check_verdicts() {
       # A dispatch is not a review, and a reviewer that returned REJECTED must
       # not satisfy the gate it was dispatched to satisfy. A line either states a
       # verdict or it records a launch; only the first is evidence.
+      # The latest verdict counts, but a re-run at a commit already REJECTED cannot approve it.
       case "$rline" in
-        *'"verdict":"APPROVED"'*) seen_verdict=1; ok=1; approved_at="$sha"; break ;;
-        *'"verdict":"REJECTED"'*) seen_verdict=1; rejected=1; last_kind=REJECTED; last_sha="$sha" ;;
-        *'"verdict":"UNKNOWN"'*)  seen_verdict=1; rejected=1; last_kind=UNKNOWN ;;
+        *'"verdict":"APPROVED"'*)
+          seen_verdict=1
+          if [[ " $rejected_shas " == *" $sha "* ]]; then last_kind=REJECTED; last_sha="$sha"
+          else last_kind=APPROVED; approved_at="$sha"; fi ;;
+        *'"verdict":"REJECTED"'*) seen_verdict=1; last_kind=REJECTED; last_sha="$sha"; rejected_shas+=" $sha" ;;
+        *'"verdict":"UNKNOWN"'*)  seen_verdict=1; last_kind=UNKNOWN ;;
         *) dispatch_only="$sha" ;;
       esac
     done < <(printf '%s\n' "$content")
+    case "$last_kind" in
+      APPROVED) ok=1 ;;
+      REJECTED|UNKNOWN) rejected=1 ;;
+    esac
     if [[ $ok -ne 1 && "$last_kind" == "REJECTED" ]]; then
       unruled="$(_exloom_unruled_findings "$checklist" "$tip" "$agent" "$last_sha" "$need_quote")"
       case $? in
