@@ -1,18 +1,39 @@
 #!/usr/bin/env bash
 # test-all.sh — run every suite, in parallel, with the gate suite split by section.
-# Usage: bash scripts/test-all.sh [-j N] [--changed [BASE]] [--only REGEX] [--list]
+# Usage: bash scripts/test-all.sh [-j N] [--changed [BASE]] [--only REGEX] [--list] [--native]
 #   --changed  run only what the files changed since BASE (default: merge-base
 #              with main, plus uncommitted work) can affect
 #   --only     run only gate sections whose title matches REGEX
+#   --native   run on this host even when Docker is available
+# With Docker available it runs in a Linux container: on Windows each process
+# start costs ~85 ms, which puts the native suite at 8-12 minutes. Run --native
+# before a release, since the container cannot catch Windows-only behaviour.
 # Exits 0 when every selected job passes, 1 otherwise.
 
 set -u
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." || exit 1
 
+NATIVE=0
+for a in "$@"; do [[ "$a" == "--native" ]] && NATIVE=1; done
+if [[ $NATIVE -eq 0 && -z "${EXLOOM_IN_CONTAINER:-}" ]] && command -v docker >/dev/null 2>&1 \
+   && docker info >/dev/null 2>&1; then
+  if docker image inspect exloom-test >/dev/null 2>&1 \
+     || docker build -q -t exloom-test scripts/test-image >/dev/null; then
+    echo "running in a Linux container (--native to run on this host)"
+    SRC="$(pwd -W 2>/dev/null || pwd)"
+    MSYS_NO_PATHCONV=1 exec docker run --rm -e EXLOOM_IN_CONTAINER=1 -v "$SRC:/src:ro" exloom-test \
+      bash -c 'cp -r /src /repo && cd /repo \
+        && find . -path ./.git -prune -o -type f \( -name "*.sh" -o -name "*.md" -o -name "*.json" -o -name "*.yml" \) -exec sed -i "s/\r$//" {} + \
+        && exec bash scripts/test-all.sh "$@"' _ "$@"
+  fi
+  echo "could not build the test image; running on this host" >&2
+fi
+
 GATE=scripts/test-exloom-gate.sh
 JOBS=8; CHANGED=0; BASE=""; ONLY=""; LIST=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --native) shift ;;
     -j) JOBS="$2"; shift 2 ;;
     -j*) JOBS="${1#-j}"; shift ;;
     --changed) CHANGED=1; shift
