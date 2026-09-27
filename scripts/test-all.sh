@@ -107,7 +107,7 @@ want_sections_naming() {   # want_sections_naming <name>...
 want_all_sections() { local i; for ((i = 0; i < NSEC; i++)); do WANT_SEC[$i]=1; done; }
 
 if [[ $CHANGED -eq 1 ]]; then
-  [[ -n "$BASE" ]] || BASE="$(git merge-base HEAD main 2>/dev/null || echo HEAD)"
+  [[ -n "$BASE" ]] || BASE="$(git merge-base HEAD main 2>/dev/null)" || { echo "--changed: cannot resolve main; pass a base, e.g. --changed origin/main" >&2; exit 2; }
   CHANGED_FILES="$( { git diff --name-only "$BASE"; git ls-files --others --exclude-standard; } | sort -u)"
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
@@ -182,7 +182,7 @@ FAILED=0; PASSES=0
 while read -r id; do
   cat "$TMP/$id.t" >> "$TMP/times.new"
   rc="$(cat "$TMP/$id.rc" 2>/dev/null || echo 1)"
-  p="$(sed -n 's/^PASS=\([0-9]*\) FAIL=.*/\1/p' "$TMP/$id.out" | tail -1)"
+  p="$(sed -n -e 's/^PASS=\([0-9]*\) FAIL=.*/\1/p' -e 's/^== \([0-9]*\) passed, .*/\1/p' "$TMP/$id.out" | tail -1)"
   PASSES=$((PASSES + ${p:-0}))
   if [[ "$rc" != "0" ]]; then
     FAILED=$((FAILED + 1))
