@@ -2546,6 +2546,36 @@ ROUND NEEDED AFTER FIX: YES"
 ok "a NOT ADDRESSED finding is recorded in scope with its earlier severity" \
    "$(grep "\"head\":\"$(git rev-parse HEAD)\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep '"scope":"IN-SCOPE"' | grep -c '"severity":"HIGH"')" "1"
 
+section "the ledger: minor findings never enter the fix loop"
+
+subrepo ledger
+LC=".claude/reviews/feat/plan.md"; LV=".claude/reviews/feat/plan.verdicts"; LL=".claude/reviews/feat/plan.ledger.md"
+mkdir -p "$LV"; printf '# checklist\n\n## Rulings\n' > "$LC"
+printf 'a\nb\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+lfeed() {
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+MINOR_ONLY='VERDICT: REJECTED (1 items)
+## Minor (may defer with a reason in the checklist)
+- src/a.go:1 — IN-SCOPE — the name says count, it holds a total
+## Pre-existing (backlog, not this branch)
+- src/a.go:2 — PRE-EXISTING — an old unchecked return
+ROUND NEEDED AFTER FIX: YES'
+lfeed "$MINOR_ONLY"
+ok "a minor finding goes to the ledger" "$(grep -c 'src/a.go:1' "$LL" 2>/dev/null)" "1"
+ok "...and so does a pre-existing one" "$(grep -c 'src/a.go:2' "$LL" 2>/dev/null)" "1"
+ok "a minor-only report does not ask for another round" \
+   "$(tail -1 "$LV/l1-reviewer.json" | grep -c '"round_needed":"NO"')" "1"
+lfeed "$MINOR_ONLY"
+ok "the same report twice adds nothing to the ledger" "$(grep -c 'src/a.go:1' "$LL")" "1"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ok "a minor-only REJECTED needs no ruling" \
+   "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

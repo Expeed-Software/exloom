@@ -55,6 +55,8 @@ If that holds, ship. Do not run another round to be thorough — an extra round 
 
 `"round_needed":"UNKNOWN"` means the reviewer gave no such line, and counts as `YES`: a reviewer that did not answer has not told you the loop can stop. Re-dispatch that one reviewer rather than the whole set.
 
+**Minor, out-of-scope and pre-existing findings go to the ledger**, `.claude/reviews/<branch>.ledger.md`, written by the same hook. They never need a ruling and never start another round: a report whose findings are all in the ledger is recorded as `"round_needed":"NO"`. Do not fix ledger items during the loop. After the final review, go through the ledger once with the user: tick each item with its outcome — fixed, ticket id, or dropped — and commit the ledger with the checklist. After a compaction, read the ledger and the receipts to see where the review stands.
+
 **A REJECTED review is closed by rulings, not by another round.** For each finding the reviewer recorded, add one line under `## Rulings` in the checklist:
 
 ```

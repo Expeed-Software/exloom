@@ -14,7 +14,7 @@ Execute in order.
 From the repo root:
 
 ```bash
-find .claude/reviews -type f -name '*.md' 2>/dev/null | grep -v '/archive/'
+find .claude/reviews -type f -name '*.md' ! -name '*.ledger.md' 2>/dev/null | grep -v '/archive/'
 ```
 
 For each path, derive its branch name by stripping the `.claude/reviews/` prefix and the `.md` suffix (e.g. `.claude/reviews/feature/csv-export.md` → `feature/csv-export`). Nested paths map to slashed branch names.
@@ -50,11 +50,12 @@ Offer the user three choices for the orphan set:
    # the receipts and any bypass record belong with the checklist they document
    [ -d ".claude/reviews/<b>.verdicts" ] && git mv ".claude/reviews/<b>.verdicts" ".claude/reviews/archive/<b>.verdicts"
    [ -f ".claude/reviews/<b>.bypass.json" ] && git mv ".claude/reviews/<b>.bypass.json" ".claude/reviews/archive/<b>.bypass.json"
+   [ -f ".claude/reviews/<b>.ledger.md" ] && git mv ".claude/reviews/<b>.ledger.md" ".claude/reviews/archive/<b>.ledger.md"
    ```
-   Move all three or none. A checklist archived without its receipts leaves the evidence stranded under the active directory, where the next reader cannot tell which branch it belonged to.
+   Move them all or none. A checklist archived without its receipts leaves the evidence stranded under the active directory, where the next reader cannot tell which branch it belonged to.
 
    Archiving keeps everything in-tree and in history while clearing the active directory. The gate only ever reads `.claude/reviews/<current-branch>.md`, so archived files never affect enforcement.
-2. **Delete** — `git rm` the checklist and the same two companions. They remain in git history; only the working tree loses them.
+2. **Delete** — `git rm` the checklist and the same companions. They remain in git history; only the working tree loses them.
 3. **Cancel** — do nothing.
 
 Wait for an explicit choice. Do not default to acting.

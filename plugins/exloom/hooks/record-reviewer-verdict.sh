@@ -344,7 +344,9 @@ ROUND="$(cat "${VDIR}/l1-reviewer.json" 2>/dev/null \
 [[ "$ROUND" =~ ^[0-9]+$ ]] || ROUND=1
 
 FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
+LEDGER=".claude/reviews/${BRANCH}.ledger.md"
 n_found=0
+n_blocking=0
 cur_sev=""
 item_sev=""
 cur_scope="IN-SCOPE"
@@ -444,7 +446,24 @@ while IFS= read -r fline; do
     "$ROUND" "$AGENT" "$sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
     >> "$FINDINGS_FILE" 2>/dev/null || break
   n_found=$((n_found + 1))
+
+  # Minor, out-of-scope and pre-existing findings go to the ledger, never the fix loop.
+  if [[ "$sev" == "LOW" || "$scope" != "IN-SCOPE" ]]; then
+    case "$scope" in IN-SCOPE) label="minor" ;; *) label="$(printf '%s' "$scope" | tr '[:upper:]' '[:lower:]')" ;; esac
+    key="${cite} — ${label} — ${AGENT}"
+    if ! grep -qF -e "- [ ] ${key}" -e "- [x] ${key}" "$LEDGER" 2>/dev/null; then
+      [[ -f "$LEDGER" ]] || printf '# Review ledger — %s\n\nNon-blocking findings. The final review triages each: fix, ticket or drop.\n\n' "$BRANCH" > "$LEDGER"
+      ltext="$(printf '%s' "$fline" | sed -e "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||" -e 's/^[[:space:]*-]*//' -e 's/^[[:space:]—–:-]*//')"
+      printf -- '- [ ] %s, round %s — %s\n' "$key" "$ROUND" "$ltext" >> "$LEDGER" 2>/dev/null
+    fi
+  else
+    n_blocking=$((n_blocking + 1))
+  fi
 done <<< "$SCAN"
+
+if [[ "$VERDICT" == "REJECTED" && $n_found -gt 0 && $n_blocking -eq 0 ]]; then
+  ROUND_NEEDED="NO"
+fi
 
 if [[ $n_found -gt 0 ]]; then
   echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
