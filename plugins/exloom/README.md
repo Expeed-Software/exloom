@@ -24,40 +24,12 @@ Or from a terminal: `claude plugin marketplace add https://github.com/Expeed-Sof
 
 Updating requires a session restart, not just a reload — hooks are read at session start.
 
-## Pick a lane before you pick a step
+## Quick start
 
-Rigour is earned by stakes. Running the full flow on a null check is how a one-line fix becomes a feature, so the ceremony scales separately from the review.
+1. `/exloom-setup` — once per repository: turns the gate on, pins your test command, and commits the settings.
+2. `/exloom` — on any feature branch: runs the next step (review, fix, rulings, proof, report) until the branch can be pushed. `/exloom status` prints where it stands in one line.
 
-| Lane | Before the code | After it | Declared |
-|---|---|---|---|
-| **Sprint** | nothing | L1, smoke test, proof | `**Lane:** sprint` |
-| **Standard** | a spec and a plan | whatever the tier requires | the default |
-| **Certified** | a spec and a plan | tier's requirements, no workflow-step escape hatches, signed commit | `**Lane:** certified` |
-
-"No workflow-step escape hatches" means the gate refuses a Certified checklist that records a skipped step under `## Escape hatches used` — a step you chose not to do is not a step you may write your way past. It does not mean the branch cannot be pushed: `EXLOOM_REVIEW_SKIP=1` still bypasses the hooks on any lane, and always writes a bypass receipt. One is a workflow decision the gate reads; the other is an out-of-band override that leaves a trace.
-
-The lane is your choice; the **tier** is derived from the diff and decides how deep the review goes. They are different axes: a migration is Tier 3 whatever lane you are on, and **Sprint is refused at Tier 3** — those are the stakes that earn the full flow.
-
-Set a repo default in a committed `.claude/exloom-lane`, or per branch in the checklist. Absent both, it is `standard`, so nothing changes for a repo that does not opt in.
-
-A Sprint branch that turns out to matter gets `/harden`: it recovers the spec from the diff that now exists, raises the lane, and names what the higher bar requires. Nothing is regenerated.
-
-## The loop
-
-| # | Step | Run | Produces |
-|---|---|---|---|
-| 1 | Decide what to build | `exloom:brainstorming` | a spec — problem, approach, numbered requirements, a criterion each |
-| 2 | Turn it into a plan | `exloom:planning-for-handoff` | a plan — exact files, tasks citing the criteria they serve |
-| 3 | Get on a branch | `exloom:isolating-execution` | a feature branch, because the gate skips protected ones |
-| 4 | Start the record | `/review-init` | `.claude/reviews/<branch>.md` with a tier and a lane |
-| 5 | Build it | `exloom:executing-handoff-plans` | the code — not more, not less; deviations logged |
-| 6 | Prove the tests notice it | `scripts/prove-change-is-tested.sh` | `proof.json` — PROVED, or the reason it is not |
-| 7 | Check for drift | `exloom:auditing-plan-fidelity` | criteria with no task, tasks with no criterion, files no task called for |
-| 8 | Run it | `/smoke-test` | real output from the real thing |
-| 9 | Review | `/review-complete` | reviewer receipts, findings, dispositions |
-| 10 | Ship | `git push` | the gate lets it through |
-
-**A small change starts at step 3.** Steps 1, 2, 5 and 7 need a plan to work against, and the Sprint lane skips them.
+[How it works](HOW-IT-WORKS.md) has the lanes and every step `/exloom` runs, for when you want to run one yourself.
 
 ## What the gate actually verifies
 
