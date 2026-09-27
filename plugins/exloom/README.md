@@ -101,7 +101,7 @@ Optional, all committed:
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
 
-The proof records one of three results: `PROVED`; `NOT_PROVED`, which blocks; or `NOT_APPLICABLE`, when the tests do not compile without the change, which passes at Tier 1 only.
+The proof records one of four results: `PROVED`; `NOT_PROVED`, which blocks; `NOT_APPLICABLE`, when the tests do not compile without the change, which passes at Tier 1 only; or `NO_NEW_BEHAVIOUR`, when no test changed, the diff only removes code and the suite passes at the tip, which at Tier 2–3 also needs a `- Proof: deletion only — <reason>` line from the user in the checklist.
 
 **Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
 

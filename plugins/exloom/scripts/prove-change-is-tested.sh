@@ -40,6 +40,8 @@
 #                       question cannot be asked. Recorded, not waived - the
 #                       receipt carries method=not-applicable and the gate says
 #                       so on every push. Weakest of the three.
+#   NO_NEW_BEHAVIOUR    no test changed and the diff adds no behavioural source
+#                       line (a deletion); the full suite passes at the tip.
 #
 # NOT_PROVED is reserved for the actual finding: the tests ran without the change
 # and passed anyway. Reporting an additive change as NOT_PROVED made a new class
@@ -183,7 +185,17 @@ _receipt_early() {
 }
 
 [[ -n "$SRC" ]] || { echo "no source changes to prove (docs/tests only)" >&2; exit 2; }
+NNB=0
 if [[ -z "$TST" ]]; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../hooks" && pwd)/lib.sh"
+  # Only for a committed change: the classifier compares commits.
+  if git diff --quiet HEAD -- . ':(exclude).claude' 2>/dev/null \
+     && [[ -z "$(git ls-files --others --exclude-standard -- . ':(exclude).claude' 2>/dev/null)" ]]; then
+    exloom_diff_adds_behaviour "$BASE" HEAD || NNB=1
+  fi
+fi
+if [[ -z "$TST" && $NNB -eq 0 ]]; then
   BASE="$BASE" TESTCMD="${TESTCMD:-none}" _receipt_early NOT_PROVED
   echo "NOT PROVED: this change touches source but adds or changes NO test."
   printf '  source changed:\n%s\n' "$(printf '%s\n' "$SRC" | sed 's/^/    /')"
@@ -310,6 +322,21 @@ _receipt() {
 #     vendor and target are absent and every run fails on a missing dependency;
 #   - a broken runner, an OOM, a daemon crash, or a `--cmd` that always fails.
 # The control turns all of those into "the environment cannot run the suite".
+if [[ $NNB -eq 1 ]]; then
+  git -C "$WT" checkout -q "$(git rev-parse HEAD)" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
+  echo "no test changed and the diff adds no behavioural line: running the full suite at the tip…"
+  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.tip-out" 2>&1
+  if [[ $? -eq 0 ]]; then
+    _receipt NO_NEW_BEHAVIOUR full-suite
+    echo "NO_NEW_BEHAVIOUR — the change only removes code, and the suite passes at the tip."
+    exit 0
+  fi
+  _receipt NOT_PROVED full-suite
+  echo "NOT PROVED — the change only removes code, but the suite fails at the tip:"
+  tail -25 "$WT/.tip-out" 2>/dev/null
+  exit 1
+fi
+
 echo "run 1/3: base source + base tests (control — must pass)…"
 ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
 base_rc=$?

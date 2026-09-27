@@ -1378,6 +1378,10 @@ checklist, and re-run /review-complete."
 # CONSERVATIVE BY DESIGN: non-behavioural only when every added and removed line
 # is blank or starts with a comment marker. Being wrong here costs one extra
 # review; being wrong the other way ships unreviewed code.
+# Like exloom_diff_is_behavioural, but only ADDED lines count: a pure deletion adds nothing.
+exloom_diff_adds_behaviour() {   # exloom_diff_adds_behaviour <from> <to>
+  _EXLOOM_ADDED_ONLY=1 exloom_diff_is_behavioural "$1" "$2"
+}
 exloom_diff_is_behavioural() {
   local from="$1" to="$2" files f ext body line stripped marker rest
 
@@ -1393,8 +1397,10 @@ exloom_diff_is_behavioural() {
      | grep -qE '^-[[:space:]]+-[[:space:]]'; then
     return 0
   fi
+  local meta_re='^(old mode|new mode|rename from|rename to|deleted file|new file) '
+  [[ -n "${_EXLOOM_ADDED_ONLY:-}" ]] && meta_re='^(old mode|new mode|rename from|rename to|new file) '
   if git diff --no-color "$from" "$to" -- . ':(exclude).claude/reviews' 2>/dev/null \
-     | grep -qE '^(old mode|new mode|rename from|rename to|deleted file|new file) '; then
+     | grep -qE "$meta_re"; then
     return 0
   fi
 
@@ -1452,7 +1458,8 @@ exloom_diff_is_behavioural() {
       # Real diff headers have a space then a path; `+++i;` and `---force` do not.
       case "$line" in
         '+++ '*|'--- '*|'@@'*|'diff --git '*|'index '*) continue ;;
-        '+'*|'-'*) ;;
+        '+'*) ;;
+        '-'*) [[ -n "${_EXLOOM_ADDED_ONLY:-}" ]] && continue ;;
         *) continue ;;
       esac
       stripped="${line:1}"
@@ -1632,7 +1639,7 @@ then apply it."
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4" tier="${5:-1}"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_na_blocked=0
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_na_blocked=0 seen_nnb_blocked=0
 
   # On whenever the gate is on. A repo whose suite needs untracked local state
   # opts out with a COMMITTED .claude/exloom-proof.disabled.
@@ -1680,6 +1687,10 @@ exloom_check_proof() {
         # it must not read as the same failure. Accepted and reported, because
         # the alternative was a bypass - which lets the same push through while
         # recording less about why.
+        *'"result":"NO_NEW_BEHAVIOUR"'*)
+          if [[ "$tier" -le 1 ]] || MSYS_NO_PATHCONV=1 git show "${tip}:${checklist}" 2>/dev/null \
+               | grep -qE '^-?[[:space:]]*Proof:[^—]*—[[:space:]]*[^[:space:]]'; then ok=1; break
+          else seen_nnb_blocked=1; fi ;;
         *'"result":"NOT_APPLICABLE"'*)
           if [[ "$tier" -le 1 ]]; then ok=1; seen_notapplicable=1; else seen_na_blocked=1; fi ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
@@ -1698,7 +1709,12 @@ exloom_check_proof() {
   fi
 
   local detail
-  if [[ $seen_na_blocked -eq 1 ]]; then
+  if [[ ${seen_nnb_blocked:-0} -eq 1 ]]; then
+    detail="The proof recorded NO_NEW_BEHAVIOUR: no test changed and the diff only removes
+code. At Tier ${tier} that also needs the user's ruling in ${checklist}, e.g.
+  - Proof: deletion only — <their reason>
+Ask them; do not write it for them."
+  elif [[ $seen_na_blocked -eq 1 ]]; then
     detail="The proof recorded NOT_APPLICABLE: the tests do not compile without the change,
 so the three-run proof could not ask its question. That is accepted only at
 Tier 1; this branch is Tier ${tier}. Make the tests compile at the base (for

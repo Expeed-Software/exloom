@@ -74,7 +74,7 @@ The gate accepts the REJECTED receipt once every in-scope finding has a ruling, 
 ### Tier 1 required
 - L1 code review: `l1-reviewer.json` receipt present, findings listed (or "no findings" stated), resolution for each Critical/Important.
 - Smoke test: boot command filled, user action filled, expected result filled, actual observed result filled with real evidence (not `<paste output>` placeholder, not empty). "Test passed" ticked.
-- **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt present, `"result":"PROVED"` (or `NOT_APPLICABLE` at Tier 1 only), covering the reviewed commit. Written only by:
+- **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt present, `"result":"PROVED"` (or `NOT_APPLICABLE` at Tier 1 only, or `NO_NEW_BEHAVIOUR` with a `- Proof: deletion only — <reason>` line from the user at Tier 2–3), covering the reviewed commit. Written only by:
 
   ```bash
   PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"

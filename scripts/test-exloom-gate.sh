@@ -2906,6 +2906,33 @@ ok "an ignored .claude/ lists the receipts and every committed-only setting" \
 printf '.claude/*\n!.claude/reviews/\n!.claude/exloom-*\n' > .gitignore
 ok "ignoring only local files -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
 
+section "a deletion with no new behaviour proves NO_NEW_BEHAVIOUR"
+
+proofrepo deletion 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4
+unused() { echo dead; }'; B="$BASESHA"
+printf 'echo 4\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm 'drop dead code' >/dev/null 2>&1
+ok "a pure deletion whose suite passes -> NO_NEW_BEHAVIOUR" "$(prove "$B"; proofres)" "0
+NO_NEW_BEHAVIOUR"
+proofrepo deletionbroken 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+: > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm 'delete too much' >/dev/null 2>&1
+ok "a deletion that breaks the suite -> NOT_PROVED" "$(prove "$B"; proofres)" "1
+NOT_PROVED"
+proofrepo addition 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+printf 'echo 4\nrm -rf /tmp/x\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
+ok "an added behavioural line with no test -> NOT_PROVED" "$(prove "$B"; proofres)" "1
+NOT_PROVED"
+
+NC=".claude/reviews/feat/proof.md"; NV=".claude/reviews/feat/proof.verdicts"; mkdir -p "$NV"
+printf '# checklist\n' > "$NC"
+printf '{"check":"change-is-tested","result":"NO_NEW_BEHAVIOUR","head":"%s"}\n' "$(git rev-parse HEAD)" > "$NV/proof.json"
+git add -A >/dev/null 2>&1; git commit -qm nnb >/dev/null 2>&1
+nnb() { exloom_check_proof "$NC" HEAD "$(git rev-parse HEAD)" test "$1" >/dev/null 2>&1; echo $?; }
+ok "NO_NEW_BEHAVIOUR passes at Tier 1" "$(nnb 1)" "0"
+ok "...not at Tier 2 without a ruling" "$(nnb 2)" "2"
+printf -- '- Proof: deletion only — the helper had no callers\n' >> "$NC"
+git add -A >/dev/null 2>&1; git commit -qm ruling >/dev/null 2>&1
+ok "...and at Tier 2 with one" "$(nnb 2)" "0"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
