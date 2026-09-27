@@ -636,8 +636,13 @@ exloom_policy_required_reviewers() {   # exloom_policy_required_reviewers <base>
 # errors: it fails open in the mechanism whose only job is to notice
 # accumulation.
 exloom_round_count() {   # exloom_round_count <checklist> <tip>
-  local vdir committed working
+  local vdir committed working d
   vdir="$(exloom_verdict_dir "$1")"
+  # With a dispatch log, a round is a whole-branch l1-reviewer dispatch, so
+  # committing receipts never adds one.
+  d="$( { MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/dispatches.jsonl" 2>/dev/null; cat "${vdir}/dispatches.jsonl" 2>/dev/null; } \
+    | grep -F '"agent":"l1-reviewer","key":"final"' | sort -u | awk 'END{print NR}')"
+  if [[ "$d" -gt 0 ]]; then printf '%s\n' "$d"; return 0; fi
   committed="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/l1-reviewer.json" 2>/dev/null || true)"
   working="$(cat "${vdir}/l1-reviewer.json" 2>/dev/null || true)"
   # awk, not `grep -c . || printf 0`: on no match grep prints 0 AND exits 1, so

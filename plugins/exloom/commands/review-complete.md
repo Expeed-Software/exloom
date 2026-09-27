@@ -163,6 +163,8 @@ Previous findings:
 
 `<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. The receipt records the mode and the range. A new finding outside the fix range is recorded out of scope and never needs a ruling.
 
+**exloom enforces the budget at dispatch.** Each reviewer gets one whole-branch review and one verify pass here, and each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). A dispatch past that, or after the branch has grown by more than max(100 lines, half its size) since review started, is refused. The answer is rulings, not another round. If the user wants one anyway, record their words under `## Rulings` as `- Extra round — "<their words>"`; each such line allows one more dispatch. Receipts are bound to the commit at dispatch, so a commit made while a reviewer runs is not covered by its approval.
+
 **That is the whole prompt.** Do not summarise your change, do not explain your reasoning, do not say which areas you think matter, do not name a severity, and do not say what you have already checked.
 
 This is not brevity for its own sake. A reviewer that reads your framing reviews your framing. Tell it where you think the risk is and it looks there; tell it what you already verified and it believes you. The agent files already carry the full instruction set — what to check, in what order, what counts as blocking, and `## 4. The author's claims are not evidence`, which explicitly instructs the reviewer to treat your comments, commit messages and summaries as unverified assertions. A long brief is you doing the reviewer's job for it, worse, and then being told what you already believed.

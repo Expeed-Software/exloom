@@ -172,6 +172,53 @@ HEAD_SHA="$(git rev-parse HEAD 2>/dev/null)" || exit 0
 VDIR=".claude/reviews/${BRANCH}.verdicts"
 mkdir -p "$VDIR" 2>/dev/null || exit 0
 
+# ---------- bind the receipt to the commit the reviewer was shown ----------
+# guard-reviewer-dispatch.sh recorded HEAD at dispatch, keyed by tool_use_id.
+# PostToolUse maps tool_use_id to the agent id. SubagentStop carries only the
+# agent id and, for a foreground dispatch, fires first, so its result is held
+# until the mapping exists.
+DLOG="${VDIR}/dispatches.jsonl"
+HELD_DIR="${VDIR}/held"
+MODEL=""; TUID=""
+_unmapped_dispatch() {
+  local t
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    grep -qF "\"map\":true,\"tool_use_id\":\"${t}\"" "$DLOG" || return 0
+  done < <(grep -F "\"agent\":\"${AGENT}\"" "$DLOG" | sed -n 's/.*"tool_use_id":"\([^"]*\)","dispatch_head".*/\1/p')
+  return 1
+}
+if [[ -f "$DLOG" ]]; then
+  if [[ $IS_COMPLETION -eq 1 ]]; then
+    AID="$(_field agent_id | tr -cd 'A-Za-z0-9_-')"
+    [[ -n "$AID" ]] && TUID="$(grep -F '"map":true' "$DLOG" | grep -F "\"agent_id\":\"${AID}\"" | tail -1 \
+      | sed -n 's/.*"tool_use_id":"\([^"]*\)".*/\1/p')"
+    if [[ -z "$TUID" && -n "$AID" ]] && _unmapped_dispatch; then
+      mkdir -p "$HELD_DIR" && printf '%s' "$HOOK_INPUT" > "${HELD_DIR}/${AID}.json"
+      exit 0
+    fi
+  else
+    TUID="$(_field tool_use_id | tr -cd 'A-Za-z0-9_-')"
+    AID="$(_field tool_response.agentId | tr -cd 'A-Za-z0-9_-')"
+    MODEL="$(_field tool_response.resolvedModel | tr -cd 'A-Za-z0-9._-')"
+    if [[ -n "$TUID" && -n "$AID" ]] && ! grep -qF "\"map\":true,\"tool_use_id\":\"${TUID}\"" "$DLOG"; then
+      printf '{"map":true,"tool_use_id":"%s","agent_id":"%s","model":"%s"}\n' "$TUID" "$AID" "$MODEL" >> "$DLOG"
+    fi
+    if [[ -n "$AID" && -f "${HELD_DIR}/${AID}.json" ]]; then
+      HOOK_INPUT="$(cat "${HELD_DIR}/${AID}.json")"
+      rm -f "${HELD_DIR}/${AID}.json"; rmdir "$HELD_DIR" 2>/dev/null
+      IS_COMPLETION=1
+    fi
+  fi
+  if [[ -n "$TUID" ]]; then
+    DH="$(grep -F "\"tool_use_id\":\"${TUID}\",\"dispatch_head\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+    [[ -n "$DH" ]] && HEAD_SHA="$DH"
+    [[ -n "$MODEL" ]] || MODEL="$(grep -F "\"map\":true,\"tool_use_id\":\"${TUID}\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"model":"\([^"]*\)".*/\1/p')"
+  fi
+fi
+
 SESSION="$(_field session_id)"
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
 
@@ -579,6 +626,7 @@ fi
 
 RANGE_FIELD=""; [[ -n "$RANGE" ]] && RANGE_FIELD=",\"range\":\"${RANGE}\""
 [[ -n "$TASK_ID" ]] && RANGE_FIELD=",\"task\":\"${TASK_ID}\",\"spec\":\"${SPEC}\""
+[[ -n "$MODEL" ]] && RANGE_FIELD="${RANGE_FIELD},\"model\":\"${MODEL}\""
 printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s"%s}\n' \
   "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" "$MODE" "$RANGE_FIELD" \
   >> "$RECEIPT" 2>/dev/null || exit 0

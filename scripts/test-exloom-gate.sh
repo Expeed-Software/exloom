@@ -542,7 +542,7 @@ ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
       | grep -v '\.claude-plugin/plugin\.json$' | wc -l | tr -d ' ')" "0"
 ok "...while the manifest, where it IS interpolated, still uses it" \
-   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "5"
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "6"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
 section "record-reviewer-verdict hook (a real dispatch writes one)"
@@ -2622,6 +2622,83 @@ ok "...and not in the branch receipt, so it is not a branch round" \
    "$( [[ -f "$TV/l1-reviewer.json" ]] && echo present || echo absent)" "absent"
 ok "code beyond the task's text is recorded as a blocking spec finding" \
    "$(grep 'src/a.go:1' "$TV/l1-reviewer.findings.jsonl" | grep '"severity":"MED"' | grep -c '"scope":"IN-SCOPE"')" "1"
+
+section "the dispatch budget is enforced at dispatch, and a receipt is bound to it"
+
+subrepo budget
+BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
+printf '# checklist\n\n## Rulings\n' > "$BC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+disp() {   # disp <tool_use_id> <prompt> [agent] -> exit code of the guard
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:'+sys.argv[3],'prompt':sys.argv[2]}}))" "$1" "$2" "${3:-l1-reviewer}" \
+  | bash "$HOOKS_ABS/guard-reviewer-dispatch.sh" >/dev/null 2>&1; echo $?
+}
+ok "a task's first review is allowed" "$(disp t1 'Review task 3 of p.md. Diff: git diff a..b')" "0"
+ok "...a second full review of the same task is refused" "$(disp t2 'Review task 3 of p.md. Diff: git diff a..b')" "2"
+ok "fix round 1 is allowed" "$(disp t3 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "fix round 2 is allowed" "$(disp t4 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "fix round 3 is allowed" "$(disp t5 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "a fourth fix round is refused" "$(disp t6 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — "one more, then we ship"\n' >> "$BC"
+ok "...unless the user granted an extra round" "$(disp t7 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "...and the grant is used once" "$(disp t8 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+ok "the final review runs once" "$(disp f1 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "0"
+ok "...a second final review is refused" "$(disp f2 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "2"
+ok "...one scoped re-review is allowed" "$(disp f3 'Verify fixes on branch feat/plan. Fix range: a..b' adversarial-reviewer)" "0"
+ok "...a second fix wave is refused" "$(disp f4 'Verify fixes on branch feat/plan. Fix range: a..b' adversarial-reviewer)" "2"
+ok "each dispatch records the commit and a prompt hash" \
+   "$(grep '"tool_use_id":"t1"' "$BV/dispatches.jsonl" | grep -cE '"dispatch_head":"[0-9a-f]{40}","prompt_hash":"[0-9a-f]{40}"')" "1"
+
+seq 1 150 > src/big.go; git add -A >/dev/null 2>&1; git commit -qm grow >/dev/null 2>&1
+ok "a branch that grew past the limit since review started is refused" \
+   "$(disp g1 'Review task 9 of p.md. Diff: git diff a..b')" "2"
+
+subrepo binding
+BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
+printf '# checklist\n' > "$BC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+H1="$(git rev-parse HEAD)"
+post() {   # post <tool_use_id> <agent_id> <response-json>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review branch feat/plan'},
+ 'tool_response':dict(json.loads(sys.argv[3]),agentId=sys.argv[2],resolvedModel='claude-opus-5-5')}))" "$1" "$2" "$3" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+stop() {   # stop <agent_id> <report>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':sys.argv[1],
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[2]}))" "$1" "$2" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+disp b1 'Review branch feat/plan at x. Diff: git diff m...x' >/dev/null
+post b1 ag1 '{"isAsync":true,"status":"async_launched"}'
+printf 'b\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm during >/dev/null 2>&1
+stop ag1 'VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+ok "an async review's receipt names the commit it was dispatched at" \
+   "$(tail -1 "$BV/l1-reviewer.json" | grep -c "\"head\":\"${H1}\",\"verdict\":\"APPROVED\"")" "1"
+ok "...and records the model that ran" "$(tail -1 "$BV/l1-reviewer.json" | grep -c '"model":"claude-opus-5-5"')" "1"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ok "a commit made during the review cannot inherit its approval" \
+   "$(exloom_check_verdicts "$BC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+ok "committing receipts does not raise the round count" "$(exloom_round_count "$BC" HEAD)" "1"
+
+H2="$(git rev-parse HEAD)"
+printf -- '- Extra round — "check the fix"\n' >> "$BC"
+disp b2 'Review branch feat/plan at y. Diff: git diff m...y' >/dev/null
+stop ag2 'VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+ok "a foreground result is held until PostToolUse maps it" \
+   "$(grep -c "\"head\":\"${H2}\"" "$BV/l1-reviewer.json")" "0"
+post b2 ag2 '{"content":[{"type":"text","text":"VERDICT: APPROVED"}]}'
+ok "...then recorded against the dispatch commit" \
+   "$(grep -c "\"head\":\"${H2}\",\"verdict\":\"APPROVED\"" "$BV/l1-reviewer.json")" "1"
 
 section "the bypass leaves a trace"
 
