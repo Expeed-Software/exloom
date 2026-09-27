@@ -2084,6 +2084,17 @@ ok "ruby spec/ dir -> test" "$(istest 'spec/models/order_spec.rb')" "test"
 ok "js .spec.ts -> test"     "$(istest 'src/order.spec.ts')" "test"
 ok "go _test.go -> test"     "$(istest 'internal/order/order_test.go')" "test"
 ok "plain source -> source"  "$(istest 'internal/order/order.go')" "source"
+for p in scripts/test-all.sh test-gate.sh hooks/gate.bats lib/widgets/card_test.dart \
+         src/MyApp.Tests/OrderTests.cs src/MyApp.UnitTests/Order.cs src/MyApp.IntegrationTests/Api.cs \
+         src/MyApp.Test/Order.cs src/Orders/OrderServiceTest.cs; do
+  ok "$p -> test" "$(istest "$p")" "test"
+done
+ok "a C# source file -> source" "$(istest 'src/MyApp/OrderService.cs')" "source"
+printf 'checks/*.check\n' > .claude/exloom-test-patterns
+ok "an uncommitted repo pattern is ignored" "$(istest 'checks/a.check')" "source"
+git add .claude/exloom-test-patterns >/dev/null 2>&1; git commit -qm pat >/dev/null 2>&1
+ok "a committed repo pattern extends the list" "$(istest 'checks/a.check')" "test"
+git rm -q .claude/exloom-test-patterns; git commit -qm unpat >/dev/null 2>&1
 
 section "the shipped template must not block a branch that filled it honestly"
 

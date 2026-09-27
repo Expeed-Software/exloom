@@ -144,7 +144,19 @@ is_test() {
     */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*) return 0 ;;
     *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;
     *.test.ts|*.test.js|*.test.tsx|*.spec.ts|*.spec.js|*.spec.tsx) return 0 ;;
+    test-*.sh|*/test-*.sh|*.bats|*_test.dart) return 0 ;;
+    *Test.cs|*Tests.cs|*.*Tests/*|*.Test/*) return 0 ;;
   esac
+  # A repo adds its own globs, one per line, in a COMMITTED file.
+  local pat
+  if [[ -f .claude/exloom-test-patterns ]] && git ls-files --error-unmatch .claude/exloom-test-patterns >/dev/null 2>&1; then
+    while IFS= read -r pat; do
+      pat="${pat%$'\r'}"
+      [[ -z "$pat" || "$pat" == \#* ]] && continue
+      # shellcheck disable=SC2254
+      case "$1" in $pat) return 0 ;; esac
+    done < .claude/exloom-test-patterns
+  fi
   return 1
 }
 
