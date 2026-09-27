@@ -128,7 +128,7 @@ if [[ $CHANGED -eq 1 ]]; then
         want_sections_naming "${nm[@]}" $(helpers_using "${nm[@]}") ;;
       plugins/exloom/templates/*|plugins/exloom/agents/*)
         want_sections_naming "$(basename "$f")" TPL AGENTS_DIR ;;
-      scripts/test-exloom-gate.sh|scripts/test-all.sh) want_all_sections ;;
+      scripts/test-exloom-gate.sh|scripts/test-all.sh|scripts/fixtures/*) want_all_sections ;;
       scripts/validate-plugin.sh) WANT_SUITE[validate]=1 ;;
     esac
   done <<< "$CHANGED_FILES"

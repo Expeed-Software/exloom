@@ -204,7 +204,7 @@ Do not ask here whether the recovery has been tested, whether a backup restores,
 
 ## Checklist template
 
-The canonical template lives at `templates/review-checklist.md` in this plugin. `/review-init` copies it to `.claude/reviews/<branch>.md` and pre-fills the tier, branch, and blast-radius fields.
+The template at `templates/review-checklist.md` is only the part people edit (base branch, lane, rulings). `/review-init` and `/exloom` generate the checklist with `exloom_render_report`, which adds an evidence block rebuilt from the receipts on every run.
 
 ## Turn it on (per repo)
 

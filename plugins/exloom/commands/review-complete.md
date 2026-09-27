@@ -233,76 +233,27 @@ Wait for the user. Do NOT mark complete while anything is missing.
 
 ## Step 5 — If everything is present
 
-First capture the **reviewed code tip** — the commit this review covers:
-
-`git rev-parse HEAD`
-
-Fill the Final Verdict section, writing that SHA into `Reviewed code commit:`:
-
-```
-## Final verdict
-- [x] All required gates passed for declared tier
-- [x] Checklist committed
-- [x] Ready to ship
-
-Reviewed code commit: <the `git rev-parse HEAD` output>
-Attested by: Claude (exloom session) — author self-attestation, not a reviewer sign-off
-Date: <YYYY-MM-DD>
-```
-
-`Attested by` records who filled this document in. It is **not** evidence that anyone reviewed the code; the receipts under `.claude/reviews/<branch>.verdicts/` are. Never write a reviewer's name here.
-
-Capture the SHA **before** committing the checklist, so it names the last *code*
-commit — the tip that was actually reviewed, not the checklist commit.
-
-Then fill the **Provenance** section — who and what produced this change:
-
-- **AI-assisted:** `yes` if a model wrote or co-wrote the change (the default for a
-  Claude Code session), else `no`.
-- **Model(s):** the model id you are running as (e.g. `claude-opus-4-8`), or
-  `N/A — human-authored`. State it honestly; it is self-reported.
-- **Directed by:** the human on whose behalf you are working — from
-  `git config user.name` / `user.email`.
-- **Base commit:** the fork point — `git merge-base HEAD <default-branch>` (try
-  `origin/main`, then `origin/master`, then `origin/dev`); if there is no base, use
-  the repository's first commit.
-- **Attested:** today's date.
-- **Policy fingerprint:** the output of `exloom_policy_fingerprint` (source the installed `hooks/lib.sh` first — resolve it with the same `find … | sort -V | tail -1`), or `none` if the repo has no `.exloom.yml`. This binds the review to the *policy* that was in force, not only to the code — so a later reader can tell that a change was reviewed under a policy the repo has since changed.
-
-```
-## Provenance
-- AI-assisted: yes
-- Model(s): claude-opus-4-8
-- Directed by: Jane Dev <jane@example.com>
-- Base commit: <merge-base output>
-- Attested: <YYYY-MM-DD>
-- Policy fingerprint: 2bc91f... (or `none`)
-```
-
-Then stage the checklist **and the verdict receipts** and commit them together — the gate reads receipts from the committed ref, so an uncommitted receipt does not exist as far as the hooks are concerned:
+Regenerate the evidence block from the receipts; do not write it by hand:
 
 ```bash
-git add .claude/reviews/<branch>.md ".claude/reviews/<branch>.verdicts"
+exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-**If** the repo has
-`.claude/exloom-provenance-signed.enabled`, the commit MUST be signed
-(`git commit -S`) — the hooks `git verify-commit` it and block an unsigned commit.
-Otherwise a normal commit is fine:
+It records the reviewed code commit (HEAD — the last code commit, so run it before committing), the derived tier, the criteria matrix, each reviewer's latest verdict and model, the findings summary and the provenance: directed by `git config user.email`, the fork point as base commit, and the policy fingerprint.
 
-```
-# signed-provenance repos:
-git commit -S -m "chore(review): mark Tier <N> review complete for <branch-name>"
-# otherwise:
-git commit -m "chore(review): mark Tier <N> review complete for <branch-name>"
+Then stage the checklist **and the verdict receipts** and commit them together — the gate reads receipts from the committed ref:
+
+```bash
+git add .claude/reviews/<branch>.md ".claude/reviews/<branch>.verdicts" ".claude/reviews/<branch>.ledger.md"
 ```
 
-The reviewed SHA binds the review to the branch tip (the hooks block a push if any
-non-checklist file changed after it), and the provenance record makes who/what
-produced the change auditable. If `git commit -S` fails because no signing key is
-configured, tell the user to set up git commit signing (GPG or SSH) or remove the
-signed-provenance marker — do **not** fall back to an unsigned commit in a
-signed-provenance repo.
+If the repo has `.claude/exloom-provenance-signed.enabled` or is in strict mode (`.claude/exloom-strict`), the commit MUST be signed (`git commit -S`); do not fall back to an unsigned commit there. Otherwise a normal commit is fine:
+
+```
+git commit -m "chore(review): record the review of <branch-name>"
+```
+
+A checklist created from the old template (it has a `## Final verdict` section with tick boxes) still works: tick the boxes and write `Reviewed code commit:` as before.
 
 ## Step 6 — Tell the user what is now unblocked
 

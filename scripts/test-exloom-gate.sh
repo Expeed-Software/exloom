@@ -1117,7 +1117,7 @@ ok "adversarial: '## Non-blocking' is not recorded as blocking severity" \
 
 section "CONTRACT: every template placeholder is enforced, every alternation is written"
 
-TPL="$(cd "$(dirname "$LIB_ABS")/../templates" && pwd)/review-checklist.md"
+TPL="$(cd "$(dirname "$LIB_ABS")/../../../scripts/fixtures" && pwd)/legacy-review-checklist.md"
 PRE="$(sed -n "s/^  placeholder_re='\(.*\)'$/\1/p" "$LIB_ABS")"
 ok "placeholder_re extracted from lib.sh" "$([[ -n "$PRE" ]] && echo yes || echo no)" "yes"
 
@@ -2119,7 +2119,7 @@ section "the shipped template must not block a branch that filled it honestly"
 # The placeholder-coverage test above cannot catch that. It asks whether each
 # token is RECOGNISED, not whether an honestly-completed checklist survives the
 # scan — which is a different question, and this is where it is asked.
-TPL="$HOOKS_ABS/../templates/review-checklist.md"
+TPL="$HOOKS_ABS/../../../scripts/fixtures/legacy-review-checklist.md"
 for tier in 0 1 2 3; do
   filled="$(sed -e 's/<[^>]*>/filled/g' \
                 -e 's/- \[ \]/- [x]/g' "$TPL")"
@@ -2892,7 +2892,7 @@ subrepo tiersections
 TSC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$TSC")"
 for tier in 1 2; do
   awk '/^## What a revert will not undo/{keep=1} /^## /&&!/^## What a revert will not undo/{keep=0} {print keep?$0:"@@"$0}' \
-      "$HOOKS_ABS/../templates/review-checklist.md" \
+      "$HOOKS_ABS/../../../scripts/fixtures/legacy-review-checklist.md" \
     | sed -e '/^@@/s/<[^>]*>/filled/g' -e 's/^@@//' -e 's/- \[ \]/- [x]/g' \
           -e "s/^\*\*Tier:\*\* .*/**Tier:** ${tier}/" > "$TSC"
   ok "tier ${tier}: the Tier 3 section's placeholders do not block" \
@@ -2999,6 +2999,39 @@ git add .claude/exloom-strict >/dev/null 2>&1; git commit -qm strict >/dev/null 
 ok "a committed strict file makes every branch Certified" "$(smsg)" "1"
 ok "...and the ignore check lists it" \
    "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-strict')" "1"
+
+section "the evidence report is generated; people write only rulings"
+
+subrepo report
+RPC=".claude/reviews/feat/plan.md"; RPV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RPV"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+RH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","mode":"full","model":"claude-opus-5-5"}\n' "$RH" > "$RPV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","method":"three-run","head":"%s","matrix":""}\n' "$RH" > "$RPV/proof.json"
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "a first render writes the skeleton and the evidence block" \
+   "$(grep -cE '^## Rulings$|^<!-- exloom:report|^<!-- /exloom:report -->$' "$RPC")" "3"
+ok "...with the derived tier, not a declared one" \
+   "$(grep -c '^\*\*Derived tier:\*\* 1$' "$RPC"; grep -c '^\*\*Tier:\*\*' "$RPC")" "1
+0"
+ok "...the reviewed commit" "$(grep -c "^Reviewed code commit: ${RH}$" "$RPC")" "1"
+ok "...each required reviewer's latest verdict and model" \
+   "$(grep -c "^| l1-reviewer | APPROVED | ${RH:0:12} | full | claude-opus-5-5 |$" "$RPC")" "1"
+ok "...and the provenance lines the gate reads" "$(grep -cE '^- (AI-assisted|Model\(s\)|Directed by|Base commit):' "$RPC")" "4"
+sed -i 's/^none$/- src\/a.go:1 — PARKED: kept on purpose/' "$RPC"
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "a re-render keeps the rulings and replaces only the block" \
+   "$(grep -c 'PARKED: kept on purpose' "$RPC"; grep -c '^<!-- exloom:report' "$RPC")" "1
+1"
+git add -A >/dev/null 2>&1; git commit -qm report >/dev/null 2>&1
+ok "the gate accepts a generated report with its receipts" \
+   "$(exloom_validate_checklist "$RPC" HEAD 1 test >/dev/null 2>&1; echo $?)" "0"
+git checkout -q -b feat/deep
+mkdir -p src/auth; printf 'x\n' > src/auth/login.go; git add -A >/dev/null 2>&1; git commit -qm auth >/dev/null 2>&1
+mkdir -p .claude/reviews/feat; cp "$RPC" .claude/reviews/feat/deep.md; cp -r "$RPV" .claude/reviews/feat/deep.verdicts
+exloom_render_report feat/deep >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm deep >/dev/null 2>&1
+ok "a report for a Tier 3 diff is held to Tier 3 without a declared tier" \
+   "$(exloom_validate_checklist .claude/reviews/feat/deep.md HEAD 1 test 2>&1 >/dev/null | grep -c 'Tier 3 requires a verdict receipt' | head -1)" "1"
 
 section "the bypass leaves a trace"
 

@@ -139,61 +139,29 @@ Write the answer into the checklist's `**Lane:**` field. A Sprint branch is not 
 
 ## Step 3 — Create the checklist
 
-Copy the plugin's `templates/review-checklist.md` to `.claude/reviews/<branch-name>.md`.
-
-`${CLAUDE_PLUGIN_ROOT}` is interpolated by the harness into `plugin.json` hook
-commands only — it is **not** set in your shell, so a command using it fails with
-"No such file or directory". Locate the template instead:
+Generate it; do not copy or fill a template by hand:
 
 ```bash
-find ~/.claude/plugins -path '*exloom*/templates/review-checklist.md' | sort -V | tail -1
+LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
+. "$LIB"
+exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-**`| head -1` is wrong here and silently gives you a stale template.** Several
-plugin versions stay in the cache and `find` returns them path-sorted, so
-`head -1` picks the *lowest* version. The checklist it copies is missing sections
-the gate checks for, so the branch is blocked by a check its template never
-mentioned. `sort -V | tail -1` takes the highest version.
+`sort -V | tail -1` takes the highest installed version; several stay in the cache. `${CLAUDE_PLUGIN_ROOT}` is not set in your shell.
 
-Sanity-check the file you copied: it must contain `## Re-finds`, `## Provenance`,
-and a `**Tier derived from:**` field. If any is missing you have an old template —
-go back and take the highest version.
+This writes `.claude/reviews/<branch-name>.md`: a short part people edit (`**Base branch:**`, `**Lane:**`, `## Rulings`) and an evidence block exloom rebuilds from the receipts every time it runs — derived tier and its reasons, reviewed commit, criteria matrix, reviewer verdicts, findings summary and provenance. Then set:
 
-Substitute:
+- `**Base branch:**` → the branch confirmed in Step 2a, or leave `auto`.
+- `**Lane:**` → the answer from Step 2b.
 
-- `<branch-name>` → actual branch.
-- `**Base branch:**` -> the branch confirmed in Step 2a, or leave `auto` if the derived one was right.
-- `[0 | 1 | 2 | 3]` → the confirmed tier.
-- Tier rationale line → the user's confirmed rationale.
-- **Tier derived from** → the output of `exloom_tier_reasons`, one line per rule, as `` `path` → `rule` → source ``. If the tier came from the built-in rules with no repository policy in play, write `built-in defaults only`. Get it by sourcing the hook library and running the derivation:
-
-  ```bash
-  LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
-  . "$LIB"
-  exloom_derive_tier HEAD >/dev/null; exloom_tier_reasons
-  ```
-
-  Same `sort -V | tail -1` rule as the template above, and for the same reason —
-  several plugin versions live in the cache at once.
-
-  Write the reasons down even when they are obvious. This is the line a PR reviewer reads when they want to know why a two-file change is Tier 3, and the line CI reads when it re-derives the tier and wants to compare.
-- Blast radius line → "N files changed, M modules touched, user-facing: yes/no" from the diff analysis.
-- Started date → today's date.
-
-Create the parent directory chain first (branches like `feature/csv-export` require nested directories):
-
-```bash
-mkdir -p "$(dirname .claude/reviews/<branch-name>.md)"
-```
-
-This also creates `.claude/reviews/` if it does not exist.
+There is no tier field: the gate uses the tier the diff derives to.
 
 ## Step 4 — Commit the skeleton
 
 Stage `.claude/reviews/<branch>.md` and commit with message:
 
 ```
-chore(review): initialize Tier <N> review checklist for <branch-name>
+chore(review): initialize review report for <branch-name>
 ```
 
 Do NOT commit anything else. The checklist is the only file in this commit.
