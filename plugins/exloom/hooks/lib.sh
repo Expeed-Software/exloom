@@ -1715,6 +1715,36 @@ exloom_render_report() {   # exloom_render_report <branch>
   } > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
+# The one next step for /exloom: setup, branch, init, commit, report, review,
+# fix, rulings, proof, push, or blocked (read the full message).
+exloom_next_step() {   # exloom_next_step <branch>
+  local branch="$1" cl=".claude/reviews/$1.md" out
+  [[ -f .claude/exloom-gate.enabled ]] || { echo setup; return 0; }
+  exloom_is_protected_branch "$branch" && { echo branch; return 0; }
+  [[ -f "$cl" ]] || { echo init; return 0; }
+  [[ -n "$(git status --porcelain -- .claude/reviews 2>/dev/null)" ]] && { echo commit; return 0; }
+  out="$(EXLOOM_VERBOSE=1 exloom_validate_checklist "$cl" HEAD 1 check 2>&1 >/dev/null)" && { echo push; return 0; }
+  case "$out" in
+    *"review is stale"*|*"records no valid 'Reviewed code commit:'"*) echo report ;;
+    *"Review has run"*|*"Remedy choices"*|*"Re-find"*|*"Base branch:"*) echo rulings ;;
+    *"did NOT approve"*) echo fix ;;
+    *"Never dispatched"*|*"has since changed"*|*"never reached exloom"*) echo review ;;
+    *"proof"*|*"Proof"*) echo proof ;;
+    *) echo blocked ;;
+  esac
+}
+
+# One line: Tier · round · proof · rulings · next step.
+exloom_status_line() {   # exloom_status_line <branch>
+  local branch="$1" cl=".claude/reviews/$1.md" tier proof="✗" rulings next
+  tier="$(exloom_derive_tier HEAD 2>/dev/null)" || tier="?"
+  exloom_check_proof "$cl" HEAD "$(git rev-parse HEAD)" status "${tier//\?/1}" >/dev/null 2>&1 && proof="✓"
+  rulings="$(exloom_rulings "$cl" HEAD | grep -c .)"
+  next="$(exloom_next_step "$branch")"
+  printf 'Tier %s · round %s/%s · proof %s · %s rulings · next: %s\n' \
+    "$tier" "$(exloom_round_count "$cl" HEAD)" "$(exloom_max_rounds)" "$proof" "$rulings" "$next"
+}
+
 # ---------- proof-of-testedness receipt ----------
 # exloom_check_proof <checklist> <tip> <reviewed-sha> <action>
 # Returns 0 when a PROVED receipt covers the reviewed commit; prints a BLOCK

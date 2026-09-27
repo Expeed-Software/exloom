@@ -3033,6 +3033,34 @@ exloom_render_report feat/deep >/dev/null 2>&1; git add -A >/dev/null 2>&1; git 
 ok "a report for a Tier 3 diff is held to Tier 3 without a declared tier" \
    "$(exloom_validate_checklist .claude/reviews/feat/deep.md HEAD 1 test 2>&1 >/dev/null | grep -c 'Tier 3 requires a verdict receipt' | head -1)" "1"
 
+section "/exloom knows the next step"
+
+subrepo nextstep
+NSV=".claude/reviews/feat/plan.verdicts"
+ok "no checklist -> init" "$(exloom_next_step feat/plan)" "init"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "an uncommitted checklist -> commit" "$(exloom_next_step feat/plan)" "commit"
+git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+ok "no reviewer has run -> review" "$(exloom_next_step feat/plan)" "review"
+NSH="$(git rev-parse HEAD)"
+mkdir -p "$NSV"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$NSH" > "$NSV/l1-reviewer.json"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:1","fingerprint":"f","head":"%s","at":"n"}\n' "$NSH" > "$NSV/l1-reviewer.findings.jsonl"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+ok "a rejection with open findings -> fix" "$(exloom_next_step feat/plan)" "fix"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$NSH" > "$NSV/l1-reviewer.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
+ok "reviewed but no proof -> proof" "$(exloom_next_step feat/plan)" "proof"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$NSH" > "$NSV/proof.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm proof >/dev/null 2>&1
+ok "everything in place -> push" "$(exloom_next_step feat/plan)" "push"
+ok "the status is one line" "$(exloom_status_line feat/plan | grep -c .)" "1"
+ok "...naming tier, proof and the next step" \
+   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · round [0-9]+/3 · proof ✓ · 0 rulings · next: push$')" "1"
+rm -f .claude/exloom-gate.enabled
+ok "gate off -> setup" "$(exloom_next_step feat/plan)" "setup"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
