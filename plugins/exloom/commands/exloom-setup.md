@@ -72,6 +72,7 @@ Gate:            on
 Test command:    <pinned>          | proof off (.claude/exloom-proof.disabled)
 Strict mode:     yes | no
 Max rounds:      <.claude/exloom-max-rounds, else 3> per plan task
+Reviewer model:  <exloom_reviewer_model for each reviewer; opus unless set>
 Policy:          .exloom.yml @ <fingerprint prefix> | none
 Required reviewers by tier
   Tier 0, 1   l1-reviewer

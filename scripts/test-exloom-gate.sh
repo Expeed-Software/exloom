@@ -3061,6 +3061,18 @@ ok "...naming tier, proof and the next step" \
 rm -f .claude/exloom-gate.enabled
 ok "gate off -> setup" "$(exloom_next_step feat/plan)" "setup"
 
+section "the reviewer model is a committed per-repo setting, Opus by default"
+
+subrepo revmodel
+ok "no setting -> opus" "$(exloom_reviewer_model l1-reviewer)" "opus"
+printf 'l1-reviewer: sonnet\n' > .claude/exloom-reviewer-model
+ok "an uncommitted setting is ignored" "$(exloom_reviewer_model l1-reviewer)" "opus"
+git add .claude/exloom-reviewer-model >/dev/null 2>&1; git commit -qm model >/dev/null 2>&1
+ok "a committed setting names the reviewer's model" "$(exloom_reviewer_model l1-reviewer)" "sonnet"
+ok "...and leaves the others on opus" "$(exloom_reviewer_model security-auditor)" "opus"
+ok "the ignore check lists it" \
+   "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-reviewer-model')" "1"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

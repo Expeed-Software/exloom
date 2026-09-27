@@ -470,7 +470,7 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
   printf '%s\n' ".claude/reviews/${1}.md" ".claude/reviews/${1}.verdicts/l1-reviewer.json" \
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
-    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-strict \
+    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
     | git check-ignore --no-index --stdin 2>/dev/null
 }
 
@@ -597,6 +597,16 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
 # standard = the full flow. certified = no escape hatches, signed commit.
 # No lane weakens a safety check: proof, smoke, tier derivation and the security
 # surface are identical in all three.
+# The model to dispatch a reviewer on: `<agent>: <model>` lines in a COMMITTED
+# .claude/exloom-reviewer-model, else opus.
+exloom_reviewer_model() {   # exloom_reviewer_model <agent>
+  local f=".claude/exloom-reviewer-model" m=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    m="$(tr -d '\r' < "$f" | sed -n "s/^[[:space:]]*${1}[[:space:]]*:[[:space:]]*\([A-Za-z0-9._-]*\).*/\1/p" | head -1)"
+  fi
+  printf '%s' "${m:-opus}"
+}
+
 # Strict mode: a committed .claude/exloom-strict puts every branch on the Certified lane.
 exloom_is_strict() {
   [[ -f .claude/exloom-strict ]] && git ls-files --error-unmatch .claude/exloom-strict >/dev/null 2>&1
