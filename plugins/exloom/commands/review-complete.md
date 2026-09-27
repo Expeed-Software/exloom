@@ -163,7 +163,7 @@ Previous findings:
 
 `<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. The receipt records the mode and the range. A new finding outside the fix range is recorded out of scope and never needs a ruling.
 
-**exloom enforces the budget at dispatch.** Each reviewer gets one whole-branch review and one verify pass here, and each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). A dispatch past that, or after the branch has grown by more than max(100 lines, half its size) since review started, is refused. The answer is rulings, not another round. If the user wants one anyway, record their words under `## Rulings` as `- Extra round — "<their words>"`; each such line allows one more dispatch. Receipts are bound to the commit at dispatch, so a commit made while a reviewer runs is not covered by its approval.
+**exloom enforces the budget at dispatch.** Each reviewer gets one whole-branch review and one verify pass here, and each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). A dispatch past that, or a whole-branch dispatch after the branch has grown by more than max(100 lines, half its size) since the final review started, is refused. The answer is rulings, not another round. If the user wants one anyway, record their words under `## Rulings` as `- Extra round — "<their words>"`; each such line allows one more dispatch. Receipts are bound to the commit at dispatch, so a commit made while a reviewer runs is not covered by its approval.
 
 **That is the whole prompt.** Do not summarise your change, do not explain your reasoning, do not say which areas you think matter, do not name a severity, and do not say what you have already checked.
 
@@ -196,6 +196,17 @@ Getting this wrong costs two rounds and lands back where it started: the suggest
 ## How to respond to a finding
 
 Deliver what was asked, at the scope intended. Make routine judgment calls yourself, and check in only when different readings of the request would lead to materially different work. If the request seems mistaken or a better approach exists, say so in a sentence and continue with the task as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task, and stop short of actions that are clearly beyond what was asked.
+
+**The fix is made by `exloom:fixer`, not by this session.** During the fix loop this session coordinates only: it makes no code edits or code commits. Dispatch the fixer, unnamed, with exactly:
+
+```
+Fix these review findings on branch <branch>, round <n>. Findings, verbatim:
+<the blocking finding lines from the reviewer's report>
+Rulings that allow more than a minimal fix:
+<lines from '## Rulings', or "none">
+```
+
+For round 3, dispatch a fresh fixer with the Agent tool's `model` set to `opus`. Each `NEEDS RULING` line it returns goes to the user as a ruling question, never back to the fixer. Then re-dispatch the reviewer in verify mode against the fixer's commit.
 
 Applied to a review finding, that means:
 

@@ -107,7 +107,7 @@ Task text:
 <the task's text, verbatim>
 ```
 
-It returns a spec verdict (`MATCHES`, `MISSING`, `EXTRA`, `MISUNDERSTOOD`) and quality findings. EXTRA means remove the code the task does not ask for, or log it as a deviation for the author. Fix blocking findings at the cited line and re-dispatch in verify mode with `Verify fixes for task <n> on branch <branch>. Fix range: <last-reviewed-sha>..<sha>` followed by its previous findings. After `.claude/exloom-max-rounds` fix rounds (default 3) exloom refuses the next dispatch; rule on what is left instead (see `/review-complete`). The receipt goes to `l1-reviewer.tasks.json` and does not count as a branch round. The whole-branch review runs once, in `/review-complete`.
+It returns a spec verdict (`MATCHES`, `MISSING`, `EXTRA`, `MISUNDERSTOOD`) and quality findings. EXTRA means remove the code the task does not ask for, or log it as a deviation for the author. Blocking findings go to `exloom:fixer` with the findings verbatim (prompt in `/review-complete`); you do not fix them yourself. Then re-dispatch in verify mode with `Verify fixes for task <n> on branch <branch>. Fix range: <last-reviewed-sha>..<sha>` followed by its previous findings. After `.claude/exloom-max-rounds` fix rounds (default 3) exloom refuses the next dispatch; rule on what is left instead (see `/review-complete`). The receipt goes to `l1-reviewer.tasks.json` and does not count as a branch round. The whole-branch review runs once, in `/review-complete`.
 
 ### After Execution
 
