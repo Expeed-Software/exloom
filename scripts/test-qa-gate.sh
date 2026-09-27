@@ -167,6 +167,25 @@ run deny "a real create still denied when prefixed by an env assignment" \
   'ORG=https://dev.azure.com/acme az boards work-item create --type "Test Case" --title "x" --fields "System.Tags=exloom-qa:24501:TC-099"'
 
 echo ""
+echo "-- implicit POSTs and az rest are writes too --"
+cat > "$FIX/.claude/qa/24501.md" <<'EOF'
+## Approval Record
+Approved: TC-001..TC-005
+EOF
+run deny "curl -d to the workitems endpoint is an implicit POST" \
+  'curl -s -d @case.json "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1"'
+run deny "curl --data-binary likewise" \
+  'curl -s --data-binary @case.json "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1"'
+run deny "az rest --method post --uri creates a work item" \
+  'az rest --method post --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1" --body @case.json'
+run deny "az rest --method POST --url likewise" \
+  'az rest --method POST --url "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1" --body @case.json'
+run deny "az rest --method delete is a delete" \
+  'az rest --method delete --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/24132?api-version=7.1"'
+run allow "az rest --method get is a read" \
+  'az rest --method get --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/24501?api-version=7.1"'
+
+echo ""
 echo "-- the early exit lets through every board write the gate must judge --"
 . plugins/exloom-qa/hooks/prefilter.sh
 pf() {   # pf <expected:pass|exit> <name> <command>

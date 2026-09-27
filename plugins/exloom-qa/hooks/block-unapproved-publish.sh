@@ -60,15 +60,21 @@ classify_segment() {
   local prefix='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+)?'
   local is_ado=0
   printf '%s' "$seg" | grep -Eq "${prefix}az[[:space:]]+(boards|devops)([^[:alnum:]_]|$)" && is_ado=1
-  if printf '%s' "$seg" | grep -Eq "${prefix}curl([^[:alnum:]_]|$)" \
+  if printf '%s' "$seg" | grep -Eq "${prefix}(curl|az[[:space:]]+rest)([^[:alnum:]_]|$)" \
      && printf '%s' "$seg" | grep -Eq 'dev\.azure\.com|\.visualstudio\.com'; then
     is_ado=1
   fi
   [[ "$is_ado" -eq 1 ]] || return 0
 
-  # Does this segment use a mutating HTTP method?
+  # Does this segment use a mutating HTTP method? curl with a body and no -G is
+  # an implicit POST; az rest names its method with --method.
   local mutating=0
   printf '%s' "$seg" | grep -Eq -- '-X[[:space:]]*(POST|PATCH|PUT|DELETE)|--request[[:space:]]+(POST|PATCH|PUT|DELETE)' && mutating=1
+  printf '%s' "$seg" | grep -Eqi -- '--method[[:space:]]+(post|patch|put|delete)' && mutating=1
+  if printf '%s' "$seg" | grep -Eq -- '(^|[[:space:]])(-d|--data|--data-binary|--data-raw|--data-urlencode)([[:space:]=]|$)' \
+     && ! printf '%s' "$seg" | grep -Eq -- '(^|[[:space:]])(-G|--get)([[:space:]]|$)'; then
+    mutating=1
+  fi
 
   # ---- unconditional denials ----
   if printf '%s' "$seg" | grep -Eq 'az[[:space:]]+boards[[:space:]]+work-item[[:space:]]+delete'; then
@@ -76,7 +82,7 @@ classify_segment() {
       "This command deletes work items. exloom-qa never deletes anything on the board." \
       "If a published test case is genuinely wrong, remove it by hand in Azure DevOps."
   fi
-  if printf '%s' "$seg" | grep -Eq -- '-X[[:space:]]*DELETE|--request[[:space:]]+DELETE|_apis/test/testcases/[0-9]+'; then
+  if printf '%s' "$seg" | grep -Eqi -- '-X[[:space:]]*DELETE|--request[[:space:]]+DELETE|--method[[:space:]]+delete|_apis/test/testcases/[0-9]+'; then
     exloomqa_deny \
       "This command deletes board artifacts. exloom-qa never deletes anything." \
       "Test Case deletion is permanent with no recycle bin — do it by hand if it is truly intended."
