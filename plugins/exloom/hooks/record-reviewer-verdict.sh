@@ -363,7 +363,7 @@ if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2
   MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
   FIX_LINES="$(git -c core.quotepath=false diff -U0 "$MFROM" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
-           /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i)}')"
+           /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i); if(n==0){print f":"s; print f":"(s+1)}}')"
 fi
 SPEC=""
 if [[ -n "$TASK_ID" && "$MODE" != "verify" ]]; then
@@ -442,8 +442,9 @@ while IFS= read -r fline; do
       continue ;;
   esac
   not_addressed=0
-  if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*(NOT[[:space:]]+)?ADDRESSED'; then
-    printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*NOT[[:space:]]+ADDRESSED' || continue
+  # Anything but a plain ADDRESSED (NOT, PARTIALLY, …) is still open.
+  if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*([A-Za-z]+[[:space:]]+)?ADDRESSED'; then
+    printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*ADDRESSED' && continue
     not_addressed=1
   fi
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"

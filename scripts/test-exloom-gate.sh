@@ -2623,6 +2623,29 @@ ok "...and the verify pass cannot approve over it" \
 ok "a pre-existing finding not addressed stays pre-existing" \
    "$(grep "\"head\":\"${V2B}\"" "$V2V/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep -c '"scope":"PRE-EXISTING"')" "1"
 
+subrepo verify3
+V3V=".claude/reviews/feat/plan.verdicts"; mkdir -p "$V3V"
+printf 'guard\nwork\nmore\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+V3A="$(git rev-parse HEAD)"
+vfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:3 — IN-SCOPE — first defect
+ROUND NEEDED AFTER FIX: YES'
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'work\nmore\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm 'delete the guard' >/dev/null 2>&1
+vfeed "VERDICT: REJECTED (2 items)
+MODE: VERIFY ${V3A}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:3 — PARTIALLY ADDRESSED: still reachable
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — the deleted guard leaves this unchecked
+ROUND NEEDED AFTER FIX: YES"
+V3B="$(git rev-parse HEAD)"
+ok "a finding at a deletion the fix made is in the fix range" \
+   "$(grep "\"head\":\"${V3B}\"" "$V3V/l1-reviewer.findings.jsonl" | grep 'src/a.go:1' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "PARTIALLY ADDRESSED counts as not addressed" \
+   "$(grep "\"head\":\"${V3B}\"" "$V3V/l1-reviewer.findings.jsonl" | grep 'src/a.go:3' | grep -c '"scope":"IN-SCOPE"')" "1"
+
 section "the ledger: minor findings never enter the fix loop"
 
 subrepo ledger
