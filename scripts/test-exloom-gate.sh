@@ -2586,6 +2586,16 @@ ok "a verify range that does not start at the last reviewed head is not verify m
    "$(grep 'src/a.go:1' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
 
 
+printf 'l7\nl8\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more2 >/dev/null 2>&1
+VL="$(sed -n 's/.*"head":"\([0-9a-f]*\)","verdict".*/\1/p' "$VV/l1-reviewer.json" | tail -1)"
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${VL}..$(git rev-parse HEAD)
+## Critical (must fix before merge)
+- a.go:8 — IN-SCOPE — cited by its file name only
+ROUND NEEDED AFTER FIX: YES"
+ok "a cite by file name alone still counts as in the fix range" \
+   "$(grep 'a.go:8' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
+
 subrepo verify2
 V2V=".claude/reviews/feat/plan.verdicts"; mkdir -p "$V2V"
 printf 'l1\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1

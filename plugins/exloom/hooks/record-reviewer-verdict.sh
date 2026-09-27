@@ -377,7 +377,7 @@ _in_fix() {   # _in_fix <cite> — is the cited line one the fix range added or 
   local p="${1%:*}" l="${1##*:}" f
   while IFS= read -r f; do
     [[ -n "$f" && "${f##*:}" == "$l" ]] || continue
-    [[ "$p" == "${f%:*}" || "$p" == */"${f%:*}" ]] && return 0
+    [[ "$p" == "${f%:*}" || "$p" == */"${f%:*}" || "${f%:*}" == */"$p" ]] && return 0
   done <<< "$FIX_LINES"
   return 1
 }
