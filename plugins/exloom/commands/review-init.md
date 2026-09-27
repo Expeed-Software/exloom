@@ -5,27 +5,23 @@ description: Bootstrap .claude/reviews/<branch>.md from the checklist template. 
 
 # /review-init
 
-You are initializing your org's review checklist for the current branch. Execute the following steps in order; do not skip.
+Run the steps in order; skip none.
 
 ## Step 1 — Gather context
 
 Run:
-- `git rev-parse --abbrev-ref HEAD` — the branch name (refuse to proceed if it is `main`, `master`, `dev`, or `develop`; tell the user the protocol only applies to feature branches).
-- The fork point — the merge-base **nearest** to HEAD, not the first candidate that resolves. Where `main` is a release branch and `dev` is the branch work merges into, taking `main` puts the whole release gap in the diff and every branch derives Tier 3. Compute it against each of `origin/main`, `origin/master`, `origin/dev`, `origin/develop` that exists and keep the one fewest commits from HEAD:
+- `git rev-parse --abbrev-ref HEAD` — refuse if it is `main`, `master`, `dev`, or `develop`.
+- The fork point — the nearest merge-base to HEAD:
 
   ```bash
   LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
   . "$LIB"; exloom_fork_point HEAD
   ```
 
-  This is the same function the push gate runs, so it already honours a base
-  recorded in the checklist. Do not reimplement the candidate list here - a copy
-  of it drifts, and this command exists to agree with the gate. Step 2a confirms
-  the answer with the user.
-- `git diff --stat <fork-point>...HEAD` — the blast-radius summary.
-- `git diff --name-only <fork-point>...HEAD` — the list of changed files.
+  The push gate runs the same function. Do not reimplement it. Step 2a confirms the answer.
+- `git diff --stat <fork-point>...HEAD` and `git diff --name-only <fork-point>...HEAD`.
 
-Also check if `.claude/exloom.local.md` exists in the repo. If yes, read its frontmatter — it may override default boot commands and adversarial grep roots.
+If `.claude/exloom.local.md` exists, read its frontmatter (boot command and adversarial grep root overrides).
 
 ## Step 1a — Check that the review files can be committed
 
@@ -33,7 +29,7 @@ Also check if `.claude/exloom.local.md` exists in the repo. If yes, read its fro
 exloom_ignored_settings "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-Every path it prints is git-ignored. exloom honours its settings, checklist and receipts only when they are committed, so each one listed is silently dropped, and with the checklist or receipts ignored the gate can never pass. `exloom-gate.enabled` and `exloom-provenance-signed.enabled` only need to exist, so they still take effect: the gate is on while nothing can satisfy it. If anything is listed, stop and show the user the list and the minimum fix, which keeps local files such as `settings.local.json` ignored:
+Every path it prints is git-ignored, so exloom ignores it and the gate can never pass. If anything is listed, stop and show the user the list and the minimum fix (it keeps `settings.local.json` ignored):
 
 ```
 .claude/*
@@ -43,7 +39,7 @@ Every path it prints is git-ignored. exloom honours its settings, checklist and 
 
 ## Step 2 — Propose a tier
 
-Use these rules mechanically first, then ask the user to confirm:
+Apply these rules mechanically, then ask the user to confirm:
 
 - If the ONLY changed files are `*.md`, `README*`, or live under the top-level `docs/` directory → Tier 0. A `.txt` file (such as `requirements.txt`) and a nested `docs/` folder inside source do not count.
 - If any file under a `migrations/`, `liquibase/`, `db/changelog/` path → Tier 3.
@@ -55,13 +51,13 @@ Use these rules mechanically first, then ask the user to confirm:
 - Else if the diff touches ≥5 files → Tier 2.
 - Else → Tier 1.
 
-Show the proposed tier, the rule that triggered it, and the `git diff --stat` output. Ask the user to confirm or override. Record the final tier and the one-sentence rationale.
+Show the tier, the triggering rule, and the `git diff --stat`. Ask the user to confirm or override; record the tier and a one-sentence rationale.
 
-**The override is upward only.** When the gate is enabled, `lib.sh` derives the same minimum from the diff at push time and blocks a checklist that declares less — with no escape hatch, because the tier decides which gates apply and an escapable tier makes every other gate optional. So a user asking to go lower is asking for a push that will fail; say so, and either raise the tier or fix the derivation rule. Going higher is always allowed and is the documented response to uncertainty.
+**The override is upward only.** The push gate derives the same minimum and blocks anything lower. If the user asks to go lower, say the push will fail; raise the tier or fix the derivation rule.
 
-Two of the rules above are judgment the hook cannot make, so it derives a lower floor and leaves the decision here: deployment/k8s/helm/docker paths floor at Tier 2 (raise to 3 when the change is flag- or prod-related), and "frontend AND backend changed" or "more than one module" need stack knowledge a file list does not carry. Apply them yourself.
+Apply yourself what the hook cannot judge: deployment paths floor at Tier 2 there (raise to 3 when flag- or prod-related), and the frontend+backend and multi-module rules.
 
-**The repository may add rules of its own.** A committed `.exloom.yml` names path globs that this repo treats as Tier 2 or Tier 3 — its own words for risk, such as `identity`, `iam` or `rbac`, which the list above does not know. Those rules only ever raise the tier. Rather than reproducing them here, take the tier from the derivation itself, which already merges both sources:
+A committed `.exloom.yml` may add path globs that raise the tier. Take the tier from the derivation, which merges both:
 
 ```bash
 # ${CLAUDE_PLUGIN_ROOT} is set for plugin.json hooks, NOT in your shell.
@@ -72,20 +68,11 @@ LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)
 exloom_derive_tier HEAD; exloom_tier_reasons
 ```
 
-If that disagrees with the rules above, it is right and they are the summary — it is the same function the push gate runs. If it prints nothing and returns 1, exloom found no base branch; Step 2a is then required, because the push gate blocks until `**Base branch:**` names one. A return of 2 means the branch has no diff yet.
+If it disagrees with the rules above, it is right. Return 1 with no output: no base branch found, so Step 2a must set `**Base branch:**`. Return 2: no diff yet.
 
 ## Step 2a - Confirm the base branch
 
-The tier is derived from the diff between the base and this branch. So the base
-decides what counts as "changed", and a wrong one puts somebody else's commits in
-your diff - the tier then cites a path this branch never touched.
-
-exloom guesses from a fixed list of integration-branch names. A repo that calls
-its integration branch anything else - `dev-deploy`, `release/x`, an internal
-convention - is guessed wrong every time, and there is no way for it to know.
-
-Show what it picked, what the alternatives are, and what each would mean. Compute
-the distance for every remote branch:
+The base decides what counts as changed. exloom guesses from a fixed name list, so repos with other integration branch names are guessed wrong. Compute the distance to every remote branch:
 
 ```bash
 for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
@@ -94,34 +81,20 @@ for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
 done | sort -n | head -6
 ```
 
-Offer the nearest few plus any that look like integration branches, with the
-count beside each, and let the user type one that is not listed:
+Offer the nearest few plus likely integration branches, with counts, and allow a typed answer:
 
 ```
   origin/dev-deploy     3 commits back
   origin/main          57 commits back   <- currently used
 ```
 
-**Do not auto-pick the nearest.** A colleague who branched off this branch is
-nearer than any integration branch, and choosing it would shrink the diff to
-almost nothing and derive Tier 0 for a change that earns more. The arithmetic is
-shown; the person decides.
+**Do not auto-pick the nearest.** A colleague's branch forked from this one is nearer and would shrink the diff. The user decides.
 
-Write the answer into the checklist's `**Base branch:**` field. The gate reads it
-back from the committed checklist at push time and derives from it.
-
-**Say plainly what that means**, because it is the one field here that can lower
-a tier: a stated base changes what the gate sees. That is why it lives in the
-checklist and travels in the diff a reviewer reads, rather than in a config file
-nobody opens. If the user names a branch that makes the change look much smaller,
-ask once whether that is really where the work forked.
-
-The template ships the field as `auto`, which means "derive it". Leave it there
-if the guess was right - that is a complete answer, not an unfinished one.
+Write the answer into `**Base branch:**`; the gate reads it at push time. Tell the user this field can lower a tier; if their choice makes the change much smaller, ask once whether the work really forked there. Leave `auto` if the guess was right.
 
 ## Step 2b — Propose a lane
 
-The tier is derived from the diff. The **lane** is the user's call, and it decides how much happens *before* the code — not how deep the review goes.
+The **lane** is the user's call: how much happens *before* the code.
 
 | Lane | For | Before the code | After it |
 |---|---|---|---|
@@ -129,13 +102,13 @@ The tier is derived from the diff. The **lane** is the user's call, and it decid
 | `standard` | work meant to become a real system | spec, plan, fidelity audit | whatever the tier requires |
 | `certified` | regulated, or someone outside the team must be able to audit it | same as standard | tier's requirements, **no workflow-step escape hatches**, signed provenance |
 
-On Certified, a skipped step recorded under `## Escape hatches used` blocks the push — writing a justification is not a way past a step. `EXLOOM_REVIEW_SKIP=1` is separate: it overrides the hooks on any lane and always leaves a bypass receipt.
+On Certified, a skipped step under `## Escape hatches used` blocks the push. `EXLOOM_REVIEW_SKIP=1` overrides the hooks on any lane and leaves a bypass receipt.
 
-Ask once, with a recommendation, and default to the repo's committed `.claude/exloom-lane` (or `standard` when there is none). Recommend `sprint` when the change is small and self-contained and the user described it as a fix or a spike; recommend `standard` otherwise.
+Ask once. Default to the committed `.claude/exloom-lane`, else `standard`. Recommend `sprint` for a small, self-contained fix or spike; otherwise `standard`.
 
-**Sprint is not available at Tier 3.** If the derived tier is 3, do not offer it — say that migrations, auth, tenancy, secrets and crypto are the stakes that earn the full flow, and that the gate refuses the combination.
+**Sprint is not available at Tier 3.** Do not offer it; the gate refuses the combination.
 
-Write the answer into the checklist's `**Lane:**` field. A Sprint branch is not exempt from evidence, only from ceremony: the receipts, the proof and the smoke test are identical, and the checklist records the lane so a skipped step is a recorded fact rather than a silent absence.
+Write the answer into `**Lane:**`.
 
 ## Step 3 — Create the checklist
 
@@ -147,14 +120,10 @@ LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)
 exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-`sort -V | tail -1` takes the highest installed version; several stay in the cache. `${CLAUDE_PLUGIN_ROOT}` is not set in your shell.
-
-This writes `.claude/reviews/<branch-name>.md`: a short part people edit (`**Base branch:**`, `**Lane:**`, `## Rulings`) and an evidence block exloom rebuilds from the receipts every time it runs — derived tier and its reasons, reviewed commit, criteria matrix, reviewer verdicts, findings summary and provenance. Then set:
+This writes `.claude/reviews/<branch-name>.md`: editable fields (`**Base branch:**`, `**Lane:**`, `## Rulings`) and an evidence block exloom rebuilds from receipts. Then set:
 
 - `**Base branch:**` → the branch confirmed in Step 2a, or leave `auto`.
 - `**Lane:**` → the answer from Step 2b.
-
-There is no tier field: the gate uses the tier the diff derives to.
 
 ## Step 4 — Commit the skeleton
 
@@ -164,7 +133,7 @@ Stage `.claude/reviews/<branch>.md` and commit with message:
 chore(review): initialize review report for <branch-name>
 ```
 
-Do NOT commit anything else. The checklist is the only file in this commit.
+Commit nothing else.
 
 ## Step 5 — Tell the user what comes next
 
@@ -178,5 +147,5 @@ Print:
 
 ## Refusals
 
-- Refuse on protected branches. Protocol is for feature branches only.
-- Refuse if `.claude/reviews/<branch>.md` already exists — tell the user to open it and continue, or delete it explicitly if they want to start over.
+- Refuse on protected branches.
+- Refuse if `.claude/reviews/<branch>.md` exists — continue in it, or delete it explicitly to start over.
