@@ -124,6 +124,16 @@ if [[ -z "$TESTCMD" ]]; then
   elif [[ -f pytest.ini || -f pyproject.toml || -f setup.cfg ]]; then TESTCMD="pytest -q"
   elif [[ -f go.mod         ]]; then TESTCMD="go test ./... -count=1"
   elif [[ -f Cargo.toml     ]]; then TESTCMD="cargo test"
+  elif [[ -f pubspec.yaml   ]]; then TESTCMD="flutter test"
+  else
+    shopt -s nullglob; _sln=( *.sln ); _proj=( *.csproj ); shopt -u nullglob
+    if [[ ${#_sln[@]} -eq 1 && ${#_proj[@]} -eq 0 ]]; then TESTCMD="dotnet test ${_sln[0]}"
+    elif [[ ${#_sln[@]} -eq 0 && ${#_proj[@]} -eq 1 ]]; then TESTCMD="dotnet test ${_proj[0]}"
+    elif [[ $(( ${#_sln[@]} + ${#_proj[@]} )) -gt 1 ]]; then
+      # Plain `dotnet test` fails here with "multiple project/solution files".
+      echo "more than one .NET solution or project at the root — commit the one to test in .claude/exloom-test-command" >&2
+      exit 2
+    fi
   fi
 fi
 [[ -n "$TESTCMD" ]] || {

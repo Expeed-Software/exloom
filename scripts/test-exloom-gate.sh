@@ -2946,6 +2946,24 @@ printf -- '- Proof: deletion only — the helper had no callers\n' >> "$NC"
 git add -A >/dev/null 2>&1; git commit -qm ruling >/dev/null 2>&1
 ok "...and at Tier 2 with one" "$(nnb 2)" "0"
 
+section "the proof detects .NET and Flutter test commands"
+
+detect() {   # detect <name> <files...> -> the command the proof chose, or its refusal
+  local d="$REG/detect-$1"; shift; rm -rf "$d"; mkdir -p "$d/.claude" "$d/src"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+  : > .claude/exloom-gate.enabled; local f; for f in "$@"; do mkdir -p "$(dirname "$f")"; : > "$f"; done
+  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1; git checkout -q -b feat/x
+  printf 'x\n' > src/a.cs; mkdir -p t; printf 'x\n' > t/ATests.cs; git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+  bash "$PROVE" --base main 2>&1 | grep -E '^command:|no test command|more than one' | head -1
+}
+ok "pubspec.yaml -> flutter test" "$(detect flutter pubspec.yaml)" "command: flutter test"
+ok "one .sln at the root -> dotnet test <sln>" "$(detect onesln App.sln)" "command: dotnet test App.sln"
+ok "several .sln files -> a pinned command is required" \
+   "$(detect twosln A.sln B.sln | grep -c 'more than one .NET')" "1"
+ok "a .sln plus a loose .csproj -> a pinned command is required" \
+   "$(detect slnproj App.sln Tool.csproj | grep -c 'more than one .NET')" "1"
+cd "$WORK" || exit 1
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
