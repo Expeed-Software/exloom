@@ -312,6 +312,25 @@ if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
            /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i)}')"
 fi
+# ---------- task mode: a per-task review against the task's text ----------
+# `MODE: TASK <n>` in the report, or a dispatch prompt starting `Review task <n>`
+# for a launch with no report yet. Its receipt goes to <agent>.tasks.json, so a
+# per-task pass is never counted as a branch round.
+TASK_ID="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+  | sed -n 's/^MODE:[[:space:]]*TASK[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p' | tail -1)"
+if [[ -z "$TASK_ID" && $REPORT_SEEN -eq 0 ]]; then
+  TASK_ID="$(_field tool_input.prompt | head -1 | sed -n 's/^Review task[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p')"
+fi
+SPEC=""
+RECEIPT="${VDIR}/${AGENT}.json"
+if [[ -n "$TASK_ID" ]]; then
+  MODE="task"; RANGE=""; FIX_LINES=""
+  RECEIPT="${VDIR}/${AGENT}.tasks.json"
+  SPEC="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+    | sed -n 's/^SPEC:[[:space:]]*\([A-Za-z]*\).*/\1/p' | tr '[:lower:]' '[:upper:]' \
+    | grep -E '^(MATCHES|MISSING|EXTRA|MISUNDERSTOOD)$' | tail -1)"
+  [[ -n "$SPEC" ]] || SPEC="UNKNOWN"
+fi
 _in_fix() {   # _in_fix <cite> — is the cited line one the fix range added or changed?
   local p="${1%:*}" l="${1##*:}" f
   while IFS= read -r f; do
@@ -377,6 +396,7 @@ while IFS= read -r fline; do
         *pre-existing*) cur_scope="PRE-EXISTING"; [[ -n "$cur_sev" ]] || cur_sev="MED" ;;
       esac
       case "$head_txt" in *nothing\ to\ flag*) cur_sev="" ;; esac
+      [[ "$MODE" == "task" && "$head_txt" == *spec* ]] && cur_sev="MED"
       continue ;;
   esac
   not_addressed=0
@@ -517,7 +537,7 @@ fi
 # reviewer that states no verdict has not approved anything.
 _recorded_for_head() {
   # $1: a JSON fragment to look for on a line already naming this HEAD.
-  local f="${VDIR}/${AGENT}.json"
+  local f="$RECEIPT"
   [[ -f "$f" ]] || return 1
   grep -F "\"head\":\"${HEAD_SHA}\"" "$f" 2>/dev/null | grep -qF "$1"
 }
@@ -534,7 +554,7 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
   # lets a message name the cause rather than reporting a stale approval.
   printf '{"agent":"%s","subagent_type":"%s","head":"%s","dispatch":true,"at":"%s","session":"%s"}\n' \
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
-    >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+    >> "$RECEIPT" 2>/dev/null || exit 0
   echo "exloom: recorded ${AGENT} DISPATCH at ${HEAD_SHA:0:12} — a launch, not a review. No verdict was observable at this event, and this line does NOT satisfy the gate." >&2
   echo "exloom: if no verdict line follows when the reviewer finishes, the usual cause is that the agent was given a name, which routes its report through the mailbox rather than the tool result this hook reads. Dispatch it without a name." >&2
   exit 0
@@ -556,9 +576,10 @@ if _recorded_for_head "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND_NEE
 fi
 
 RANGE_FIELD=""; [[ -n "$RANGE" ]] && RANGE_FIELD=",\"range\":\"${RANGE}\""
+[[ -n "$TASK_ID" ]] && RANGE_FIELD=",\"task\":\"${TASK_ID}\",\"spec\":\"${SPEC}\""
 printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s"%s}\n' \
   "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" "$MODE" "$RANGE_FIELD" \
-  >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+  >> "$RECEIPT" 2>/dev/null || exit 0
 
 # The exit condition, stated where the session will read it. APPROVED with every
 # reviewer saying NO is what "stop reviewing" looks like; nothing else is.
@@ -569,7 +590,7 @@ elif [[ "$ROUND_NEEDED" == "UNKNOWN" ]]; then
 fi
 
 
-echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${AGENT}.json) — commit it with the checklist" >&2
+echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${RECEIPT}) — commit it with the checklist" >&2
 
 # WHERE THE GATE STANDS, printed here rather than only when someone runs
 # /review-complete. A session that dispatches reviewers by hand gets the same

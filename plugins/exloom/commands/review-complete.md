@@ -171,7 +171,7 @@ The dispatch prompt is an address, not a briefing.
 
 **Dispatch order matters. Do not run them all at once.**
 
-1. **`l1-reviewer` alone, first.** Fix what it finds, re-run it, until it approves. This is the loop, and it is one cheap reviewer.
+1. **`l1-reviewer` alone, first, once over the whole branch.** Each task was already reviewed against its text while it was built (`exloom:executing-handoff-plans`, step 7), so this pass is the only whole-branch L1 review. Fix what it finds, then re-dispatch in verify mode.
 2. **Then `adversarial-reviewer` and `security-auditor`** — those two in parallel with each other, once, after L1 has settled. Pass them the L1 findings so they do not re-report them.
 
 Two reasons. Anything the expensive reviewers say about a commit you are about to change is stale before you read it — dispatching all of them up front means paying for reviews of code that no longer exists. And because their approval no longer expires when you fix something, running them last is what makes their approval cover very nearly the code you ship: the only lines they miss are fixes made in response to their own findings.

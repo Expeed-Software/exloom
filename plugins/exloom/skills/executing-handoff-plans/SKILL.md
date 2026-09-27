@@ -97,6 +97,18 @@ Bad pattern: "I'll commit everything at the end." Bulk commits destroy traceabil
 
 Commit message format should include the plan reference and task number. Example: `plan:payments-rate-limit task-3: add Redis configuration for rate limiter`. This makes it possible to trace any line of code back to the plan task that introduced it, which is exactly what `exloom:auditing-plan-fidelity` relies on.
 
+**7. Review the task.**
+
+Dispatch `exloom:l1-reviewer`, unnamed, with exactly:
+
+```
+Review task <n> of <plan path>. Diff: git diff <commit before the task>..<task commit>
+Task text:
+<the task's text, verbatim>
+```
+
+It returns a spec verdict (`MATCHES`, `MISSING`, `EXTRA`, `MISUNDERSTOOD`) and quality findings. EXTRA means remove the code the task does not ask for, or log it as a deviation for the author. Fix blocking findings at the cited line, re-dispatch in verify mode (see `/review-complete`), and stop at the task's round budget. The receipt goes to `l1-reviewer.tasks.json` and does not count as a branch round. The whole-branch review runs once, in `/review-complete`.
+
 ### After Execution
 
 All tasks are complete. Run `exloom:auditing-plan-fidelity`.

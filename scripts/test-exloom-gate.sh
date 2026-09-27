@@ -2589,6 +2589,31 @@ git add -A >/dev/null 2>&1; git commit -qm mixed >/dev/null 2>&1
 ok "...and the gate does not pass it on the minor alone" \
    "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
 
+section "per-task review: a spec verdict, kept apart from the branch's rounds"
+
+subrepo tasks
+TV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$TV"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm task3 >/dev/null 2>&1
+tfeed() {
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+tfeed 'VERDICT: REJECTED (1 items)
+MODE: TASK 3
+SPEC: EXTRA
+## Spec
+- src/a.go:1 — EXTRA — a retry helper the task does not ask for
+ROUND NEEDED AFTER FIX: YES'
+ok "a task review is recorded in the task receipt" \
+   "$(grep -c '"task":"3","spec":"EXTRA"' "$TV/l1-reviewer.tasks.json" 2>/dev/null)" "1"
+ok "...and not in the branch receipt, so it is not a branch round" \
+   "$( [[ -f "$TV/l1-reviewer.json" ]] && echo present || echo absent)" "absent"
+ok "code beyond the task's text is recorded as a blocking spec finding" \
+   "$(grep 'src/a.go:1' "$TV/l1-reviewer.findings.jsonl" | grep '"severity":"MED"' | grep -c '"scope":"IN-SCOPE"')" "1"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

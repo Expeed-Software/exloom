@@ -199,6 +199,14 @@ The prompt gives your previous findings and a fix range. Review only that range:
 - Report a new finding only if it is at your blocking severity and on a line the fix range adds or changes. Anything else is out of scope: leave it out.
 - REJECTED only if an earlier finding is NOT ADDRESSED or a new in-range finding is at your blocking severity.
 
+# Task mode (when the prompt says "Review task")
+
+The prompt gives one plan task's text and that task's diff. Review the diff against the text as well as for quality:
+
+- First line: the verdict. Second line: `MODE: TASK <n>`. Third line: `SPEC: MATCHES`, `SPEC: MISSING`, `SPEC: EXTRA` or `SPEC: MISUNDERSTOOD`.
+- Under `## Spec`, one line per mismatch: `- <path>:<line> — EXTRA — <what the task does not ask for>`, `MISSING` (cite the plan line) or `MISUNDERSTOOD`. Code the task's text does not ask for is EXTRA even when it is good code.
+- Spec findings block like Important findings. Report quality findings as usual.
+
 # Verdict line (REQUIRED — first line of your report)
 
 Begin your report with EXACTLY one of:
