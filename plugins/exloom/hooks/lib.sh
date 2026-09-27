@@ -470,7 +470,7 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
   printf '%s\n' ".claude/reviews/${1}.md" ".claude/reviews/${1}.verdicts/l1-reviewer.json" \
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
-    .claude/exloom-skip-branches .claude/exloom-test-patterns \
+    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-strict \
     | git check-ignore --no-index --stdin 2>/dev/null
 }
 
@@ -597,6 +597,11 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
 # standard = the full flow. certified = no escape hatches, signed commit.
 # No lane weakens a safety check: proof, smoke, tier derivation and the security
 # surface are identical in all three.
+# Strict mode: a committed .claude/exloom-strict puts every branch on the Certified lane.
+exloom_is_strict() {
+  [[ -f .claude/exloom-strict ]] && git ls-files --error-unmatch .claude/exloom-strict >/dev/null 2>&1
+}
+
 exloom_repo_lane() {
   local f=".claude/exloom-lane" v=""
   if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
@@ -833,6 +838,7 @@ exloom_gate_status() {   # exloom_gate_status <branch> <tip>
           | sed -E 's/.*Tier:\*\*[[:space:]]*([0-9]).*/\1/')"
   lane="$(printf '%s\n' "$content" | exloom_declared_lane)"
   [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
+  exloom_is_strict && lane="certified"
   derived="$(exloom_derive_tier "$tip" 2>/dev/null || true)"
   [[ "$tier" =~ ^[0-3]$ ]] || tier="$derived"
   [[ "$tier" =~ ^[0-3]$ ]] || return 0
@@ -1837,6 +1843,7 @@ Check out that branch and run /review-init, /smoke-test, /review-complete."; ret
   local lane eff_tier
   lane="$(printf '%s\n' "$content" | exloom_declared_lane)"
   [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
+  exloom_is_strict && lane="certified"
 
   # Sprint is not available at Tier 3. Migrations, auth, tenancy, secrets and
   # crypto are exactly the stakes that earn rigour, and the tier is derived from

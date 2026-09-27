@@ -2986,6 +2986,20 @@ ok "the user's verbose setting shows everything" \
    "$(EXLOOM_VERBOSE=0 CLAUDE_PLUGIN_OPTION_VERBOSE=true _exloom_block push "a
 b" 2>&1 | grep -c 'Emergency bypass')" "1"
 
+section "strict mode is a committed repo setting"
+
+subrepo strict
+SC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$SC")"
+printf '**Tier:** 1\n**Lane:** standard\n\n## Escape hatches used\n- Skipped: smoke test — headless box\n' > "$SC"
+smsg() { exloom_validate_checklist "$SC" HEAD 1 test 2>&1 >/dev/null | grep -c 'Certified lane, which has no escape hatches' | head -1; }
+ok "no strict file -> the standard lane accepts the skip" "$(smsg)" "0"
+: > .claude/exloom-strict
+ok "an uncommitted strict file changes nothing" "$(smsg)" "0"
+git add .claude/exloom-strict >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "a committed strict file makes every branch Certified" "$(smsg)" "1"
+ok "...and the ignore check lists it" \
+   "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-strict')" "1"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

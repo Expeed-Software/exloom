@@ -93,6 +93,7 @@ Optional, all committed:
 | File | Effect |
 |---|---|
 | `.claude/exloom-lane` | the repo's default lane |
+| `.claude/exloom-strict` | strict mode: every branch on the Certified lane |
 | `.claude/exloom-max-rounds` | fix rounds per plan task, default 3 |
 | `.claude/exloom-proof.disabled` | turns the proof off, for a suite that cannot run from tracked files alone |
 | `.claude/exloom-test-command` | the command the proof runs — pin one that is valid at any base, not one naming this branch's test classes |
