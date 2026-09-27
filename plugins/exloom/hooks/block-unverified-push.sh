@@ -16,14 +16,14 @@
 # Bypass (when enabled): EXLOOM_REVIEW_SKIP=1
 
 set -u
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$SCRIPT_DIR" == "${BASH_SOURCE[0]}" ]] && SCRIPT_DIR=.
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/lib.sh"
+. "$SCRIPT_DIR/prefilter.sh"
 
 # ---------- read hook input ----------
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
-  HOOK_INPUT="$(cat 2>/dev/null || true)"
+  IFS= read -r -d '' HOOK_INPUT || true
 fi
 
 # ---------- bypass ----------
@@ -31,10 +31,16 @@ fi
 # A line saying only "a bypass happened" answers none of the questions a reader
 # of it will have.
 if [[ "${EXLOOM_REVIEW_SKIP:-0}" == "1" ]]; then
+  # shellcheck source=/dev/null
+  . "$SCRIPT_DIR/lib.sh"
   echo "exloom: push bypass via EXLOOM_REVIEW_SKIP=1" >&2
   exloom_bypass_receipt "push:$(exloom_json_field "$HOOK_INPUT" tool_name)"
   exit 0
 fi
+
+exloom_may_publish "$HOOK_INPUT" || exit 0
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib.sh"
 
 # ---------- which tool fired? ----------
 TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"

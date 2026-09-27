@@ -21,9 +21,6 @@
 # Bypass: EXLOOM_QA_SKIP=1
 
 set -u
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/lib.sh"
 
 if [[ "${EXLOOM_QA_SKIP:-0}" == "1" ]]; then
   echo "exloom-qa: publish gate bypassed via EXLOOM_QA_SKIP=1 (audit)" >&2
@@ -32,9 +29,16 @@ fi
 
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
-  HOOK_INPUT="$(cat 2>/dev/null || true)"
+  IFS= read -r -d '' HOOK_INPUT || true
 fi
 [[ -n "$HOOK_INPUT" ]] || exit 0
+
+SCRIPT_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$SCRIPT_DIR" == "${BASH_SOURCE[0]}" ]] && SCRIPT_DIR=.
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/prefilter.sh"
+exloomqa_may_write_board "$HOOK_INPUT" || exit 0
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib.sh"
 
 CMD="$(exloomqa_command "$HOOK_INPUT")"
 [[ -n "$CMD" ]] || exit 0

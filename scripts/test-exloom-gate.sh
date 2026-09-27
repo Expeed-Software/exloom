@@ -2497,6 +2497,40 @@ git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
 ok "a rejection is reported as a rejection, not as a stale receipt" \
    "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'did NOT approve')" "1"
 
+section "the early exit lets through every input a hook must judge"
+
+. "$HOOKS_ABS/prefilter.sh"
+pf() { if "$1" "$2"; then echo pass; else echo exit; fi; }
+bashp() { printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
+
+ok "receipts: a cd into the verdicts folder, then a relative redirect" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'cd .claude/reviews/feat/x.verdicts && echo {} > l1-reviewer.json')")" "pass"
+ok "receipts: node -e writing a receipt" \
+   "$(pf exloom_may_touch_receipts "$(bashp "node -e \\\"require('fs').writeFileSync('.claude/reviews/x.verdicts/l1-reviewer.json','{}')\\\"")")" "pass"
+ok "receipts: git apply of a patch that names no path" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'git apply fix.patch')")" "pass"
+ok "receipts: git clean -fdx" "$(pf exloom_may_touch_receipts "$(bashp 'git clean -fdx')")" "pass"
+ok "receipts: a Windows path to a receipt" \
+   "$(pf exloom_may_touch_receipts '{"tool_name":"Write","tool_input":{"file_path":"C:\\r\\.claude\\reviews\\x.verdicts\\l1-reviewer.json"}}')" "pass"
+ok "receipts: deleting the gate marker" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'rm .claude/exloom-gate.enabled')")" "pass"
+ok "receipts: an ordinary command exits early" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'ls -la && git status')")" "exit"
+
+ok "push: git -C dir push" "$(pf exloom_may_publish "$(bashp 'git -C ../x push origin HEAD')")" "pass"
+ok "push: gh pr create" "$(pf exloom_may_publish "$(bashp 'gh pr create --fill')")" "pass"
+for t in mcp__github__push_files mcp__github__create_pull_request mcp__github__merge_pull_request mcp__github__delete_file mcp__github__create_or_update_file; do
+  ok "push: $t" "$(pf exloom_may_publish "{\"tool_name\":\"$t\",\"tool_input\":{}}")" "pass"
+done
+ok "push: an ordinary command exits early" "$(pf exloom_may_publish "$(bashp 'ls -la && git status')")" "exit"
+
+ok "receipt hook: a SubagentStop from a reviewer" \
+   "$(pf exloom_may_be_reviewer '{"hook_event_name":"SubagentStop","agent_type":"exloom:security-auditor"}')" "pass"
+ok "receipt hook: a Task dispatch of a reviewer" \
+   "$(pf exloom_may_be_reviewer '{"tool_name":"Agent","tool_input":{"subagent_type":"exloom:adversarial-reviewer"}}')" "pass"
+ok "receipt hook: any other agent exits early" \
+   "$(pf exloom_may_be_reviewer '{"hook_event_name":"SubagentStop","agent_type":"Explore"}')" "exit"
+
 cd "$WORK" || exit 1
 
 echo

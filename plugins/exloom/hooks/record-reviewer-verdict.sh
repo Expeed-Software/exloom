@@ -18,9 +18,14 @@ set -u
 # ---------- read hook input ----------
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
-  HOOK_INPUT="$(cat 2>/dev/null || true)"
+  IFS= read -r -d '' HOOK_INPUT || true
 fi
 [[ -n "$HOOK_INPUT" ]] || exit 0
+_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_DIR" == "${BASH_SOURCE[0]}" ]] && _DIR=.
+case "$_DIR" in /*|[A-Za-z]:*) ;; *) _DIR="$PWD/$_DIR" ;; esac
+# shellcheck source=/dev/null
+. "$_DIR/prefilter.sh"
+exloom_may_be_reviewer "$HOOK_INPUT" || exit 0
 
 # ---------- nested field extraction (jq -> python3 -> sed) ----------
 # Args: <dotted-path> e.g. "tool_input.subagent_type". The sed fallback is a
@@ -509,8 +514,9 @@ echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${A
 # that until the push is refused — by which point the tier was never derived, a
 # required reviewer was never run, and the checklist still holds placeholders.
 # Saying it at every completion removes the reason to defer the command.
-_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib.sh"
-if [[ -r "$_LIB" ]]; then
+# Computing it takes seconds, so skip it when nobody can read it.
+_LIB="$_DIR/lib.sh"
+if [[ -r "$_LIB" && "$(readlink /proc/$$/fd/2 2>/dev/null)" != "/dev/null" ]]; then
   # shellcheck source=/dev/null
   # `2>&1 >/dev/null` in THIS order: stderr goes to the pipe, then stdout goes to
   # /dev/null. Reversed, both go to /dev/null and the status vanishes — easy to

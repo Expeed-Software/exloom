@@ -167,6 +167,19 @@ run deny "a real create still denied when prefixed by an env assignment" \
   'ORG=https://dev.azure.com/acme az boards work-item create --type "Test Case" --title "x" --fields "System.Tags=exloom-qa:24501:TC-099"'
 
 echo ""
+echo "-- the early exit lets through every board write the gate must judge --"
+. plugins/exloom-qa/hooks/prefilter.sh
+pf() {   # pf <expected:pass|exit> <name> <command>
+  local got=exit
+  exloomqa_may_write_board "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$3\"}}" && got=pass
+  if [[ "$got" == "$1" ]]; then echo "  PASS  [$1] $2"; PASS=$((PASS + 1))
+  else echo "  FAIL  [expected $1, got $got] $2"; FAIL=$((FAIL + 1)); fi
+}
+pf pass "curl -d (an implicit POST)" 'curl -s -d @case.json https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1'
+pf pass "az rest --method post" 'az rest --method post --uri https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case'
+pf exit "an ordinary command" 'ls -la && git status'
+
+echo ""
 echo "-- bypass --"
 set +e
 printf '%s' "$(CMD_ENV="$TC_CREATE" "$PY" -c '
