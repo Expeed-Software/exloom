@@ -347,6 +347,7 @@ FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
 LEDGER=".claude/reviews/${BRANCH}.ledger.md"
 n_found=0
 n_blocking=0
+unparsed_blocking=0
 cur_sev=""
 item_sev=""
 cur_scope="IN-SCOPE"
@@ -394,6 +395,11 @@ while IFS= read -r fline; do
       *severity:*low*|*'[low]'*)                                       item_sev="LOW" ;;
       '') item_sev="" ;;
     esac
+    if [[ "$cur_sev" == "HIGH" || "$cur_sev" == "MED" ]] \
+       && printf '%s' "$fline" | grep -qE '^[[:space:]]*[-*][[:space:]]+[^[:space:]]' \
+       && ! printf '%s' "$fline" | grep -qiE '^[[:space:]]*[-*][[:space:]]+none[[:space:].]*$'; then
+      unparsed_blocking=1
+    fi
     continue
   fi
 
@@ -451,9 +457,9 @@ while IFS= read -r fline; do
   if [[ "$sev" == "LOW" || "$scope" != "IN-SCOPE" ]]; then
     case "$scope" in IN-SCOPE) label="minor" ;; *) label="$(printf '%s' "$scope" | tr '[:upper:]' '[:lower:]')" ;; esac
     key="${cite} — ${label} — ${AGENT}"
-    if ! grep -qF -e "- [ ] ${key}" -e "- [x] ${key}" "$LEDGER" 2>/dev/null; then
+    ltext="$(printf '%s' "$fline" | sed -e "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||" -e 's/^[[:space:]*-]*//' -e 's/^[[:space:]—–:-]*//')"
+    if ! grep -F -e "] ${key}, round" "$LEDGER" 2>/dev/null | grep -qF -- "— ${ltext}"; then
       [[ -f "$LEDGER" ]] || printf '# Review ledger — %s\n\nNon-blocking findings. The final review triages each: fix, ticket or drop.\n\n' "$BRANCH" > "$LEDGER"
-      ltext="$(printf '%s' "$fline" | sed -e "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||" -e 's/^[[:space:]*-]*//' -e 's/^[[:space:]—–:-]*//')"
       printf -- '- [ ] %s, round %s — %s\n' "$key" "$ROUND" "$ltext" >> "$LEDGER" 2>/dev/null
     fi
   else
@@ -461,7 +467,7 @@ while IFS= read -r fline; do
   fi
 done <<< "$SCAN"
 
-if [[ "$VERDICT" == "REJECTED" && $n_found -gt 0 && $n_blocking -eq 0 ]]; then
+if [[ "$VERDICT" == "REJECTED" && $n_found -gt 0 && $n_blocking -eq 0 && $unparsed_blocking -eq 0 ]]; then
   ROUND_NEEDED="NO"
 fi
 

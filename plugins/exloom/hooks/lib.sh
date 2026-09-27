@@ -1017,7 +1017,10 @@ _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
   [[ -n "$all" ]] || return 2
   findings="$(printf '%s\n' "$all" | grep -vF -e '"scope":"PRE-EXISTING"' -e '"scope":"OUT-OF-SCOPE"' -e '"severity":"LOW"')"
   if [[ -z "$findings" ]]; then
-    printf '%s\n' "$all" | grep -qF -e '"scope":"OUT-OF-SCOPE"' -e '"severity":"LOW"' && return 0
+    # Only when the hook saw no blocking item it could not parse.
+    MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.json" 2>/dev/null \
+      | grep -F "\"head\":\"${4}\"" | grep -F '"verdict":"REJECTED"' | tail -1 \
+      | grep -qF '"round_needed":"NO"' && return 0
     return 2
   fi
   rulings="$(exloom_rulings "$1" "$2")"

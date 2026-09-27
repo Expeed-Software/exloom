@@ -2576,6 +2576,19 @@ git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
 ok "a minor-only REJECTED needs no ruling" \
    "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
 
+printf 'c\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
+lfeed 'VERDICT: REJECTED (2 items)
+## Critical (must fix before merge)
+- the whole retry path leaks connections
+## Minor (may defer with a reason in the checklist)
+- src/a.go:3 — IN-SCOPE — a name
+ROUND NEEDED AFTER FIX: YES'
+ok "a Critical the parser could not cite keeps the round open" \
+   "$(tail -1 "$LV/l1-reviewer.json" | grep -c '"round_needed":"YES"')" "1"
+git add -A >/dev/null 2>&1; git commit -qm mixed >/dev/null 2>&1
+ok "...and the gate does not pass it on the minor alone" \
+   "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
