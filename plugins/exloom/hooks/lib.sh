@@ -1615,14 +1615,15 @@ then apply it."
 # on a missing or failing proof — a gate that waves through "the check did not
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
-  local checklist="$1" tip="$2" reviewed="$3" action="$4"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0
+  local checklist="$1" tip="$2" reviewed="$3" action="$4" tier="${5:-1}"
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_na_blocked=0
 
-  # Opt-in per repo: the proof runs the suite in a clean worktree, which holds
-  # tracked files only, so it cannot run where the suite needs untracked local
-  # state to start.
-  [[ -f ".claude/exloom-proof.enabled" ]] || return 0
-  git ls-files --error-unmatch ".claude/exloom-proof.enabled" >/dev/null 2>&1 || return 0
+  # On whenever the gate is on. A repo whose suite needs untracked local state
+  # opts out with a COMMITTED .claude/exloom-proof.disabled.
+  if [[ -f ".claude/exloom-proof.disabled" ]] \
+     && git ls-files --error-unmatch ".claude/exloom-proof.disabled" >/dev/null 2>&1; then
+    return 0
+  fi
 
   vdir="$(exloom_verdict_dir "$checklist")"
   file="${vdir}/proof.json"
@@ -1663,7 +1664,8 @@ exloom_check_proof() {
         # it must not read as the same failure. Accepted and reported, because
         # the alternative was a bypass - which lets the same push through while
         # recording less about why.
-        *'"result":"NOT_APPLICABLE"'*) ok=1; seen_notapplicable=1 ;;
+        *'"result":"NOT_APPLICABLE"'*)
+          if [[ "$tier" -le 1 ]]; then ok=1; seen_notapplicable=1; else seen_na_blocked=1; fi ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
@@ -1680,7 +1682,14 @@ exloom_check_proof() {
   fi
 
   local detail
-  if [[ $seen_cmdswap -eq 1 ]]; then
+  if [[ $seen_na_blocked -eq 1 ]]; then
+    detail="The proof recorded NOT_APPLICABLE: the tests do not compile without the change,
+so the three-run proof could not ask its question. That is accepted only at
+Tier 1; this branch is Tier ${tier}. Make the tests compile at the base (for
+example by testing through an interface that already exists), then re-run:
+
+    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\""
+  elif [[ $seen_cmdswap -eq 1 ]]; then
     detail="A proof receipt covers this commit, but .claude/exloom-test-command has changed
 since it was written, so the receipt proves a command that is no longer the one
 this repo runs. Re-run the proof against the current command:
@@ -1931,7 +1940,7 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     # tier, never the effective one: the proof is a safety check, not ceremony,
     # and it is the cheapest evidence exloom produces. Sprint keeps it.
     if [[ "$tier" -ge 1 ]]; then
-      exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" || return 2
+      exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" "$tier" || return 2
     fi
 
     # A remedy the reviewer left open is a decision, not a defect, and it is

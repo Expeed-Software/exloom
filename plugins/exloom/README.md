@@ -93,11 +93,16 @@ Optional, all committed:
 | File | Effect |
 |---|---|
 | `.claude/exloom-lane` | the repo's default lane |
-| `.claude/exloom-max-rounds` | the review-round cap, default 3 |
+| `.claude/exloom-max-rounds` | fix rounds per plan task, default 3 |
+| `.claude/exloom-proof.disabled` | turns the proof off, for a suite that cannot run from tracked files alone |
 | `.claude/exloom-test-command` | the command the proof runs — pin one that is valid at any base, not one naming this branch's test classes |
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
+
+The proof records one of three results: `PROVED`; `NOT_PROVED`, which blocks; or `NOT_APPLICABLE`, when the tests do not compile without the change, which passes at Tier 1 only.
+
+**Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
 
 Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env. It is honoured unconditionally, and records itself in `.claude/reviews/<branch>.bypass.json` — commit that with the change so the bypass is findable afterwards.
 

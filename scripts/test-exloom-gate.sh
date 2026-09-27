@@ -418,16 +418,16 @@ section "proof receipt (the tested-ness check cannot be skipped by forgetting)"
 git checkout -q -b feat/proof main
 CP=".claude/reviews/feat/proof.md"; mkdir -p "$(dirname "$CP")"
 CPD="$(exloom_verdict_dir "$CP")"; mkdir -p "$CPD"
-pchk() { exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; echo $?; }
-
-ok "without the marker the proof is not required" "$(pchk)" "0"
-: > .claude/exloom-proof.enabled
-ok "an untracked marker does not enable it" "$(pchk)" "0"
-git add -A; git commit -qm enable
+pchk() { exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" "test" "${1:-1}" 2>/dev/null; echo $?; }
 
 printf 'a\n' > src/p.go; git add -A; git commit -qm p
 RP="$(git rev-parse HEAD)"
-ok "a committed marker enables it, and no receipt blocks" "$(pchk)" "2"
+ok "the proof is required by default, and no receipt blocks" "$(pchk)" "2"
+: > .claude/exloom-proof.disabled
+ok "an untracked opt-out marker does not turn it off" "$(pchk)" "2"
+git add -A; git commit -qm disable
+ok "a committed opt-out marker turns it off" "$(pchk)" "0"
+git rm -q .claude/exloom-proof.disabled; git commit -qm reenable
 
 printf '{"check":"change-is-tested","result":"NOT_PROVED","head":"%s"}\n' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm p2
@@ -446,7 +446,8 @@ ok "PROVED receipt covering the commit -> allowed" "$(pchk)" "0"
 printf '{"check":"change-is-tested","result":"NOT_APPLICABLE","method":"not-applicable","head":"%s"}
 ' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm pna
-ok "NOT_APPLICABLE receipt -> allowed" "$(pchk)" "0"
+ok "NOT_APPLICABLE receipt -> allowed at Tier 1" "$(pchk)" "0"
+ok "...but not at Tier 2" "$(pchk 2)" "2"
 ok "...and says so rather than passing silently"    "$(exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null | grep -c 'NOT_APPLICABLE')" "1"
 
 # The weak result is still bound to the commit. Accepting it must not also mean
