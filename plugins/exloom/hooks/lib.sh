@@ -464,6 +464,16 @@ exloom_derive_tier() {
 # committed with the checklist — the same rule the checklist itself lives under.
 exloom_verdict_dir() { printf '%s' "${1%.md}.verdicts"; }
 
+# Echoes each exloom path that .gitignore would keep out of git. Every one of
+# them is honoured only when committed, so an ignored one is silently dropped.
+exloom_ignored_settings() {   # exloom_ignored_settings <branch>
+  printf '%s\n' ".claude/reviews/${1}.md" ".claude/reviews/${1}.verdicts/l1-reviewer.json" \
+    .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
+    .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
+    .claude/exloom-skip-branches .claude/exloom-test-patterns \
+    | git check-ignore --no-index --stdin 2>/dev/null
+}
+
 # ---------- is the evidence pipeline alive? ----------
 # exloom_evidence_blind <checklist> <tip>
 #   prints the number of dispatches when receipts exist but NONE of them, for any

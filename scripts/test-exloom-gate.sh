@@ -2896,6 +2896,16 @@ git add -A >/dev/null 2>&1; git commit -qm replace >/dev/null 2>&1
 ok "a replaced test is removed before the runs, so the change proves" "$(prove "$B")" "0"
 ok "...and the receipt says PROVED" "$(proofres)" "PROVED"
 
+section "a git-ignored .claude/ is named, file by file"
+
+subrepo ignored
+ok "nothing ignored -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
+printf '.claude/\n' > .gitignore
+ok "an ignored .claude/ lists the receipts and every committed-only setting" \
+   "$(exloom_ignored_settings feat/plan | grep -cE 'reviews/feat/plan.md|verdicts|exloom-test-command|exloom-max-rounds|exloom-proof.disabled|exloom-lane|exloom-mutation-command|exloom-protected-branches|exloom-skip-branches|exloom-test-patterns')" "10"
+printf '.claude/*\n!.claude/reviews/\n!.claude/exloom-*\n' > .gitignore
+ok "ignoring only local files -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an

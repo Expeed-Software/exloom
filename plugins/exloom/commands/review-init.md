@@ -27,6 +27,20 @@ Run:
 
 Also check if `.claude/exloom.local.md` exists in the repo. If yes, read its frontmatter — it may override default boot commands and adversarial grep roots.
 
+## Step 1a — Check that the review files can be committed
+
+```bash
+exloom_ignored_settings "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+Every path it prints is git-ignored. exloom honours its settings, checklist and receipts only when they are committed, so each one listed is silently dropped, and with the checklist or receipts ignored the gate can never pass. `exloom-gate.enabled` and `exloom-provenance-signed.enabled` only need to exist, so they still take effect: the gate is on while nothing can satisfy it. If anything is listed, stop and show the user the list and the minimum fix, which keeps local files such as `settings.local.json` ignored:
+
+```
+.claude/*
+!.claude/reviews/
+!.claude/exloom-*
+```
+
 ## Step 2 — Propose a tier
 
 Use these rules mechanically first, then ask the user to confirm:
