@@ -43,6 +43,16 @@ _tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 # deleting it disables every other hook.
 VERDICT_RE='\.verdicts[/\\]|\.claude[/\\]reviews[/\\].*\.state([^A-Za-z0-9]|$)|\.claude[/\\]exloom-gate\.enabled'
 
+# A patch names its targets inside the file, not on the command line.
+_patch_writes_receipts() {
+  local p
+  for p in $1; do
+    [[ "$p" != -* && -f "$p" ]] || continue
+    grep -Eq '^(\+\+\+|---) [ab]/.*\.verdicts/' "$p" 2>/dev/null && return 0
+  done
+  return 1
+}
+
 TARGET=""
 case "$TOOL" in
   Write|Edit|NotebookEdit|MultiEdit)
@@ -76,6 +86,13 @@ case "$TOOL" in
       # `git clean -fdx` removes untracked files repo-wide, which includes an
       # uncommitted checklist, state file and receipts, without naming them.
       TARGET="$CMD"
+    elif printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)git[[:space:]]+(apply|am)([[:space:]]|$)' \
+         && _patch_writes_receipts "$SCAN_CMD"; then
+      TARGET="$CMD"
+    elif printf '%s' "$SCAN_CMD" | grep -Eq '(^|[;&|(][[:space:]]*)(cd|pushd)[[:space:]]+[^;&|]*(\.verdicts|\.claude[/\\]reviews)' \
+         && printf '%s' "$SCAN_CMD" | grep -Eq '(^|[[:space:]]|&|[0-9])>>?[[:space:]]*[^[:space:]&/]|(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i'; then
+      # After a cd into the receipts folder a relative write names no guarded path.
+      TARGET="$CMD"
     elif ! printf '%s' "$SCAN_CMD" | grep -Eq "$VERDICT_RE"; then
       exit 0
     else
@@ -96,7 +113,7 @@ case "$TOOL" in
       # it is not one. `2>/dev/null` IS a redirect, and its target is /dev/null,
       # which is not a receipt.
       REDIR="$(printf '%s' "$SCAN_CMD"         | grep -oE '(^|[[:space:]]|&|[0-9])>>?[[:space:]]*[^[:space:];|&()]+'         | sed -E 's/^.*>>?[[:space:]]*//')"
-      if ! printf '%s' "$REDIR" | grep -Eq "$VERDICT_RE"          && ! printf '%s' "$SCAN_CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e'; then
+      if ! printf '%s' "$REDIR" | grep -Eq "$VERDICT_RE"          && ! printf '%s' "$SCAN_CMD" | grep -Eq '(^|[^[:alnum:]_])(rm|mv|cp|tee|truncate|touch|install|dd|chmod)([^[:alnum:]_]|$)|sed[[:space:]]+[^|;]*-i|python[0-9.]*[[:space:]]+-c|perl[[:space:]]+-[a-z]*e|node[[:space:]]+(-e|--eval|-p|--print)'; then
         exit 0
       fi
       TARGET="$CMD"

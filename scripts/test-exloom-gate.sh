@@ -2846,6 +2846,21 @@ ok "/** opening a javadoc -> inert" "$(cbeh '/**')" "inert"
 ok "*/ closing it -> inert" "$(cbeh ' */')" "inert"
 ok "// line comment -> inert" "$(cbeh '// note')" "inert"
 
+section "hand-written receipts: cd, node -e and git apply"
+
+subrepo handwrite
+bashj() { python3 -c "import json,sys; print(json.dumps({'tool_name':'Bash','tool_input':{'command':sys.argv[1]}}))" "$1"; }
+ok "cd into the verdicts folder, then a relative redirect -> denied" \
+   "$(deny "$(bashj 'cd .claude/reviews/feat/plan.verdicts && echo {} > l1-reviewer.json')")" "2"
+ok "...but cd there to list it -> allowed" \
+   "$(deny "$(bashj 'cd .claude/reviews/feat/plan.verdicts && ls -la')")" "0"
+ok "node -e writing a receipt -> denied" \
+   "$(deny "$(bashj "node -e \"require('fs').writeFileSync('.claude/reviews/feat/plan.verdicts/l1-reviewer.json','{}')\"")")" "2"
+printf -- '--- a/.claude/reviews/feat/plan.verdicts/l1-reviewer.json\n+++ b/.claude/reviews/feat/plan.verdicts/l1-reviewer.json\n@@ -0,0 +1 @@\n+{}\n' > fix.patch
+ok "git apply of a patch that writes a receipt -> denied" "$(deny "$(bashj 'git apply fix.patch')")" "2"
+printf -- '--- a/src/a.go\n+++ b/src/a.go\n@@ -0,0 +1 @@\n+x\n' > ok.patch
+ok "git apply of an ordinary patch -> allowed" "$(deny "$(bashj 'git apply ok.patch')")" "0"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
