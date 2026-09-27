@@ -2077,7 +2077,13 @@ Configure git commit signing (GPG or SSH) and re-run /review-complete, which com
 # the message tells the session what to ask and what to do with each answer. The
 # push stays blocked either way; the session only chooses which option runs.
 _exloom_block() {
-  local action="$1" detail="$2"
+  local action="$1" detail="$2" first
+  # One line by default; /exloom re-runs the check with EXLOOM_VERBOSE=1 for the rest.
+  if [[ "${EXLOOM_VERBOSE:-0}" != "1" && "${CLAUDE_PLUGIN_OPTION_VERBOSE:-false}" != "true" ]]; then
+    first="$(printf '%s\n' "$detail" | sed -n '/[^[:space:]]/{s/^[[:space:]]*//;p;q;}')"
+    printf 'exloom: blocked — %s → run /exloom\n' "$first" >&2
+    return 0
+  fi
   cat >&2 <<EOF
 exloom review gate: BLOCKED — cannot ${action}.
 

@@ -8,6 +8,7 @@
 
 set -u
 unset EXLOOM_REVIEW_SKIP
+export EXLOOM_VERBOSE=1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 HOOKS_ABS="$(cd "$HERE/../plugins/exloom/hooks" && pwd)"

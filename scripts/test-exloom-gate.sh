@@ -20,6 +20,7 @@ set -u
 # why. The suite tests what the gate does when it is ON; the bypass is tested by
 # setting it deliberately, never by inheriting it.
 unset EXLOOM_REVIEW_SKIP
+export EXLOOM_VERBOSE=1
 
 LIB="plugins/exloom/hooks/lib.sh"
 HOOKS="plugins/exloom/hooks"
@@ -2974,6 +2975,16 @@ for p in pubspec.yaml pubspec.lock Directory.Packages.props; do
   ok "$p is a dependency surface" \
      "$(exloom_security_surface "$(git rev-parse main)" HEAD && echo yes || echo no)" "yes"
 done
+
+section "a block is one line and a next action, unless asked for more"
+
+short="$(EXLOOM_VERBOSE=0 _exloom_block "push" "proof missing for this commit
+more detail that should not show" 2>&1)"
+ok "the default block is one line" "$(printf '%s\n' "$short" | grep -c .)" "1"
+ok "...naming the reason and /exloom" "$(printf '%s' "$short" | grep -c 'blocked — proof missing for this commit → run /exloom')" "1"
+ok "the user's verbose setting shows everything" \
+   "$(EXLOOM_VERBOSE=0 CLAUDE_PLUGIN_OPTION_VERBOSE=true _exloom_block push "a
+b" 2>&1 | grep -c 'Emergency bypass')" "1"
 
 section "the bypass leaves a trace"
 
