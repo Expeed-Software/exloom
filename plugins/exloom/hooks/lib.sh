@@ -581,7 +581,7 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
   # Dependency manifests and lockfiles: a bumped or added dependency is the
   # single most common way an unreviewed vulnerability enters a codebase, and a
   # one-line manifest change otherwise derives to Tier 1.
-  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*.csproj|packages.lock.json|pubspec.(yaml|lock)|Directory.Packages.props)$'; then
+  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*\.csproj|packages\.lock\.json|pubspec\.(yaml|lock)|Directory\.Packages\.props)$'; then
     return 0
   fi
 
@@ -1684,7 +1684,8 @@ exloom_render_report() {   # exloom_render_report <branch>
   if [[ -f "$file" ]]; then
     human="$(tr -d '\r' < "$file" | awk '/^<!-- exloom:report/{skip=1} !skip{print} /^<!-- \/exloom:report -->/{skip=0}')"
   else
-    human="$(sed "s|<branch-name>|${branch}|" "$EXLOOM_LIB_DIR/../templates/review-checklist.md")"
+    human="$(cat "$EXLOOM_LIB_DIR/../templates/review-checklist.md")"
+    human="${human//<branch-name>/$branch}"
   fi
   tip="$(git rev-parse HEAD)" || return 1
   tier="$(exloom_derive_tier "$tip" 2>/dev/null)"; drc=$?
@@ -1736,7 +1737,7 @@ exloom_next_step() {   # exloom_next_step <branch>
   out="$(EXLOOM_VERBOSE=1 exloom_validate_checklist "$cl" HEAD 1 check 2>&1 >/dev/null)" && { echo push; return 0; }
   case "$out" in
     *"review is stale"*|*"records no valid 'Reviewed code commit:'"*) echo report ;;
-    *"Review has run"*|*"Remedy choices"*|*"Re-find"*|*"Base branch:"*) echo rulings ;;
+    *"Review has run"*|*"Remedy choices"*|*"Re-find"*) echo rulings ;;
     *"did NOT approve"*) echo fix ;;
     *"Never dispatched"*|*"has since changed"*|*"never reached exloom"*) echo review ;;
     *"proof"*|*"Proof"*) echo proof ;;
@@ -1747,7 +1748,8 @@ exloom_next_step() {   # exloom_next_step <branch>
 # One line: Tier · round · proof · rulings · next step.
 exloom_status_line() {   # exloom_status_line <branch>
   local branch="$1" cl=".claude/reviews/$1.md" tier proof="✗" rulings next
-  tier="$(exloom_derive_tier HEAD 2>/dev/null)" || tier="?"
+  tier="$(exloom_derive_tier HEAD 2>/dev/null)"
+  case $? in 1) tier="?" ;; 2) tier=0 ;; esac
   exloom_check_proof "$cl" HEAD "$(git rev-parse HEAD)" status "${tier//\?/1}" >/dev/null 2>&1 && proof="✓"
   rulings="$(exloom_rulings "$cl" HEAD | grep -c .)"
   next="$(exloom_next_step "$branch")"
