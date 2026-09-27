@@ -1845,9 +1845,9 @@ Run /review-complete — it names each tier-required section still missing."
   local placeholder_re drop scan
   placeholder_re='<(paste output / screenshot link|exact command|exact steps|expected-result|Claude-session-or-human-reviewer|who-attests|path to committed runbook\.md|test id or path[^>]*|paste|list[^>]*|file:line — problem[^>]*|category \+ file:line[^>]*|N files changed[^>]*|Critical / Important / Minor[^>]*|reviewed-sha|ai-assisted|model-id|directed-by|base-sha|attested-date|severity \+ category \+ file:line[^>]*|fixed / deferred with reason per finding|one sentence why|secrets / dep-audit / static[^>]*|which hostile question[^>]*|step name|exact command, or "detected"|PROVED / NOT_PROVED|what is missing[^>]*|rows rewritten[^>]*|the mechanism, e\.g\.[^>]*|one line per rule[^>]*|policy-fingerprint)>'
   drop=''
-  if   [[ "$eff_tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook)'
-  elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook)'
-  elif [[ "$eff_tier" -lt 3 ]]; then drop='^## (Security review|Runbook)'
+  if   [[ "$eff_tier" -lt 1 ]]; then drop='^## (Smoke test|Cross-layer|Adversarial|Security review|Runbook|What a revert will not undo)'
+  elif [[ "$eff_tier" -lt 2 ]]; then drop='^## (Cross-layer|Adversarial|Security review|Runbook|What a revert will not undo)'
+  elif [[ "$eff_tier" -lt 3 ]]; then drop='^## (Security review|Runbook|What a revert will not undo)'
   fi
   # HTML comments are guidance, not evidence. The template uses them to show what
   # a filled-in line looks like, which necessarily quotes the placeholder tokens,

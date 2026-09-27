@@ -2861,6 +2861,19 @@ ok "git apply of a patch that writes a receipt -> denied" "$(deny "$(bashj 'git 
 printf -- '--- a/src/a.go\n+++ b/src/a.go\n@@ -0,0 +1 @@\n+x\n' > ok.patch
 ok "git apply of an ordinary patch -> allowed" "$(deny "$(bashj 'git apply ok.patch')")" "0"
 
+section "a tier's placeholder scan skips the sections that tier does not need"
+
+subrepo tiersections
+TSC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$TSC")"
+for tier in 1 2; do
+  awk '/^## What a revert will not undo/{keep=1} /^## /&&!/^## What a revert will not undo/{keep=0} {print keep?$0:"@@"$0}' \
+      "$HOOKS_ABS/../templates/review-checklist.md" \
+    | sed -e '/^@@/s/<[^>]*>/filled/g' -e 's/^@@//' -e 's/- \[ \]/- [x]/g' \
+          -e "s/^\*\*Tier:\*\* .*/**Tier:** ${tier}/" > "$TSC"
+  ok "tier ${tier}: the Tier 3 section's placeholders do not block" \
+     "$(exloom_validate_checklist "$TSC" HEAD 1 test 2>&1 >/dev/null | grep -c 'runbook' | head -1)" "0"
+done
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
