@@ -486,8 +486,9 @@ while IFS= read -r fline; do
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac
   sev="${cur_sev:-${line_sev:-$item_sev}}"
   if [[ $not_addressed -eq 1 ]]; then
-    sev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | tail -1 \
-           | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    prev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | tail -1)"
+    sev="$(printf '%s' "$prev" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    prev_scope="$(printf '%s' "$prev" | sed -n 's/.*"scope":"\([A-Z-]*\)".*/\1/p')"
     [[ -n "$sev" ]] || sev="MED"
   fi
   [[ -n "$sev" ]] || continue
@@ -496,7 +497,7 @@ while IFS= read -r fline; do
   printf '%s' "$fline" | grep -qiE 'PRE-EXISTING' && scope="PRE-EXISTING"
   printf '%s' "$fline" | grep -qiE 'IN-SCOPE'     && scope="IN-SCOPE"
   if [[ $not_addressed -eq 1 ]]; then
-    scope="IN-SCOPE"
+    scope="${prev_scope:-IN-SCOPE}"
   elif [[ "$MODE" == "verify" && "$scope" == "IN-SCOPE" ]] && { [[ "$sev" == "LOW" ]] || ! _in_fix "$cite"; }; then
     scope="OUT-OF-SCOPE"
   fi
@@ -528,6 +529,19 @@ while IFS= read -r fline; do
     n_blocking=$((n_blocking + 1))
   fi
 done <<< "$SCAN"
+
+# The author writes the verify prompt, so an earlier blocking finding it left out
+# is carried forward as not addressed, and the pass cannot approve over it.
+if [[ "$MODE" == "verify" ]]; then
+  while IFS= read -r prev; do
+    cite="$(printf '%s' "$prev" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')"
+    [[ -n "$cite" ]] || continue
+    printf '%s\n' "$SCAN" | grep -qF -- "$cite" && continue
+    printf '%s\n' "$prev" | sed -e "s/\"head\":\"[0-9a-f]*\"/\"head\":\"${HEAD_SHA}\"/" \
+      -e "s/\"round\":[0-9]*/\"round\":${ROUND}/" >> "$FINDINGS_FILE" 2>/dev/null
+    n_found=$((n_found + 1)); n_blocking=$((n_blocking + 1)); VERDICT="REJECTED"; ROUND_NEEDED="YES"
+  done < <(grep -F "\"head\":\"${MFROM}\"" "$FINDINGS_FILE" 2>/dev/null | grep -F '"scope":"IN-SCOPE"' | grep -vF '"severity":"LOW"')
+fi
 
 if [[ "$VERDICT" == "REJECTED" && $n_found -gt 0 && $n_blocking -eq 0 && $unparsed_blocking -eq 0 ]]; then
   ROUND_NEEDED="NO"

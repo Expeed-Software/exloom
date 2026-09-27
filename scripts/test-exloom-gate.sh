@@ -2586,6 +2586,33 @@ ok "a verify range that does not start at the last reviewed head is not verify m
    "$(grep 'src/a.go:1' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
 
 
+subrepo verify2
+V2V=".claude/reviews/feat/plan.verdicts"; mkdir -p "$V2V"
+printf 'l1\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+V2A="$(git rev-parse HEAD)"
+vfeed 'VERDICT: REJECTED (2 items)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — first defect
+- src/a.go:3 — IN-SCOPE — second defect
+## Pre-existing (backlog, not this branch)
+- src/a.go:2 — PRE-EXISTING — old leak
+ROUND NEEDED AFTER FIX: YES'
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'l1 fixed\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+vfeed "VERDICT: APPROVED
+MODE: VERIFY ${V2A}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:1 — ADDRESSED
+- src/a.go:2 — NOT ADDRESSED: still leaks
+ROUND NEEDED AFTER FIX: NO"
+V2B="$(git rev-parse HEAD)"
+ok "a blocking finding left out of the verify prompt is carried forward" \
+   "$(grep "\"head\":\"${V2B}\"" "$V2V/l1-reviewer.findings.jsonl" | grep 'src/a.go:3' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "...and the verify pass cannot approve over it" \
+   "$(tail -1 "$V2V/l1-reviewer.json" | grep -c '"verdict":"REJECTED"')" "1"
+ok "a pre-existing finding not addressed stays pre-existing" \
+   "$(grep "\"head\":\"${V2B}\"" "$V2V/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep -c '"scope":"PRE-EXISTING"')" "1"
+
 section "the ledger: minor findings never enter the fix loop"
 
 subrepo ledger
