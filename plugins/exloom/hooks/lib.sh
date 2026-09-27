@@ -1369,7 +1369,7 @@ checklist, and re-run /review-complete."
 # is blank or starts with a comment marker. Being wrong here costs one extra
 # review; being wrong the other way ships unreviewed code.
 exloom_diff_is_behavioural() {
-  local from="$1" to="$2" files f ext body line stripped marker
+  local from="$1" to="$2" files f ext body line stripped marker rest
 
   # ---------- binary and metadata changes are ALWAYS behavioural ----------
   # For a binary change `git diff` emits only "Binary files a/x and b/x differ",
@@ -1453,9 +1453,15 @@ exloom_diff_is_behavioural() {
         '#')  case "$stripped" in '#!'*) return 0 ;; '#'*) continue ;; esac ;;
         '//') case "$stripped" in
                 '//go:'*) return 0 ;;            # build/generate directive: code
-                '//'*|'/*'*|'*/'*) continue ;;
-                '*') continue ;;                 # a BARE star is a javadoc paragraph break
-                '* '*) continue ;;               # javadoc continuation: star SPACE
+                '//'*) continue ;;
+                '/*'*|'*/'*|'*'|'* '*)           # `*` alone or `* ` is a javadoc line
+                  # Code after a closing `*/` is code.
+                  if [[ "$stripped" == *'*/'* ]]; then
+                    rest="${stripped##*'*/'}"
+                    [[ -z "${rest//[[:space:]]/}" ]] && continue
+                    return 0
+                  fi
+                  continue ;;
                 '*'*) return 0 ;;                # `*p = x` is a dereference, not a comment
               esac ;;
         '--') case "$stripped" in '--'*) continue ;; esac ;;

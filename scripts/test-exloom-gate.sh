@@ -2829,6 +2829,23 @@ printf 'y\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/
 ok "with no origin, a local base is used" "$(exloom_derive_tier HEAD 2>/dev/null)" "1"
 ok "...with a warning" "$(exloom_derive_tier HEAD 2>&1 >/dev/null | grep -c 'no origin/' | head -1)" "1"
 
+section "a comment line is a comment only when nothing follows it"
+
+subrepo comments
+printf 'int a = 1;\n' > src/c.java; git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+cbeh() {   # cbeh <added line> -> behavioural|inert
+  local b; b="$(git rev-parse HEAD)"
+  printf 'int a = 1;\n%s\n' "$1" > src/c.java; git add -A >/dev/null 2>&1; git commit -qm x >/dev/null 2>&1
+  if exloom_diff_is_behavioural "$b" HEAD; then echo behavioural; else echo inert; fi
+  git reset -q --hard "$b"
+}
+ok "/**/ code(); -> behavioural" "$(cbeh '/**/ code();')" "behavioural"
+ok "*/ code(); -> behavioural" "$(cbeh '*/ code();')" "behavioural"
+ok "/* note */ -> inert" "$(cbeh '/* note */')" "inert"
+ok "/** opening a javadoc -> inert" "$(cbeh '/**')" "inert"
+ok "*/ closing it -> inert" "$(cbeh ' */')" "inert"
+ok "// line comment -> inert" "$(cbeh '// note')" "inert"
+
 section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
