@@ -581,7 +581,7 @@ exloom_security_surface() {   # exloom_security_surface <base> <tip>
   # Dependency manifests and lockfiles: a bumped or added dependency is the
   # single most common way an unreviewed vulnerability enters a codebase, and a
   # one-line manifest change otherwise derives to Tier 1.
-  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*\.csproj|packages\.lock\.json)$'; then
+  if printf '%s\n' "$files" | grep -Eq '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pom\.xml|build\.gradle(\.kts)?|gradle/libs\.versions\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|.*.csproj|packages.lock.json|pubspec.(yaml|lock)|Directory.Packages.props)$'; then
     return 0
   fi
 

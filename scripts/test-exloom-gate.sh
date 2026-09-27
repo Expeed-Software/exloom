@@ -82,6 +82,11 @@ git checkout -q -b feat/x
 . "$LIB_ABS"
 
 section() { echo "== $1 =="; }
+PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+istest() {   # istest <path> -> test|source, using the script's own function
+  bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
+    is_test "$1" && echo test || echo source' _ "$1"
+}
 sp() {   # sp <path> -> derived tier for a branch changing only that path
   git checkout -q -B "t/$RANDOM" main
   mkdir -p "$(dirname "$1")"; printf 'x\n' > "$1"; git add -A >/dev/null 2>&1; git commit -qm p >/dev/null 2>&1
@@ -2082,11 +2087,6 @@ section "test-vs-source classification: a production package named spec/"
 # src/main, the proof would revert part of a production package and keep the
 # rest: the tree would not compile, and the run would fail for a reason that has
 # nothing to do with the tests.
-PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
-istest() {   # istest <path> -> test|source, using the script's own function
-  bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
-    is_test "$1" && echo test || echo source' _ "$1"
-}
 ok "src/main spec package -> source" \
    "$(istest 'svc/src/main/java/com/example/orchestration/spec/TopicSpec.java')" "source"
 ok "src/main anything -> source" \
@@ -2963,6 +2963,17 @@ ok "several .sln files -> a pinned command is required" \
 ok "a .sln plus a loose .csproj -> a pinned command is required" \
    "$(detect slnproj App.sln Tool.csproj | grep -c 'more than one .NET')" "1"
 cd "$WORK" || exit 1
+
+section "Flutter integration tests and package files"
+
+ok "integration_test/ -> test" "$(istest 'integration_test/app_test.dart')" "test"
+ok "a nested integration_test/ -> test" "$(istest 'packages/app/integration_test/login.dart')" "test"
+subrepo flutterdeps
+for p in pubspec.yaml pubspec.lock Directory.Packages.props; do
+  git checkout -q -B "d/$RANDOM" main; printf 'x\n' > "$p"; git add -A >/dev/null 2>&1; git commit -qm d >/dev/null 2>&1
+  ok "$p is a dependency surface" \
+     "$(exloom_security_surface "$(git rev-parse main)" HEAD && echo yes || echo no)" "yes"
+done
 
 section "the bypass leaves a trace"
 

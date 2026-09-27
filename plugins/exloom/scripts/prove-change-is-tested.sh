@@ -153,7 +153,7 @@ is_test() {
     */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
   esac
   case "$1" in
-    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*) return 0 ;;
+    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*|integration_test/*|*/integration_test/*) return 0 ;;
     *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;
     *.test.ts|*.test.js|*.test.tsx|*.spec.ts|*.spec.js|*.spec.tsx) return 0 ;;
     test-*.sh|*/test-*.sh|*.bats|*_test.dart) return 0 ;;
