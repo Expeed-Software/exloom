@@ -1763,6 +1763,19 @@ ok "...and the run says so out loud, rather than dropping it silently" \
 ok "the receipt records a PROVED result alongside the criteria" \
    "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$PJ" | tail -1)" "PROVED"
 
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+SPECF="$REG/criteria/F-012-orders.md"
+printf 'R-3 · event\nAC-1 · unit\nAC-2 · unit\nAC-3 · unit\nR-9 · event\nAC-1 · unit\n' > "$SPECF"
+ok "the spec lists its criteria in ref form" \
+   "$(exloom_spec_criteria "$SPECF" | tr '\n' ' ')" "F-012/R-3/AC-1 F-012/R-3/AC-2 F-012/R-3/AC-3 F-012/R-9/AC-1 "
+MX="$(exloom_criteria_matrix .claude/reviews/feat/plan.md HEAD "$SPECF")"
+ok "matrix: a proved criterion names its test, failing without and passing with" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-3/AC-1 | T.F-012/R-3/AC-1 — notices the change | yes | yes |$')" "1"
+ok "matrix: a criterion whose test passes without the change says so" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-9/AC-1 | .* | no | yes |$')" "1"
+ok "matrix: a criterion with no test is open" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-3/AC-3 | — | open |')" "1"
+
 section "an additive change is provable by mutation, not by absence"
 
 # The three-run proof is structurally unsatisfiable for a purely additive change:

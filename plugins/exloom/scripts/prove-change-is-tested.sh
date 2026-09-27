@@ -243,8 +243,8 @@ _criteria_from_reports() {   # _criteria_from_reports <worktree>
   [[ -n "$reports" ]] || return 0
 
   if command -v python3 >/dev/null 2>&1; then
-    ( cd "$wt" && printf '%s\n' "$reports" | python3 -c '
-import sys, re, xml.etree.ElementTree as ET
+    ( cd "$wt" && printf '%s\n' "$reports" | PAIRS="${2:-}" python3 -c '
+import os, sys, re, xml.etree.ElementTree as ET
 REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
 # XXE and billion-laughs both need a DTD, and a JUnit report never has one, so
 # refusing any file that declares one closes both without needing defusedxml —
@@ -253,6 +253,7 @@ REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
 # whatever is on disk, and that is not the same trust boundary.
 DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.I)
 found = set()
+tests = {}
 for line in sys.stdin:
     path = line.strip()
     if not path:
@@ -272,8 +273,14 @@ for line in sys.stdin:
             continue
         for attr in ("name", "classname"):
             for m in REF.finditer(tc.get(attr) or ""):
-                found.add("F-%s/R-%s/AC-%s" % (m.group(1), m.group(2), m.group(3)))
-print(" ".join(sorted(found)))
+                ref = "F-%s/R-%s/AC-%s" % (m.group(1), m.group(2), m.group(3))
+                found.add(ref)
+                tests.setdefault(ref, "%s.%s" % (tc.get("classname") or "", tc.get("name") or ""))
+if os.environ.get("PAIRS"):
+    for ref in sorted(tests):
+        print("%s\t%s" % (ref, re.sub(r"[\"\\;=\t\n]", "", tests[ref])))
+else:
+    print(" ".join(sorted(found)))
 ' 2>/dev/null )
   else
     # No python3: name-only scan. Cannot tell a passing case from a failing one,
@@ -302,11 +309,12 @@ _receipt() {
   mkdir -p "$vdir" 2>/dev/null || return 0
   local cmdhash="none"
   [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
-  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","at":"%s"}\n' \
+  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","matrix":"%s","at":"%s"}\n' \
     "$result" "$method" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
     "$cmdhash" \
     "${CRITERIA_RAN:-}" \
+    "${MATRIX:-}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
@@ -519,6 +527,13 @@ if [[ $rc -ne 0 ]]; then
     done
     CRITERIA_RAN="$(printf '%s' "${CRITERIA_PROVED:-}" | tr -s ' ' | sed 's/^ //;s/ $//')"
     CRITERIA_UNPROVED="$(printf '%s' "$CRITERIA_UNPROVED" | tr -s ' ' | sed 's/^ //;s/ $//')"
+    # criterion=test=fails-without-the-change, for the evidence report's matrix.
+    MATRIX=""
+    while IFS=$'\t' read -r _c _t; do
+      [[ -n "$_c" ]] || continue
+      case " $CRITERIA_BASE_OK " in *" $_c "*) _f=no ;; *) _f=yes ;; esac
+      MATRIX="${MATRIX:+${MATRIX};}${_c}=${_t}=${_f}"
+    done < <(_criteria_from_reports "$WT" pairs)
   fi
   _receipt PROVED
   echo

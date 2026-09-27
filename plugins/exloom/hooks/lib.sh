@@ -1631,6 +1631,31 @@ then apply it."
   return 2
 }
 
+# A spec's criteria in ref form, F-<nnn>/R-<n>/AC-<n>, F taken from its file name.
+exloom_spec_criteria() {   # exloom_spec_criteria <spec.md>
+  local fnum
+  fnum="$(basename "$1" | sed -n 's/^F-\{0,1\}\([0-9][0-9]*\).*/\1/p')"
+  [[ -n "$fnum" ]] || return 1
+  tr -d '\r' < "$1" | awk -v f="$fnum" '
+    /^R-[0-9]+/ { r=$0; sub(/^R-/, "", r); sub(/[^0-9].*/, "", r) }
+    /^[[:space:]]*AC-[0-9]+/ && r!="" { a=$0; sub(/^[[:space:]]*AC-/, "", a); sub(/[^0-9].*/, "", a); print "F-" f "/R-" r "/AC-" a }'
+}
+
+# The criterion -> test -> fails without -> passes with table, from the latest
+# PROVED receipt. With a spec, a criterion no test proved is listed as open.
+exloom_criteria_matrix() {   # exloom_criteria_matrix <checklist> <tip> [spec.md]
+  local m c
+  m="$(MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/proof.json" 2>/dev/null \
+    | grep -F '"result":"PROVED"' | tail -1 | sed -n 's/.*"matrix":"\([^"]*\)".*/\1/p')"
+  printf '| Criterion | Test | Fails without the change | Passes with it |\n|---|---|---|---|\n'
+  printf '%s' "$m" | tr ';' '\n' | awk -F'=' 'NF==3 { printf "| %s | %s | %s | yes |\n", $1, $2, $3 }'
+  [[ -n "${3:-}" ]] || return 0
+  while IFS= read -r c; do
+    [[ -n "$c" ]] || continue
+    case ";${m}" in *";${c}="*) ;; *) printf '| %s | — | open | — |\n' "$c" ;; esac
+  done < <(exloom_spec_criteria "$3")
+}
+
 # ---------- proof-of-testedness receipt ----------
 # exloom_check_proof <checklist> <tip> <reviewed-sha> <action>
 # Returns 0 when a PROVED receipt covers the reviewed commit; prints a BLOCK
