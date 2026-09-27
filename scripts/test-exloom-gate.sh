@@ -1066,7 +1066,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
 fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
 
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
   blk="$(agent_block "$a")"
   ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
 
@@ -1085,7 +1085,7 @@ for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"
 done
 
 # The verdict line each agent literally documents must not be self-defeating.
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
   vline="$(grep -m1 '^VERDICT: APPROVED' "$AGENTS_DIR/$a.md" || true)"
   ok "$a: documented verdict line is unambiguous (no '|')" \
      "$(printf '%s' "$vline" | grep -c '|')" "0"
@@ -2629,12 +2629,22 @@ subrepo budget
 BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
 printf '# checklist\n\n## Rulings\n' > "$BC"
 printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
-disp() {   # disp <tool_use_id> <prompt> [agent] -> exit code of the guard
+disp() {   # disp <tool_use_id> <prompt> [agent] [nolaunch] -> exit code of the guard
+  local rc
   python3 -c "
 import json,sys
 print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
  'tool_input':{'subagent_type':'exloom:'+sys.argv[3],'prompt':sys.argv[2]}}))" "$1" "$2" "${3:-l1-reviewer}" \
-  | bash "$HOOKS_ABS/guard-reviewer-dispatch.sh" >/dev/null 2>&1; echo $?
+  | bash "$HOOKS_ABS/guard-reviewer-dispatch.sh" >/dev/null 2>&1; rc=$?
+  if [[ $rc -eq 0 && -z "${4:-}" ]]; then
+    python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:'+sys.argv[3],'prompt':sys.argv[2]},
+ 'tool_response':{'isAsync':True,'status':'async_launched','agentId':'ag-'+sys.argv[1]}}))" "$1" "$2" "${3:-l1-reviewer}" \
+      | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  fi
+  echo $rc
 }
 ok "a task's first review is allowed" "$(disp t1 'Review task 3 of p.md. Diff: git diff a..b')" "0"
 ok "...a second full review of the same task is refused" "$(disp t2 'Review task 3 of p.md. Diff: git diff a..b')" "2"
@@ -2652,9 +2662,14 @@ ok "...a second fix wave is refused" "$(disp f4 'Verify fixes on branch feat/pla
 ok "each dispatch records the commit and a prompt hash" \
    "$(grep '"tool_use_id":"t1"' "$BV/dispatches.jsonl" | grep -cE '"dispatch_head":"[0-9a-f]{40}","prompt_hash":"[0-9a-f]{40}"')" "1"
 
+ok "a dispatch that never launched does not spend the budget" \
+   "$(disp n1 'Review branch feat/plan at x.' security-auditor nolaunch; disp n2 'Review branch feat/plan at x.' security-auditor)" "0
+0"
 seq 1 150 > src/big.go; git add -A >/dev/null 2>&1; git commit -qm grow >/dev/null 2>&1
-ok "a branch that grew past the limit since review started is refused" \
-   "$(disp g1 'Review task 9 of p.md. Diff: git diff a..b')" "2"
+ok "planned work does not count as growth: a new task is still reviewed" \
+   "$(disp g0 'Review task 9 of p.md. Diff: git diff a..b')" "0"
+ok "growth since the final review started refuses the next fix round" \
+   "$(disp g1 'Verify fixes on branch feat/plan. Fix range: a..b' security-auditor)" "2"
 
 subrepo binding
 BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
@@ -2676,7 +2691,7 @@ print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':s
  'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[2]}))" "$1" "$2" \
   | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
 }
-disp b1 'Review branch feat/plan at x. Diff: git diff m...x' >/dev/null
+disp b1 'Review branch feat/plan at x. Diff: git diff m...x' l1-reviewer nolaunch >/dev/null
 post b1 ag1 '{"isAsync":true,"status":"async_launched"}'
 printf 'b\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm during >/dev/null 2>&1
 stop ag1 'VERDICT: APPROVED
@@ -2691,14 +2706,34 @@ ok "committing receipts does not raise the round count" "$(exloom_round_count "$
 
 H2="$(git rev-parse HEAD)"
 printf -- '- Extra round — "check the fix"\n' >> "$BC"
-disp b2 'Review branch feat/plan at y. Diff: git diff m...y' >/dev/null
+disp b2 'Review branch feat/plan at y. Diff: git diff m...y' l1-reviewer nolaunch >/dev/null
 stop ag2 'VERDICT: APPROVED
 ROUND NEEDED AFTER FIX: NO'
 ok "a foreground result is held until PostToolUse maps it" \
-   "$(grep -c "\"head\":\"${H2}\"" "$BV/l1-reviewer.json")" "0"
+   "$(grep -c "\"head\":\"${H2}\"" "$BV/l1-reviewer.json"; [[ -f "$BV/held/ag2.json" ]] && echo held)" "0
+held"
 post b2 ag2 '{"content":[{"type":"text","text":"VERDICT: APPROVED"}]}'
 ok "...then recorded against the dispatch commit" \
    "$(grep -c "\"head\":\"${H2}\",\"verdict\":\"APPROVED\"" "$BV/l1-reviewer.json")" "1"
+
+T1="$(git rev-parse HEAD)"
+disp k1 'Review task 4 of p.md. Diff: git diff a..b' >/dev/null
+stop ag-k1 'VERDICT: REJECTED (1 items)
+MODE: TASK 4
+SPEC: MATCHES
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — bad
+ROUND NEEDED AFTER FIX: YES'
+printf 'fixed\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm taskfix >/dev/null 2>&1
+disp k2 'Verify fixes for task 4 on branch feat/plan. Fix range: a..b' >/dev/null
+stop ag-k2 "VERDICT: APPROVED
+MODE: VERIFY ${T1}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:1 — ADDRESSED
+ROUND NEEDED AFTER FIX: NO"
+ok "a task's verify pass goes to the task receipt, with its range" \
+   "$(tail -1 "$BV/l1-reviewer.tasks.json" | grep -c "\"mode\":\"verify\",\"range\":\"${T1}\.\..*\"task\":\"4\"")" "1"
+ok "...and is not a branch round" "$(grep -c '"verify"' "$BV/l1-reviewer.json")" "0"
 
 section "the bypass leaves a trace"
 

@@ -172,21 +172,16 @@ HEAD_SHA="$(git rev-parse HEAD 2>/dev/null)" || exit 0
 VDIR=".claude/reviews/${BRANCH}.verdicts"
 mkdir -p "$VDIR" 2>/dev/null || exit 0
 
-# ---------- bind the receipt to the commit the reviewer was shown ----------
-# guard-reviewer-dispatch.sh recorded HEAD at dispatch, keyed by tool_use_id.
-# PostToolUse maps tool_use_id to the agent id. SubagentStop carries only the
-# agent id and, for a foreground dispatch, fires first, so its result is held
-# until the mapping exists.
+# The receipt names HEAD at dispatch. A foreground SubagentStop fires before the
+# PostToolUse that maps its agent id to the dispatch, so it is held until then.
 DLOG="${VDIR}/dispatches.jsonl"
 HELD_DIR="${VDIR}/held"
-MODEL=""; TUID=""
-_unmapped_dispatch() {
+MODEL=""; TUID=""; DTASK=""
+_unmapped_dispatch() {   # is this agent's latest dispatch still unmapped?
   local t
-  while IFS= read -r t; do
-    [[ -n "$t" ]] || continue
-    grep -qF "\"map\":true,\"tool_use_id\":\"${t}\"" "$DLOG" || return 0
-  done < <(grep -F "\"agent\":\"${AGENT}\"" "$DLOG" | sed -n 's/.*"tool_use_id":"\([^"]*\)","dispatch_head".*/\1/p')
-  return 1
+  t="$(grep -F "\"agent\":\"${AGENT}\"" "$DLOG" | grep -F '"dispatch_head"' | tail -1 \
+    | sed -n 's/.*"tool_use_id":"\([^"]*\)","dispatch_head".*/\1/p')"
+  [[ -n "$t" ]] && ! grep -qF "\"map\":true,\"tool_use_id\":\"${t}\"" "$DLOG"
 }
 if [[ -f "$DLOG" ]]; then
   if [[ $IS_COMPLETION -eq 1 ]]; then
@@ -214,6 +209,8 @@ if [[ -f "$DLOG" ]]; then
     DH="$(grep -F "\"tool_use_id\":\"${TUID}\",\"dispatch_head\"" "$DLOG" | tail -1 \
       | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p')"
     [[ -n "$DH" ]] && HEAD_SHA="$DH"
+    DTASK="$(grep -F "\"tool_use_id\":\"${TUID}\",\"dispatch_head\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"key":"task:\([A-Za-z0-9.-]*\)".*/\1/p')"
     [[ -n "$MODEL" ]] || MODEL="$(grep -F "\"map\":true,\"tool_use_id\":\"${TUID}\"" "$DLOG" | tail -1 \
       | sed -n 's/.*"model":"\([^"]*\)".*/\1/p')"
   fi
@@ -346,14 +343,24 @@ case "$RLINE" in
   NO)  ROUND_NEEDED="NO" ;;
 esac
 
-# ---------- verify mode: a re-review of the fix range only ----------
-# `MODE: VERIFY <from>..<to>` in the report. New findings count only on lines the
-# range adds or changes, and only at Critical/Important; the rest are recorded
-# OUT-OF-SCOPE, which the gate never asks a ruling for.
+# A per-task review (MODE: TASK, or a task dispatch) is recorded in
+# <agent>.tasks.json, so it is never a branch round.
+TASK_ID="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+  | sed -n 's/^MODE:[[:space:]]*TASK[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p' | tail -1)"
+[[ -n "$TASK_ID" ]] || TASK_ID="$DTASK"
+if [[ -z "$TASK_ID" && $REPORT_SEEN -eq 0 ]]; then
+  TASK_ID="$(_field tool_input.prompt | head -1 | sed -nE 's/^(Review|Verify fixes for) task[[:space:]]*([A-Za-z0-9.-]*).*/\2/p')"
+fi
+RECEIPT="${VDIR}/${AGENT}.json"
+[[ -n "$TASK_ID" ]] && RECEIPT="${VDIR}/${AGENT}.tasks.json"
+
+# MODE: VERIFY <from>..<to> from the reviewer's last reviewed head: new findings
+# count only at blocking severity on lines the range adds or changes.
 MODE="full"; RANGE=""; FIX_LINES=""
 MFROM="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
   | sed -n 's/^MODE:[[:space:]]*VERIFY[[:space:]]*\([0-9a-fA-F]\{7,40\}\)\.\..*/\1/p' | tail -1)"
-LAST_HEAD="$(grep -F '"verdict":' "${VDIR}/${AGENT}.json" 2>/dev/null | tail -1 | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+LAST_HEAD="$(grep -F '"verdict":' "$RECEIPT" 2>/dev/null | { if [[ -n "$TASK_ID" ]]; then grep -F "\"task\":\"${TASK_ID}\""; else cat; fi; } \
+  | tail -1 | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
 if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)" \
    && [[ "$MFROM" == "$LAST_HEAD" && "$MFROM" != "$HEAD_SHA" ]]; then
   MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
@@ -361,20 +368,9 @@ if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
            /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i)}')"
 fi
-# ---------- task mode: a per-task review against the task's text ----------
-# `MODE: TASK <n>` in the report, or a dispatch prompt starting `Review task <n>`
-# for a launch with no report yet. Its receipt goes to <agent>.tasks.json, so a
-# per-task pass is never counted as a branch round.
-TASK_ID="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
-  | sed -n 's/^MODE:[[:space:]]*TASK[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p' | tail -1)"
-if [[ -z "$TASK_ID" && $REPORT_SEEN -eq 0 ]]; then
-  TASK_ID="$(_field tool_input.prompt | head -1 | sed -n 's/^Review task[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p')"
-fi
 SPEC=""
-RECEIPT="${VDIR}/${AGENT}.json"
-if [[ -n "$TASK_ID" ]]; then
-  MODE="task"; RANGE=""; FIX_LINES=""
-  RECEIPT="${VDIR}/${AGENT}.tasks.json"
+if [[ -n "$TASK_ID" && "$MODE" != "verify" ]]; then
+  MODE="task"
   SPEC="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
     | sed -n 's/^SPEC:[[:space:]]*\([A-Za-z]*\).*/\1/p' | tr '[:lower:]' '[:upper:]' \
     | grep -E '^(MATCHES|MISSING|EXTRA|MISUNDERSTOOD)$' | tail -1)"
@@ -625,7 +621,8 @@ if _recorded_for_head "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND_NEE
 fi
 
 RANGE_FIELD=""; [[ -n "$RANGE" ]] && RANGE_FIELD=",\"range\":\"${RANGE}\""
-[[ -n "$TASK_ID" ]] && RANGE_FIELD=",\"task\":\"${TASK_ID}\",\"spec\":\"${SPEC}\""
+[[ -n "$TASK_ID" ]] && RANGE_FIELD="${RANGE_FIELD},\"task\":\"${TASK_ID}\""
+[[ -n "$SPEC" ]] && RANGE_FIELD="${RANGE_FIELD},\"spec\":\"${SPEC}\""
 [[ -n "$MODEL" ]] && RANGE_FIELD="${RANGE_FIELD},\"model\":\"${MODEL}\""
 printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s"%s}\n' \
   "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" "$MODE" "$RANGE_FIELD" \

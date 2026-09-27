@@ -54,7 +54,15 @@ VDIR="$(exloom_verdict_dir "$CHECKLIST")"
 DLOG="${VDIR}/dispatches.jsonl"
 mkdir -p "$VDIR" 2>/dev/null || exit 0
 
-prior() { grep -F "\"agent\":\"${AGENT}\",\"key\":\"${KEY}\",\"kind\":\"$1\"" "$DLOG" 2>/dev/null | grep -c . ; }
+# A dispatch counts once it launched (PostToolUse mapped it); a denied or failed one does not.
+prior() {
+  local t n=0
+  while IFS= read -r t; do
+    if [[ -z "$t" ]] || grep -qF "\"map\":true,\"tool_use_id\":\"${t}\"" "$DLOG"; then n=$((n + 1)); fi
+  done < <(grep -F "\"agent\":\"${AGENT}\",\"key\":\"${KEY}\",\"kind\":\"$1\"" "$DLOG" 2>/dev/null \
+             | sed -n 's/.*"tool_use_id":"\([^"]*\)".*/\1/p')
+  echo "$n"
+}
 REASON=""
 MAX="$(exloom_max_rounds)"
 if [[ "$KIND" == "review" && "$(prior review)" -ge 1 ]]; then
@@ -69,8 +77,8 @@ elif [[ "$KIND" == "verify" && "$KEY" != "final" && "$(prior verify)" -ge "$MAX"
   REASON="task ${TASK} has used its ${MAX} fix rounds with ${AGENT}."
 fi
 
-START="$(sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p' "$DLOG" 2>/dev/null | head -1)"
-if [[ -z "$REASON" && -n "$START" ]] && git cat-file -e "${START}^{commit}" 2>/dev/null; then
+START="$(grep -F '"key":"final"' "$DLOG" 2>/dev/null | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p' | head -1)"
+if [[ -z "$REASON" && "$KEY" == "final" && -n "$START" ]] && git cat-file -e "${START}^{commit}" 2>/dev/null; then
   lines() { git diff --numstat "$1" "$2" -- . ':(exclude).claude' 2>/dev/null | awk '{a+=$1+$2} END{print a+0}'; }
   FORK="$(exloom_fork_point "$START" 2>/dev/null || true)"
   SIZE=0; [[ -n "$FORK" ]] && SIZE="$(lines "$FORK" "$START")"
