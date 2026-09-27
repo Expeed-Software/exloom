@@ -384,7 +384,7 @@ exloom_derive_tier() {
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     case "$f" in
-      *.md|*.txt|docs/*|*/docs/*|README*|*/README*) ;;
+      *.md|docs/*|README*|*/README*) ;;
       *) docs_only=0; break ;;
     esac
   done <<< "$files"

@@ -31,7 +31,7 @@ Also check if `.claude/exloom.local.md` exists in the repo. If yes, read its fro
 
 Use these rules mechanically first, then ask the user to confirm:
 
-- If the ONLY changed files match `*.md`, `*.txt`, or live under doc-only directories (`docs/`, `README*`), AND no file contains non-comment code changes → Tier 0.
+- If the ONLY changed files are `*.md`, `README*`, or live under the top-level `docs/` directory → Tier 0. A `.txt` file (such as `requirements.txt`) and a nested `docs/` folder inside source do not count.
 - If any file under a `migrations/`, `liquibase/`, `db/changelog/` path → Tier 3.
 - Else if any file touches auth, tenancy, secrets, crypto (search paths for `auth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`) → Tier 3.
 - Else if any file under a `deployment/`, `k8s/`, `docker/`, `helm/` path AND flag/prod-related → Tier 3.

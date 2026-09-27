@@ -82,6 +82,11 @@ git checkout -q -b feat/x
 . "$LIB_ABS"
 
 section() { echo "== $1 =="; }
+sp() {   # sp <path> -> derived tier for a branch changing only that path
+  git checkout -q -B "t/$RANDOM" main
+  mkdir -p "$(dirname "$1")"; printf 'x\n' > "$1"; git add -A >/dev/null 2>&1; git commit -qm p >/dev/null 2>&1
+  exloom_derive_tier HEAD 2>/dev/null
+}
 
 deny() { printf '%s' "$1" | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?; }
 
@@ -2793,17 +2798,22 @@ git checkout -q feat/plan
 section "security paths derive Tier 3 whatever their case"
 
 subrepo secpaths
-sp() {   # sp <path> -> derived tier for a branch changing only that path
-  git checkout -q -B "t/$RANDOM" main
-  mkdir -p "$(dirname "$1")"; printf 'x\n' > "$1"; git add -A >/dev/null 2>&1; git commit -qm p >/dev/null 2>&1
-  exloom_derive_tier HEAD 2>/dev/null
-}
 for p in src/OAuth2Config.java src/security/Filter.java src/PasswordEncoder.java src/EncryptionService.java \
          app/SECRETS.py src/rbac/Roles.go src/HTTPSecurity.java src/IAMPolicy.go src/sso/x.go src/acl.go; do
   ok "$p -> Tier 3" "$(sp "$p")" "3"
 done
 for p in src/authoring/x.go src/Author.java src/diameter.go src/oracle.go src/decipherable.go; do
   ok "$p -> not Tier 3" "$(sp "$p")" "1"
+done
+
+section "docs-only means Markdown, READMEs and top-level docs/"
+
+subrepo docsonly
+for p in requirements.txt src/docs/Handler.java; do
+  ok "$p -> not docs-only" "$(sp "$p")" "1"
+done
+for p in docs/guide.txt README notes/x.md; do
+  ok "$p -> docs-only" "$(sp "$p")" "0"
 done
 
 section "the bypass leaves a trace"
