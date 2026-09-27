@@ -197,6 +197,8 @@ Templates live at `../../assets/claude-md-templates/`. Each is a Markdown file w
 | `fastapi.md` | Python 3.12+ / FastAPI | `pyproject.toml` or `requirements.txt` with `fastapi` |
 | `react.md` | React 18+ / TypeScript | `package.json` with `react` — CRA, Vite, or Next.js frontend |
 | `angular.md` | Angular 17+ | `angular.json` present, `package.json` with `@angular/core` |
+| `dotnet.md` | C# 12+ / ASP.NET Core 8.x | a `*.sln` or `*.csproj` at the root |
+| `flutter.md` | Dart 3.x / Flutter 3.x | `pubspec.yaml` with a `flutter` SDK dependency |
 
 If no template matches, use `default.md` and fill in detected conventions manually. Do not create new template files — extend the default.
 

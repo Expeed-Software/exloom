@@ -109,7 +109,7 @@ for plugin in $PLUGINS; do
     exloom)
       TEMPLATES_DIR="$PLUGIN_ROOT/assets/claude-md-templates"
       EXPECTED_TEMPLATES=(
-        default.md spring.md micronaut.md nodejs.md strapi.md fastapi.md react.md angular.md
+        default.md spring.md micronaut.md nodejs.md strapi.md fastapi.md react.md angular.md dotnet.md flutter.md
       )
       for tpl in "${EXPECTED_TEMPLATES[@]}"; do
         if [ ! -f "$TEMPLATES_DIR/$tpl" ]; then
