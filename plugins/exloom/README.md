@@ -147,7 +147,7 @@ reviewers:
 
 Repository rules are **additive only** — they raise a tier and add a reviewer, and nothing in the file can lower either. Built-in rules always run; the effective tier is the higher of the two. An invalid policy **blocks** rather than falling back to the defaults, because a rule that silently failed to load is how a security check everyone believes in turns out never to have run.
 
-`/exloom-config` prints the effective configuration and why the current diff derives the tier it does. The reasoning is also written into the checklist, so a PR reader sees it without running anything.
+`/exloom-setup` prints the effective configuration and why the current diff derives the tier it does. The reasoning is also written into the checklist, so a PR reader sees it without running anything.
 
 ## Try it in two minutes
 
@@ -176,7 +176,7 @@ A review pass is not a fix. Re-reviewing a commit nobody changed returns the pre
 
 - **9 skills** — `brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, and `using-exloom` (the index).
 - **3 reviewer agents** — `l1-reviewer` at low effort per commit; `adversarial-reviewer` and `security-auditor` at medium, once, before push. The adversarial dispatch carries the cross-layer contract check.
-- **6 commands** — `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`, `/exloom-config`.
+- **7 commands** — `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`.
 - **2 scripts** — `prove-change-is-tested.sh` and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
 - **4 hooks** — record a receipt on real dispatch, deny writing one by hand, block the push without evidence, announce the flow at session start.
 - **2 templates** — the review checklist and the spec format.

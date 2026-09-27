@@ -131,7 +131,7 @@ before any path rule, and a glob matching a `.md` file does not make it code.
 
 ## Seeing what it does
 
-`/exloom-config` prints the effective configuration: built-in rules, repository
+`/exloom-setup` prints the effective configuration: built-in rules, repository
 rules, the derived tier for the current diff, and which rule produced it.
 
 `/review-init` writes the same reasoning into the checklist under **Tier derived

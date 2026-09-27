@@ -231,7 +231,8 @@ Write the reason into the checklist's "Escape hatches used" section as well, so 
 - `/review-init` — create the checklist for the current branch.
 - `/smoke-test` — fill the smoke-test section with real commands and observed output.
 - `/review-complete` — verify all required sections populated for the tier, run any missing reviewer agents, mark ready to ship.
-- `/exloom-config` — print the effective configuration, and why the current diff derives the tier it does.
+- `/exloom-setup` — set the repo up once, and print the effective configuration and why the current diff derives the tier it does.
+- `/exloom` — run the next step for this branch; `/exloom status` for one line.
 
 **Invoke these yourself, with the Skill tool.** They are not instructions for the user to type. Reading them and performing the steps by hand produces the same checklist file but none of the receipts, so the gate will block the push — the commands exist to cause events, not to describe them.
 
