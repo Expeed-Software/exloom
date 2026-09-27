@@ -1,6 +1,6 @@
 {
   "name": "exloom",
-  "description": "Evidence for team code review on Claude Code — a spec, a plan, a mechanical proof that your tests notice your change, and reviewer receipts, gated once at push.",
+  "description": "Evidence for team code review on Claude Code \u2014 a spec, a plan, a mechanical proof that your tests notice your change, and reviewer receipts, gated once at push.",
   "version": "5.7.0",
   "author": {
     "name": "Expeed Software",
@@ -13,8 +13,6 @@
     "development",
     "planning",
     "code-review",
-    "debugging",
-    "test-driven-development",
     "brownfield",
     "team",
     "review",

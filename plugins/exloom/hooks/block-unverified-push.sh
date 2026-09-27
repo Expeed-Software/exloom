@@ -10,8 +10,9 @@
 #
 # Exit codes:
 #   0  — allow (gate off, not a publish action, checklist complete, protected/skip
-#              branch, or any infrastructure parse failure — never block on infra)
-#   2  — block with stderr message
+#              branch, or no repo or payload to read)
+#   2  — block with stderr message; also when .exloom.yml cannot be read or no
+#              base branch can be found, since both would weaken the tier
 #
 # Bypass (when enabled): EXLOOM_REVIEW_SKIP=1
 
