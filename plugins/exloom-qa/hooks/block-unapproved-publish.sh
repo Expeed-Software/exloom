@@ -22,11 +22,6 @@
 
 set -u
 
-if [[ "${EXLOOM_QA_SKIP:-0}" == "1" ]]; then
-  echo "exloom-qa: publish gate bypassed via EXLOOM_QA_SKIP=1 (audit)" >&2
-  exit 0
-fi
-
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
   IFS= read -r -d '' HOOK_INPUT || true
@@ -37,6 +32,16 @@ SCRIPT_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$SCRIPT_DIR" == "${BASH_SOURCE[0]}" ]
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/prefilter.sh"
 exloomqa_may_write_board "$HOOK_INPUT" || exit 0
+
+# The receipt records who and when, never the command: it may carry a token.
+if [[ "${EXLOOM_QA_SKIP:-0}" == "1" ]]; then
+  echo "exloom-qa: publish gate bypassed via EXLOOM_QA_SKIP=1 (audit)" >&2
+  qdir="${CLAUDE_PROJECT_DIR:-$PWD}/.claude/qa"
+  mkdir -p "$qdir" 2>/dev/null && printf '{"bypass":"EXLOOM_QA_SKIP","who":"%s","at":"%s"}\n' \
+    "$(git config user.email 2>/dev/null | tr -cd 'A-Za-z0-9@._+-' || true)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" >> "$qdir/bypass.jsonl" 2>/dev/null
+  exit 0
+fi
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib.sh"
 

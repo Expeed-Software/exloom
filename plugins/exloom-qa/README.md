@@ -112,9 +112,11 @@ A `PreToolUse` hook inspects every Bash command and blocks Azure DevOps writes t
 | Deleting any work item | **denied** |
 | Anything touching Test Plans or Test Suites | **denied** |
 
-Denials explain the failure and name the command that fixes it.
+Denials explain the failure and name the command that fixes it. `curl` with a body (`-d`, `--data`, `--data-binary`) counts as a POST, and `az rest` is gated like `curl`.
 
-Audited bypass: set `EXLOOM_QA_SKIP=1` in your session env (`settings.json` → `env`). An inline `EXLOOM_QA_SKIP=1 <cmd>` will not work — the hook reads its own environment, not the command's.
+**The Approval Record is self-attested.** The session writes it into the artifact after QA approves in the conversation, and the hook checks only that it names the case. It stops an agent publishing cases nobody approved; it does not prove who approved them.
+
+Audited bypass: set `EXLOOM_QA_SKIP=1` in your session env (`settings.json` → `env`). An inline `EXLOOM_QA_SKIP=1 <cmd>` will not work — the hook reads its own environment, not the command's. Each bypassed board write appends who and when to `.claude/qa/bypass.jsonl`.
 
 Behaviour is covered by `scripts/test-qa-gate.sh` in the repository root; run it after any change to the hook.
 

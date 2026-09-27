@@ -215,6 +215,19 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+BYP="$(mktemp -d)"
+printf '%s' "$(CMD_ENV="$TC_CREATE" "$PY" -c '
+import json, os
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["CMD_ENV"]}}))')" \
+  | CLAUDE_PROJECT_DIR="$BYP" EXLOOM_QA_SKIP=1 bash "$HOOK" >/dev/null 2>&1
+if grep -q '"bypass":"EXLOOM_QA_SKIP"' "$BYP/.claude/qa/bypass.jsonl" 2>/dev/null \
+   && ! grep -q 'work-item create' "$BYP/.claude/qa/bypass.jsonl"; then
+  echo "  PASS  the bypass leaves a receipt, without the command text"; PASS=$((PASS + 1))
+else
+  echo "  FAIL  the bypass leaves no receipt"; FAIL=$((FAIL + 1))
+fi
+rm -rf "$BYP"
+
 echo ""
 echo "== $PASS passed, $FAIL failed =="
 [[ "$FAIL" -eq 0 ]] || exit 1
