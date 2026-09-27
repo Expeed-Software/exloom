@@ -65,7 +65,7 @@ See `worked-example.md` in this skill for one real change taken through all ten 
 
 | Situation | Skill |
 |---|---|
-| New feature or behaviour change, no spec yet | `exloom:brainstorming` |
+| New feature, or unclear requirements, no spec yet | `exloom:brainstorming` |
 | Have a spec, need a plan someone else could execute | `exloom:planning-for-handoff` |
 | About to start executing — before the first commit | `exloom:isolating-execution` |
 | Executing a written plan | `exloom:executing-handoff-plans` |

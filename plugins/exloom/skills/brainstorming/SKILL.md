@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: Use before any creative work — creating features, building components, adding functionality, or modifying behavior. Explores intent, requirements, and design before implementation. Brownfield-aware.
+description: Use when the user asks for a new feature, or when what to build is unclear or disputed. Not for bug fixes, refactors, review findings or changes whose requirements are already stated. Explores intent, requirements and design before implementation. Brownfield-aware.
 ---
 
 # Brainstorming
