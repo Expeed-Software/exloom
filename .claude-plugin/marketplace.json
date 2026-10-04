@@ -11,13 +11,15 @@
       "name": "exloom",
       "description": "Team-oriented development workflow for Claude Code \u2014 discipline, handoff, and an enforced evidence-based review gate. Brings brainstorming, planning, execution, review, a mechanical test proof, and brownfield-aware knowledge to Claude Code, from one developer to a whole org.",
       "source": "./plugins/exloom",
-      "category": "development-workflow"
+      "category": "development-workflow",
+      "version": "6.0.0"
     },
     {
       "name": "exloom-qa",
       "description": "Team-oriented QA workflow for Claude Code \u2014 turns an Azure DevOps user story into reviewed, traceable, human-executable manual test cases. Scales test volume to story complexity, measures coverage against acceptance criteria, learns your application from QA's corrections, and publishes to the board only after explicit QA approval.",
       "source": "./plugins/exloom-qa",
-      "category": "testing"
+      "category": "testing",
+      "version": "0.2.0"
     }
   ]
 }

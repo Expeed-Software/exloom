@@ -65,6 +65,13 @@ for plugin in $PLUGINS; do
     else
       echo "OK: plugin.json is valid JSON and name matches"
     fi
+    pv=$(python -c "import json; print(json.load(open('$MANIFEST')).get('version',''))")
+    mv=$(python -c "import json; print(next((p.get('version','') for p in json.load(open('$MARKETPLACE'))['plugins'] if p['name']=='$plugin'),''))")
+    if [ "$pv" != "$mv" ]; then
+      fail "$plugin: plugin.json version '$pv' differs from marketplace.json '$mv'"
+    else
+      echo "OK: plugin.json and marketplace.json both say $pv"
+    fi
   fi
 
   # 2. Every SKILL.md has valid frontmatter with name + description matching its folder
