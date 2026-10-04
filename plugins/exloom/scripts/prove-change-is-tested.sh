@@ -253,7 +253,7 @@ _criteria_from_reports() {   # _criteria_from_reports <worktree>
   [[ -n "$reports" ]] || return 0
 
   if command -v python3 >/dev/null 2>&1; then
-    ( cd "$wt" && printf '%s\n' "$reports" | PAIRS="${2:-}" python3 -c '
+    ( cd "$wt" && printf '%s\n' "$reports" | PAIRS="${2:-}" PYTHONIOENCODING=utf-8 python3 -c '
 import os, sys, re, xml.etree.ElementTree as ET
 REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
 # XXE and billion-laughs both need a DTD, and a JUnit report never has one, so
@@ -291,7 +291,7 @@ if os.environ.get("PAIRS"):
         print("%s\t%s" % (ref, re.sub(r"[\"\\;=\t\n]", "", tests[ref])))
 else:
     print(" ".join(sorted(found)))
-' 2>/dev/null )
+' 2>/dev/null | tr -d '\r' )
   else
     # No python3: name-only scan. Cannot tell a passing case from a failing one,
     # so it reports nothing rather than reporting a criterion that failed as
