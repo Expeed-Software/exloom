@@ -54,6 +54,8 @@ It records the command, exit code and commit in `<branch>.verdicts/smoke.json` a
 
 Wait for the paste. If they say "it worked, I don't have output to paste", refuse and guide them to grab it: browser devtools network tab, backend logs, `psql` query, `curl` response.
 
+**If the spec has an approved UI mock**, compare the result with it: open the mock and the screenshot (yourself, if a browser tool is available; otherwise ask the user to). List each difference under the result, and ask the user to accept or reject each one. A rejected difference means the change is not ready.
+
 ## Step 5 — Fill the section
 
 For a pasted result, add a `## Smoke test` section above `## Rulings` in the checklist (outside the generated evidence block) with:

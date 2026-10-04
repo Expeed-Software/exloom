@@ -42,7 +42,7 @@ exloom produces **evidence** that transfers between people — spec, plan, proof
 
 **Round 2 is L1 only.** Fix what it found, re-run `/review-complete`. Adversarial and security run once, after L1 settles; fixes don't expire their approval.
 
-**When a reviewer finds something, fix what it cited.** If it seems to need a new file, class, or test class, ask first.
+**When a reviewer finds something, fix what it cited.** A new file, class, or test class needs asking first.
 
 `worked-example.md` takes one real change through all ten steps.
 
@@ -58,10 +58,11 @@ exloom produces **evidence** that transfers between people — spec, plan, proof
 | Closing work — done, shipping, opening a PR | `exloom:review-gate` |
 | Learned something worth keeping | `exloom:capturing-learnings` |
 | Writing or updating a repo's CLAUDE.md | `exloom:authoring-claude-md` |
+| Code behind an architecture, data-model, DB or API doc changed | `exloom:maintaining-reference-docs` |
 
 Scope discipline: `executing-handoff-plans` logs every deviation, `auditing-plan-fidelity` reports diff-vs-plan drift, `isolating-execution` puts work on a feature branch so the gate applies.
 
-Skip skills for conversation, factual answers, or trivial mechanical edits.
+Skip skills for conversation, factual answers, or trivial edits.
 
 ## Commands — invoke them, don't reproduce them
 
@@ -72,7 +73,7 @@ Skip skills for conversation, factual answers, or trivial mechanical edits.
 /harden           when a Sprint branch turns out to matter
 ```
 
-`/review-complete` dispatches the reviewers the tier requires; each dispatch writes a receipt the gate demands and nobody can hand-write. Doing its steps yourself produces no receipts, so the push stays blocked.
+`/review-complete` dispatches the reviewers the tier requires; each writes a receipt nobody can hand-write. Doing its steps yourself leaves the push blocked.
 
 ## Cost shape
 

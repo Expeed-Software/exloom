@@ -42,7 +42,7 @@ Four things are **not** the author's to write, and they decide everything else:
 - **Reviewer dispatch is recorded, not claimed.** When a reviewer subagent completes, a hook writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. Another hook refuses to let that file be written by hand. The receipt names the commit at dispatch, so a commit made while the reviewer runs is not covered by its approval.
 - **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. There is no tier field to argue with, and a branch whose base exloom cannot find is blocked until the checklist names it.
 - **The proof is an experiment.** `prove-change-is-tested.sh` runs your suite at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here.
-- **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`, and the latest one counts. A rejection is closed by a ruling on each of its findings, not by asking again; a report with no readable verdict line never passes.
+- **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`, and the latest one counts. A rejection is closed by a fix the verify marks ADDRESSED, or by the user's ruling on what stays open; a report with no readable verdict line never passes.
 
 **Only L1 must cover the commit you ship.** Adversarial and security must have run and approved somewhere on the branch; a later fix does not invalidate them. Requiring every reviewer to approve the same moving commit is what produces branches that never converge.
 
@@ -65,6 +65,8 @@ Optional, all committed:
 | `.claude/exloom-proof.disabled` | turns the proof off, for a suite that cannot run from tracked files alone |
 | `.claude/exloom-test-command` | the command the proof runs — pin one that is valid at any base, not one naming this branch's test classes |
 | `.claude/exloom-test-patterns` | extra globs, one per line, for files the proof should treat as tests |
+| `.claude/exloom-not-testable-patterns` | extra globs, one per line, for files the proof should treat as not testable |
+| `.claude/exloom-docs` | where the reference docs live, when not `docs/db/`, `docs/api/`, `docs/data-model/`, `docs/architecture/`: one `<doc-dir>: <code globs>` line per doc |
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
@@ -81,7 +83,15 @@ Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for
 | Flutter | `flutter test` |
 | Java | `./gradlew test --rerun-tasks` or `./mvnw -q test` |
 
-The proof records one of four results: `PROVED`; `NOT_PROVED`, which blocks; `NOT_APPLICABLE`, when the tests do not compile without the change, which passes at every tier and is reported as the weakest result; or `NO_NEW_BEHAVIOUR`, when no test changed, the diff only removes code and the suite passes at the tip, which at Tier 2–3 also needs a `- Proof: deletion only — <reason>` line from the user in the checklist.
+The proof records one of these results:
+
+- `PROVED` or `PROVED_BY_MUTATION`: passes.
+- `NOT_PROVED`: blocks.
+- `NOT_APPLICABLE`: the tests do not compile without the change. Passes at every tier, reported as the weakest result.
+- `NOT_TESTABLE`: every changed file is a style, asset, lockfile, dependency manifest or config file (`*.css`, `*.scss`, `*.less`, images, fonts, `package.json`, `*.lock`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `*.yml`, `*.yaml`, `*.json`, plus `.claude/exloom-not-testable-patterns`). Passes at every tier; a dependency change still gets the security auditor.
+- `TESTS_ONLY`: only tests changed. Passes at every tier.
+- `NO_NEW_BEHAVIOUR`: no test changed, the diff only removes code and the suite passes at the tip. At Tier 2–3 it also needs a `- Proof: deletion only — <reason>` line from the user.
+- `NO_TEST_CHANGED`: no test changed and the suite passes at the tip. Passes as a refactor with a committed `- Proof: refactor — <reason>` line from the user; `/exloom` asks.
 
 **Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
 
@@ -137,15 +147,18 @@ Two more, because they are what stops a checklist being self-written:
 
 Every loop is bounded:
 
-- **Rulings end a rejection.** Each finding gets `PARKED`, `DEFERRED <ticket>` or `FIXED` under `## Rulings`; at Tier 3 and in strict mode a ruling on a Critical quotes the user.
+- **Every fix is verified, and the user rules on what is left.** After a fix the reviewer runs in verify mode; findings it marks `ADDRESSED` close on their own. Each one still `NOT ADDRESSED` goes to the user with the reviewer's reason: fix again, `PARKED` (ignore) or `DEFERRED <ticket>` (fix later), under `## Rulings`; at Tier 3 and in strict mode a ruling on a Critical quotes the user.
 - **Re-review checks the fix, not the branch.** From round 2 a reviewer verifies its earlier findings and the fix range only.
 - **Minor findings go to a ledger**, `<branch>.ledger.md`, and never start another round.
 - **A separate fixer** makes the smallest fix at the cited line; the main session cannot commit code while findings are unruled.
-- **Budgets are enforced at dispatch:** `.claude/exloom-max-rounds` fix rounds per plan task (default 3), and one whole-branch review plus one verify pass per reviewer. A refused dispatch is answered with rulings; if the user wants another round anyway, a committed `- Extra round — "<their words>"` allows one, at that code.
+- **Budgets are enforced at dispatch:** `.claude/exloom-max-rounds` fix rounds per plan task (default 3), and one whole-branch review plus one verify pass per reviewer. A verify after a code change is never refused, so the last fix always gets one. A refused dispatch is answered with rulings; if the user wants another round anyway, a committed `- Extra round — "<their words>"` allows one, at that code.
+- **Merging main costs no review.** A merge of the base branch alone keeps the L1 approval. Afterwards the verify range and the growth limit count only the branch's own changes, not main's. A conflicted merge falls back to the full diff.
+- **Reference docs are warned on, never blocked.** When code behind an existing `docs/db/`, `docs/api/` or `docs/data-model/` changes without the doc, and without a `- Doc impact: none — <reason>` line, the push shows a warning. A commit touching only those docs keeps the L1 approval.
+- **Tags are not branches.** `git push origin v1.0.0` for an existing tag, and `git push --tags`, push no branch code and are not gated.
 
 ## What's inside
 
-- **9 skills** — `brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, and `using-exloom` (the index).
+- **10 skills** — `brainstorming` (with a UI mock step for new screens), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
 - **4 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `fixer`, which applies the smallest fix for findings it is given.
 - **7 commands** — `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`.
 - **3 scripts** — `prove-change-is-tested.sh`, `record-smoke.sh`, and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).

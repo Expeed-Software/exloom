@@ -100,6 +100,94 @@ fi
 BASE="$(git rev-parse --verify --quiet "${BASE}^{commit}" 2>/dev/null || true)"
 [[ -n "$BASE" ]] || { echo "--base does not resolve to a commit in this repo" >&2; exit 2; }
 
+# ---------- classify the diff ----------
+CHANGED="$(git diff --name-only "$BASE" -- . 2>/dev/null; git diff --name-only --cached "$BASE" -- . 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null)"
+CHANGED="$(printf '%s\n' "$CHANGED" | sed '/^$/d' | sort -u)"
+[[ -n "$CHANGED" ]] || { echo "no changes against ${BASE:0:12}" >&2; exit 2; }
+
+is_test() {
+  # A production source root is never a test, whatever its subdirectories are
+  # called. A package such as `orchestration/spec/` under src/main is production
+  # code; matching */spec/* there would revert half of it, leave the tree
+  # uncompilable, and fail the proof for a reason unrelated to the tests.
+  case "$1" in
+    */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
+  esac
+  case "$1" in
+    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*|integration_test/*|*/integration_test/*) return 0 ;;
+    *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;
+    *.test.ts|*.test.js|*.test.tsx|*.spec.ts|*.spec.js|*.spec.tsx) return 0 ;;
+    test-*.sh|*/test-*.sh|*.bats|*_test.dart) return 0 ;;
+    *Test.cs|*Tests.cs|*.*Tests/*|*.Test/*) return 0 ;;
+  esac
+  # A repo adds its own globs, one per line, in a COMMITTED file.
+  local pat
+  if [[ -f .claude/exloom-test-patterns ]] && git ls-files --error-unmatch .claude/exloom-test-patterns >/dev/null 2>&1; then
+    while IFS= read -r pat; do
+      pat="${pat%$'\r'}"
+      [[ -z "$pat" || "$pat" == \#* ]] && continue
+      # shellcheck disable=SC2254
+      case "$1" in $pat) return 0 ;; esac
+    done < .claude/exloom-test-patterns
+  fi
+  return 1
+}
+
+# Styles, assets, lockfiles, dependency manifests and config: nothing a test can notice.
+not_testable() {
+  case "${1##*/}" in
+    *.css|*.scss|*.sass|*.less|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico|*.webp|*.bmp|*.woff|*.woff2|*.ttf|*.otf|*.eot) return 0 ;;
+    package.json|package-lock.json|pnpm-lock.yaml|*.lock|go.sum|pom.xml|*.csproj|pubspec.yaml|*.yml|*.yaml|*.json) return 0 ;;
+  esac
+  local pat
+  if [[ -f .claude/exloom-not-testable-patterns ]] && git ls-files --error-unmatch .claude/exloom-not-testable-patterns >/dev/null 2>&1; then
+    while IFS= read -r pat; do
+      pat="${pat%$'\r'}"
+      [[ -z "$pat" || "$pat" == \#* ]] && continue
+      # shellcheck disable=SC2254
+      case "$1" in $pat) return 0 ;; esac
+    done < .claude/exloom-not-testable-patterns
+  fi
+  return 1
+}
+
+SRC=""; TST=""
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  case "$f" in *.md|docs/*|.claude/*) continue ;; esac
+  if is_test "$f"; then TST+="$f"$'\n'; else SRC+="$f"$'\n'; fi
+done <<< "$CHANGED"
+SRC="$(printf '%s' "$SRC" | sed '/^$/d')"
+TST="$(printf '%s' "$TST" | sed '/^$/d')"
+
+_receipt_early() {   # _receipt_early <result> <method>
+  local branch vdir head
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
+  [[ -f ".claude/exloom-gate.enabled" ]] || return 0
+  head="$(git rev-parse HEAD 2>/dev/null)" || return 0
+  vdir=".claude/reviews/${branch}.verdicts"
+  mkdir -p "$vdir" 2>/dev/null || return 0
+  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"none","at":"%s"}\n' \
+    "$1" "$2" "$BASE" "$head" "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
+    >> "${vdir}/proof.json" 2>/dev/null || return 0
+  echo "exloom: recorded proof receipt (${1}, ${2}) at ${vdir}/proof.json — commit it with the checklist" >&2
+}
+
+if [[ -z "$SRC" && -n "$TST" ]]; then
+  _receipt_early TESTS_ONLY tests-only
+  echo "TESTS_ONLY — only tests changed, so there is no source change to prove."
+  exit 0
+fi
+[[ -n "$SRC" ]] || { echo "no source changes to prove (docs only)" >&2; exit 2; }
+_all_not_testable=1
+while IFS= read -r f; do not_testable "$f" || { _all_not_testable=0; break; }; done <<< "$SRC"
+if [[ $_all_not_testable -eq 1 ]]; then
+  _receipt_early NOT_TESTABLE not-testable
+  echo "NOT_TESTABLE — every changed file is a style, asset, lockfile, manifest or config file."
+  exit 0
+fi
+
 # ---------- test command ----------
 # A repo may pin its own, which is always better than detection.
 # Must be TRACKED: this value is `eval`d with full filesystem and credential
@@ -139,77 +227,16 @@ fi
 [[ -n "$TESTCMD" ]] || {
   echo "no test command detected — pass --cmd or commit .claude/exloom-test-command" >&2; exit 2; }
 
-# ---------- classify the diff ----------
-CHANGED="$(git diff --name-only "$BASE" -- . 2>/dev/null; git diff --name-only --cached "$BASE" -- . 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null)"
-CHANGED="$(printf '%s\n' "$CHANGED" | sed '/^$/d' | sort -u)"
-[[ -n "$CHANGED" ]] || { echo "no changes against ${BASE:0:12}" >&2; exit 2; }
-
-is_test() {
-  # A production source root is never a test, whatever its subdirectories are
-  # called. A package such as `orchestration/spec/` under src/main is production
-  # code; matching */spec/* there would revert half of it, leave the tree
-  # uncompilable, and fail the proof for a reason unrelated to the tests.
-  case "$1" in
-    */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
-  esac
-  case "$1" in
-    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*|integration_test/*|*/integration_test/*) return 0 ;;
-    *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;
-    *.test.ts|*.test.js|*.test.tsx|*.spec.ts|*.spec.js|*.spec.tsx) return 0 ;;
-    test-*.sh|*/test-*.sh|*.bats|*_test.dart) return 0 ;;
-    *Test.cs|*Tests.cs|*.*Tests/*|*.Test/*) return 0 ;;
-  esac
-  # A repo adds its own globs, one per line, in a COMMITTED file.
-  local pat
-  if [[ -f .claude/exloom-test-patterns ]] && git ls-files --error-unmatch .claude/exloom-test-patterns >/dev/null 2>&1; then
-    while IFS= read -r pat; do
-      pat="${pat%$'\r'}"
-      [[ -z "$pat" || "$pat" == \#* ]] && continue
-      # shellcheck disable=SC2254
-      case "$1" in $pat) return 0 ;; esac
-    done < .claude/exloom-test-patterns
-  fi
-  return 1
-}
-
-SRC=""; TST=""
-while IFS= read -r f; do
-  [[ -z "$f" ]] && continue
-  case "$f" in *.md|docs/*|.claude/*) continue ;; esac
-  if is_test "$f"; then TST+="$f"$'\n'; else SRC+="$f"$'\n'; fi
-done <<< "$CHANGED"
-SRC="$(printf '%s' "$SRC" | sed '/^$/d')"
-TST="$(printf '%s' "$TST" | sed '/^$/d')"
-
-_receipt_early() {
-  local result="$1" branch vdir head
-  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
-  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
-  [[ -f ".claude/exloom-gate.enabled" ]] || return 0
-  head="$(git rev-parse HEAD 2>/dev/null)" || return 0
-  vdir=".claude/reviews/${branch}.verdicts"
-  mkdir -p "$vdir" 2>/dev/null || return 0
-  printf '{"check":"change-is-tested","result":"%s","base":"%s","head":"%s","cmd":"no-test-file-changed","at":"%s"}\n' \
-    "$result" "$BASE" "$head" "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
-    >> "${vdir}/proof.json" 2>/dev/null || return 0
-}
-
-[[ -n "$SRC" ]] || { echo "no source changes to prove (docs/tests only)" >&2; exit 2; }
 NNB=0
 if [[ -z "$TST" ]]; then
   # shellcheck source=/dev/null
   . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../hooks" && pwd)/lib.sh"
-  # Only for a committed change: the classifier compares commits.
-  if git diff --quiet HEAD -- . ':(exclude).claude' 2>/dev/null \
-     && [[ -z "$(git ls-files --others --exclude-standard -- . ':(exclude).claude' 2>/dev/null)" ]]; then
-    exloom_diff_adds_behaviour "$BASE" HEAD || NNB=1
+  if ! git diff --quiet HEAD -- . ':(exclude).claude' 2>/dev/null \
+     || [[ -n "$(git ls-files --others --exclude-standard -- . ':(exclude).claude' 2>/dev/null)" ]]; then
+    echo "no test changed: commit the change first, then re-run, so the suite runs on what ships." >&2
+    exit 2
   fi
-fi
-if [[ -z "$TST" && $NNB -eq 0 ]]; then
-  BASE="$BASE" TESTCMD="${TESTCMD:-none}" _receipt_early NOT_PROVED
-  echo "NOT PROVED: this change touches source but adds or changes NO test."
-  printf '  source changed:\n%s\n' "$(printf '%s\n' "$SRC" | sed 's/^/    /')"
-  exit 1
+  exloom_diff_adds_behaviour "$BASE" HEAD || NNB=1
 fi
 
 # ---------- build the counterfactual in a throwaway worktree ----------
@@ -340,17 +367,24 @@ _receipt() {
 #     vendor and target are absent and every run fails on a missing dependency;
 #   - a broken runner, an OOM, a daemon crash, or a `--cmd` that always fails.
 # The control turns all of those into "the environment cannot run the suite".
-if [[ $NNB -eq 1 ]]; then
+if [[ -z "$TST" ]]; then
   git -C "$WT" checkout -q "$(git rev-parse HEAD)" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
-  echo "no test changed and the diff adds no behavioural line: running the full suite at the tip…"
+  echo "no test changed: running the full suite at the tip…"
   ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.tip-out" 2>&1
-  if [[ $? -eq 0 ]]; then
+  tip_rc=$?
+  if [[ $tip_rc -eq 0 && $NNB -eq 1 ]]; then
     _receipt NO_NEW_BEHAVIOUR full-suite
     echo "NO_NEW_BEHAVIOUR — the change only removes code, and the suite passes at the tip."
     exit 0
+  elif [[ $tip_rc -eq 0 ]]; then
+    _receipt NO_TEST_CHANGED full-suite
+    echo "NO_TEST_CHANGED — no test changed, and the suite passes at the tip."
+    echo "It passes the gate only as a refactor: ask the user, and record their reason under"
+    echo "'## Rulings' as  - Proof: refactor — <reason>. Otherwise add a test that fails without the change."
+    exit 0
   fi
   _receipt NOT_PROVED full-suite
-  echo "NOT PROVED — the change only removes code, but the suite fails at the tip:"
+  echo "NOT PROVED — no test changed, and the suite fails at the tip:"
   tail -25 "$WT/.tip-out" 2>/dev/null
   exit 1
 fi
@@ -568,10 +602,10 @@ _receipt NOT_PROVED
 echo
 echo "NOT PROVED — the tests PASS without the source change (exit 0)."
 echo
-echo "One of these is true:"
-echo "  1. the tests do not actually exercise the change (assertions too weak to notice it);"
-echo "  2. the test runner did not run them (cached / UP-TO-DATE / filtered out) — check the tail below;"
-echo "  3. the change genuinely has no observable behaviour, in which case say so explicitly."
+echo "What clears it:"
+echo "  1. strengthen the assertions until a test fails without the change;"
+echo "  2. make the runner actually run them (not cached, UP-TO-DATE or filtered out) — check the tail below;"
+echo "  3. for purely additive code, commit a mutation command in .claude/exloom-mutation-command and re-run."
 echo
 echo "--- last 25 lines of the run ---"
 tail -25 "$WT/.exloom-out" 2>/dev/null

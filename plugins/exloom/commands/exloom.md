@@ -24,9 +24,9 @@ Otherwise run `exloom_next_step "$B"`, do what the step says, and run it again. 
 | `commit` | Commit `.claude/reviews/` — the checklist, `<branch>.verdicts/` and `<branch>.ledger.md` — on their own. |
 | `report` | Run `exloom_render_report "$B"`, then commit it. |
 | `review` | Dispatch the reviewers `/review-complete` names: per-task review during a plan, the whole-branch review once, verify mode after a fix. |
-| `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode. If exloom refuses the dispatch because a budget is spent, go to `rulings`. |
-| `rulings` | Show the user the full gate message and ask them, one question per open item, with AskUserQuestion. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
-| `proof` | Run `prove-change-is-tested.sh` (find it like the library, under `scripts/`) and commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. |
+| `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode, always. |
+| `rulings` | Ask the user about each finding the verify left NOT ADDRESSED, one AskUserQuestion per finding, showing the reviewer's reason from the gate message, with exactly these options: "Fix again" (go to `fix` with that finding), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor and record `- Proof: refactor — <their reason>`. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
+| `proof` | Run `prove-change-is-tested.sh` (find it like the library, under `scripts/`) and commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. If it reports NO_TEST_CHANGED, go to `rulings`. |
 | `smoke` | Run `/smoke-test`. |
 | `push` | Print `exloom_branch_summary "$B"` (review time, rounds, criteria proved, rulings) and tell the user the branch is ready. Do not push unless they ask. |
 | `blocked` | Show the user `EXLOOM_VERBOSE=1 exloom_validate_checklist ".claude/reviews/$B.md" HEAD 1 check` and ask what to do. |

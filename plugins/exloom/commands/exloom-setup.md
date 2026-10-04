@@ -55,6 +55,12 @@ Every path it prints is git-ignored, and exloom ignores an uncommitted setting o
 
 Apply it only when the user agrees.
 
+## Step 4b — Reference docs
+
+The defaults are `docs/db/`, `docs/api/`, `docs/data-model/` and `docs/architecture/`. If the repository keeps those docs elsewhere, write `.claude/exloom-docs` with one `<doc-dir>: <code globs>` line per doc (format in `exloom:maintaining-reference-docs`). If the defaults fit, or there are no docs, write nothing.
+
+If the repository has migrations, an API or ORM models but none of the matching docs, ask once with AskUserQuestion: "Create the database, API and data-model docs from the code now?" On yes, write them from the code as that skill describes, on the current branch, and commit them as their own commit. On no, create nothing. Never create architecture docs or diagrams.
+
 ## Step 5 — Strict mode
 
 Ask once with AskUserQuestion: "Strict mode — every branch on the Certified lane (no escape hatches, signed review commits)?" Recommend **No** unless the repository is regulated. On yes, create `.claude/exloom-strict`.

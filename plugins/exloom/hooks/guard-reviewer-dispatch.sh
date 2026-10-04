@@ -76,13 +76,22 @@ elif [[ "$KIND" == "verify" && "$KEY" == "final" && "$(prior verify)" -ge 1 ]]; 
 elif [[ "$KIND" == "verify" && "$KEY" != "final" && "$(prior verify)" -ge "$MAX" ]]; then
   REASON="task ${TASK} has used its ${MAX} fix rounds with ${AGENT}."
 fi
+# Every fix gets verified: past the budget, a verify is still allowed once per code change.
+if [[ -n "$REASON" && "$KIND" == "verify" ]]; then
+  LASTDH="$(grep -F "\"agent\":\"${AGENT}\",\"key\":\"${KEY}\"" "$DLOG" 2>/dev/null \
+    | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p' | tail -1)"
+  if [[ -n "$LASTDH" ]] && ! git diff --quiet "$LASTDH" "$HEAD_SHA" -- . ':(exclude).claude' 2>/dev/null; then
+    REASON=""
+    echo "exloom: ${AGENT} verify allowed past the budget — the last fix gets one verify." >&2
+  fi
+fi
 
 START="$(grep -F '"key":"final"' "$DLOG" 2>/dev/null | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p' | head -1)"
 if [[ -z "$REASON" && "$KEY" == "final" && -n "$START" ]] && git cat-file -e "${START}^{commit}" 2>/dev/null; then
   lines() { git diff --numstat "$1" "$2" -- . ':(exclude).claude' 2>/dev/null | awk '{a+=$1+$2} END{print a+0}'; }
   FORK="$(exloom_fork_point "$START" 2>/dev/null || true)"
   SIZE=0; [[ -n "$FORK" ]] && SIZE="$(lines "$FORK" "$START")"
-  GROWTH="$(lines "$START" "$HEAD_SHA")"
+  GROWTH="$(lines "$(exloom_own_base "$START" "$HEAD_SHA")" "$HEAD_SHA")"
   LIMIT=$(( SIZE / 2 )); [[ $LIMIT -lt 100 ]] && LIMIT=100
   if [[ "$GROWTH" -gt "$LIMIT" ]]; then
     REASON="the branch has grown by ${GROWTH} changed lines since review started (limit ${LIMIT}). Fixes are exceeding the findings."
@@ -116,9 +125,9 @@ if [[ -n "$REASON" ]]; then
     cat >&2 <<EOF
 exloom: reviewer dispatch REFUSED — ${REASON}
 
-Another round is not how this review ends. Rule on each open finding under
-'## Rulings' in ${CHECKLIST} (PARKED, DEFERRED <ticket>, or FIXED), and the
-gate accepts the REJECTED receipt. If the user wants another round anyway, ask
+Ask the user about each finding still open: "Fix again" (exloom:fixer, then
+verify), "Not a real problem, ignore (PARKED)" or "Fix later, with a ticket
+(DEFERRED)", recorded under '## Rulings' in ${CHECKLIST}. If the user wants another round anyway, ask
 them, record their answer under '## Rulings' as
   - Extra round — "<their words>"
 commit it, and dispatch again. It allows one dispatch, at the commit it was

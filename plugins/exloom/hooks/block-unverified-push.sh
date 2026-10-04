@@ -92,6 +92,8 @@ cd "$REPO_ROOT" || exit 0
 [[ -f ".claude/exloom-gate.enabled" ]] || exit 0
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+DOC_WARN=""
+exloom_is_protected_branch "$CURRENT_BRANCH"   || DOC_WARN="$(exloom_doc_warnings ".claude/reviews/${CURRENT_BRANCH}.md" HEAD 2>/dev/null)"
 
 # ---------- which branch(es) does this push ship? ----------
 # Only a parsed `git push` yields explicit targets; gh pr create / MCP publish
@@ -126,7 +128,10 @@ for br in "${VBRANCHES[@]}"; do
   # a softer exit code: an approve/cancel prompt cannot express two of its three
   # answers, so it blocks like everything else and hands the session a question
   # to put to the user.
-  case "$?" in 0) ;; *) exit 2 ;; esac
+  case "$?" in 0) ;; *) [[ -n "$DOC_WARN" ]] && printf '%s\n' "$DOC_WARN" >&2; exit 2 ;; esac
 done
 
+if [[ -n "$DOC_WARN" ]]; then
+  printf '{"systemMessage":"%s"}\n' "$(printf '%s' "$DOC_WARN" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'NR>1{printf "\\n"} {printf "%s", $0}')"
+fi
 exit 0

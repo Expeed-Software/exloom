@@ -19,6 +19,8 @@ What we are going to do, and why this rather than something else. Reference
 existing code by path: what already exists, what this extends, what convention it
 follows.
 
+UI mock: <spec-name>.mock.html — approved: "<the user's words>"   (only with a mock)
+
 ## Rejected approaches
 
 - **<approach>** — <why not>. One line each.
