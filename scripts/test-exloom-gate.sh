@@ -2743,6 +2743,9 @@ ok "fix round 1 is allowed" "$(disp t3 'Verify fixes for task 3 on branch feat/p
 ok "fix round 2 is allowed" "$(disp t4 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
 ok "fix round 3 is allowed" "$(disp t5 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
 ok "a fourth fix round is refused" "$(disp t6 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — sure\n' >> "$BC"
+ok "an extra-round line without the user's quoted words grants nothing" \
+   "$(disp t6b 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
 printf -- '- Extra round — "one more, then we ship"\n' >> "$BC"
 ok "...unless the user granted an extra round" "$(disp t7 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
 ok "...and the grant is used once" "$(disp t8 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"

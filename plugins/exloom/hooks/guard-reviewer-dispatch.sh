@@ -91,7 +91,7 @@ fi
 
 EXTRA=false
 if [[ -n "$REASON" ]]; then
-  granted="$(grep -cE '^- Extra round[[:space:]]*—[[:space:]]*[^[:space:]]' "$CHECKLIST" 2>/dev/null)"
+  granted="$(grep -cE '^- Extra round[[:space:]]*—[[:space:]]*("[^"]{3,}"|“[^”]{3,}”)' "$CHECKLIST" 2>/dev/null)"
   used="$(grep -c '"extra":true' "$DLOG" 2>/dev/null)"
   if [[ "${granted:-0}" -gt "${used:-0}" ]]; then
     EXTRA=true
