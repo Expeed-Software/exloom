@@ -19,7 +19,7 @@ The process is the same; the depth scales.
 | **Medium** | New API with integrations, new UI page, add auth to a flow | 30-45 min | Full process, but 2-3 approaches is enough. Spec is 1-2 pages. |
 | **Complex** | New subsystem, cross-cutting concern, multi-service feature | 60-90 min | Full process, all steps at full depth. Spec is 2-4 pages. |
 
-Durations are guides, not targets. Beyond 90 minutes, decompose into sub-projects and brainstorm the first. Simple work moves through all 8 steps faster; it doesn't skip them.
+Durations are guides. Beyond 90 minutes, decompose and brainstorm the first sub-project. Simple work runs all 8 steps faster; it skips none.
 
 ## Process
 
@@ -29,7 +29,7 @@ Before asking the user anything, read CLAUDE.md and README, the last 20-30 commi
 
 ### Step 2: Understand the Problem, Not the Solution
 
-Users arrive with solutions; find the problem underneath ("I need a caching layer" may be a slow query). Ask: Who has this problem? How do they solve it today? What happens if we don't build this?
+Find the problem under the proposed solution ("I need a caching layer" may be a slow query). Ask: Who has this problem? How do they solve it today? What happens if we don't build this?
 
 ### Step 3: Ask Clarifying Questions One at a Time
 
@@ -37,17 +37,17 @@ One question per message, most important first, wait for the answer. Prefer mult
 
 ### Step 4: Explore the Solution Space
 
-Present 2-3 approaches, leading with your recommendation: "I recommend Approach B because..." Each approach: two-sentence summary, 1-2 pros/cons, one-sentence "recommended when," grounded in this codebase ("extends the existing EventBus pattern"). No strawmen, no unweighted menu.
+Present 2-3 approaches, leading with your recommendation: "I recommend Approach B because..." Each approach: two-sentence summary, 1-2 pros/cons, one-sentence "recommended when," grounded in this codebase ("extends the existing EventBus pattern"). No strawmen.
 
 ### Step 5: Present the Design in Sections
 
-Scale depth to complexity; pause for feedback after each major section. Sections: **Overview** (what, why, fit — one paragraph), **Components** (name every file, class, function, endpoint, table), **Data flow** (happy path and primary failure), **Error handling** (what fails, detection, recovery), **Edge cases** (null, concurrent, network, scale — with handling), **Non-goals** (what this does not do). Present the overview first and get approval before the rest.
+Scale depth to complexity; pause for feedback after each major section. Sections: **Overview** (what, why, fit — one paragraph), **Components** (name every file, class, function, endpoint, table), **Data flow** (happy path and primary failure), **Error handling** (what fails, detection, recovery), **Edge cases** (null, concurrent, network, scale — with handling), **Non-goals** (what this does not do). Get the overview approved before the rest.
 
 ### Step 6: Write the Spec
 
 Copy `templates/spec-template.md` to where this repo keeps specs — if the repo's CLAUDE.md (or the user) specifies a location, use it; otherwise `docs/exloom/specs/F-<nnn>-<slug>.md`. Allocate `<nnn>` as one past the highest `F-` already in that directory. Commit if the user permits.
 
-The spec must be readable by someone not in the session. The template carries the canonical shape: problem, chosen approach with rationale, rejected approaches with rationale, numbered requirements each carrying at least one acceptance criterion, edge cases, non-goals, open questions. Reference code by file path. Record contentious decisions with both perspectives. Mark ambiguity as open questions.
+Write for someone not in the session. The template's shape: problem, chosen approach with rationale, rejected approaches with rationale, numbered requirements each carrying at least one acceptance criterion, edge cases, non-goals, open questions. Reference code by file path. Record contentious decisions with both perspectives. Mark ambiguity as open questions.
 
 **Requirements.** Each requirement (`R-<n> · <type>`) is one behaviour, in one of the five EARS shapes, with at least one acceptance criterion (`AC-<n> · <level>`) written as Given/When/Then. Unverifiable requirements ("works correctly", "performance is acceptable") are not requirements.
 
@@ -65,7 +65,7 @@ LINT="$(find ~/.claude/plugins -path '*exloom*/scripts/lint-spec.sh' | sort -V |
 bash "$LINT" docs/exloom/specs/F-012-slug.md
 ```
 
-**Fix the errors. Judge the warnings** — warnings are heuristics (an implementation named in a requirement; money, permissions or deletion with no `unwanted` requirement), and one you disagree with is ignored. This step is the linter and nothing else.
+**Judge the warnings** — they are heuristics (an implementation named in a requirement; money, permissions or deletion with no `unwanted` requirement); ignore one you disagree with.
 
 ### Step 8: User Reviews, Then Transition
 
@@ -73,12 +73,12 @@ Ask the user for a full read of the written spec: "Does the problem statement ma
 
 ## Brownfield Discipline
 
-Assume the codebase already has an opinion about how to solve the problem. Find it before forming your own.
+The codebase already has an opinion; find it before forming your own.
 
 1. **Search for existing implementations** by concept, not just name — for notifications, search "notification", "alert", "event", "message", "publish", "subscribe"; `AlertDispatcher` counts. Prove nothing exists before proposing something new.
 2. **Read the surrounding code.** Match the base classes, error handling, logging and DI of existing code in the same layer.
 3. **Check for shared libraries** in the codebase and the repo's CLAUDE.md before adding a dependency.
-4. **Match existing patterns, then justify deviation** in the spec. The bar: the existing pattern cannot solve the problem, and the new pattern's total cost is lower. "Simpler" is not a justification; "the ORM we're integrating only supports Active Record" is.
+4. **Match existing patterns; justify deviation** in the spec. The bar: the existing pattern cannot solve the problem, and the new pattern's total cost is lower. "Simpler" is not a justification; "the ORM we're integrating only supports Active Record" is.
 5. **Propose extending before building new.** If an existing feature does 60%+ of what's needed, extend it unless that produces a worse outcome for team maintenance and clarity.
 
 "The existing implementation is bad" needs a specific technical assessment, not an opinion.

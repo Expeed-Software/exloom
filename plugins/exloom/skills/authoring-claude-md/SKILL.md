@@ -15,19 +15,19 @@ Three modes: **greenfield** (new repo, template-based), **brownfield** (existing
 
 Use when the repo has code and either no CLAUDE.md or a thin one.
 
-**Step 1: Detect stack.** Scan the repo root and common subdirectories for `package.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `go.mod`, `composer.json`. Read each to identify language and version, framework, test framework, and package manager. Do not stop at the first build file — polyglot repos need every stack documented.
+**Step 1: Detect stack.** Scan the repo root and common subdirectories for `package.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `go.mod`, `composer.json`. Identify language and version, framework, test framework, and package manager from each; polyglot repos need every stack.
 
-**Step 2: Scan file structure.** List the top two directory levels. Map source roots, test roots, configuration directories, generated or vendor directories to exclude (`node_modules/`, `build/`, `dist/`, `target/`), and monorepo indicators (multiple `package.json` files, `modules/`, `packages/`).
+**Step 2: Scan file structure.** Map the top two levels: source roots, test roots, configuration directories, generated or vendor directories to exclude (`node_modules/`, `build/`, `dist/`, `target/`), and monorepo indicators (multiple `package.json` files, `modules/`, `packages/`).
 
-**Step 3: Sample existing conventions.** Read 3-5 source files from different layers (controller, service, model, utility). Record naming, indentation, error handling, import ordering, comment style and test naming. If files are inconsistent, document that conventions vary and let the user decide.
+**Step 3: Sample existing conventions.** Read 3-5 source files from different layers (controller, service, model, utility). Record naming, indentation, error handling, import ordering, comment style and test naming. If inconsistent, say so and let the user decide.
 
-**Step 4: Choose template.** Select from `../../assets/claude-md-templates/` by detected stack. No match (e.g. Quarkus): use `default.md` rather than stretching a near fit. Polyglot: use the primary backend template as the base and add sections for each additional stack.
+**Step 4: Choose template.** Select from `../../assets/claude-md-templates/` by detected stack. No match (e.g. Quarkus): `default.md`, not a near fit. Polyglot: primary backend template plus a section per additional stack.
 
 **Step 5: Draft CLAUDE.md.** Fill the template with conventions OBSERVED in steps 1-3, never aspirational ones (JUnit 4 in the code means JUnit 4 in the doc). Include:
 - Stack details (language, framework, versions, package manager)
 - Project structure (directory map with one-line descriptions)
 - Naming conventions, error handling patterns, test approach (framework, locations, naming, how to run)
-- Build and run commands — verify by running them only after reading the script; if it mutates state or reaches external systems, document it from the config without executing
+- Build and run commands — run one only after reading it; if it mutates state or reaches external systems, document it from config without executing
 - Notable architectural patterns (DDD, hexagonal, layered, event-driven)
 
 **Step 6: Annotate with the baselines.** Add the Baselines section:
@@ -38,13 +38,13 @@ Use when the repo has code and either no CLAUDE.md or a thin one.
 - Secrets: environment variables only, never committed to source control
 - Logging: structured logging with correlation IDs for services
 
-Every baseline that conflicts with what exists goes in Overrides with its reason. Never silently override an existing convention.
+Every baseline conflicting with what exists goes in Overrides with its reason.
 
-**Step 7: Present to user for review.** Show the complete draft before writing it to disk. Ask:
+**Step 7: Present to user for review.** Show the full draft first. Ask:
 1. "Does this accurately reflect your project's conventions?"
 2. "Any baselines that should go in Overrides?"
 
-Apply their feedback.
+Apply feedback.
 
 ### Greenfield Mode (new project)
 
@@ -52,7 +52,7 @@ Use when the repo has no code yet or only scaffolding.
 
 1. **Ask for stack.** One question: "What stack is this project using?" If ambiguous ("Java"), ask one follow-up about the framework.
 2. **Pick template** from `../../assets/claude-md-templates/`; `default.md` if none matches.
-3. **Fill template.** Add project name, description and team context. Apply all the baselines. Leave the Overrides section in place but empty, with: `_(Empty by default — record here any baseline this repo deliberately departs from, with the reason.)_`
+3. **Fill template.** Add project name, description, team context and all baselines. Leave the Overrides section in place but empty, with: `_(Empty by default — record here any baseline this repo deliberately departs from, with the reason.)_`
 4. **Commit with permission.** Propose `docs: add CLAUDE.md for [project name]` and wait for approval.
 
 ### Update Mode (CLAUDE.md exists)
@@ -69,7 +69,7 @@ If the existing file contradicts a baseline, it wins; record the conflict in Ove
 
 ## CLAUDE.md Structure (works without a template)
 
-If no template loads or fits, author from this structure. Every CLAUDE.md contains these sections:
+If no template loads or fits, use these sections:
 
 ```markdown
 # [Project Name]
@@ -104,7 +104,7 @@ If no template loads or fits, author from this structure. Every CLAUDE.md contai
 
 ## Templates Reference
 
-Templates live at `../../assets/claude-md-templates/`. If one is absent or unreadable, use the structure above.
+Templates live at `../../assets/claude-md-templates/`; if one is unreadable, use the structure above.
 
 | Template | Stack | When to Use |
 |----------|-------|-------------|
@@ -125,7 +125,7 @@ Do not create new template files — extend `default.md`.
 
 | Situation | Decision |
 |---|---|
-| Repo has no established conventions (inconsistent, chaotic) | Use the baselines as the starting point. Note "inferred — no established pattern found." |
+| Repo has no established conventions (inconsistent, chaotic) | Start from the baselines. Note "inferred — no established pattern found." |
 | Polyglot repo (e.g., Java backend + React frontend) | One CLAUDE.md at the repo root covering both stacks. Section headers per stack. |
 | Monorepo with multiple projects | One CLAUDE.md per project root for project-specific conventions, plus one at the monorepo root for shared conventions. |
 | User disagrees with an inferred convention | User wins. Update the CLAUDE.md to match. |
