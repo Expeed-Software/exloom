@@ -133,7 +133,7 @@ Previous findings:
 
 `<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. A new finding outside the fix range is out of scope and needs no ruling.
 
-**The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: answer with rulings. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it; it allows one dispatch at the code it was committed with, before any other dispatch. A commit made while a reviewer runs is not covered by its approval.
+**The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: answer with rulings. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it: one dispatch, at that code, before any other. A commit made during a review is not covered by it.
 
 **Dispatch order:**
 
