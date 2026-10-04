@@ -5,21 +5,21 @@ description: Run the final gate for the current branch. Verifies every required 
 
 # /review-complete
 
-You are the terminal gate. Read `.claude/reviews/<branch>.md` and verify every tier-required section holds real evidence; do not take the operator's word. A reviewer counts only by its receipt, `.claude/reviews/<branch>.verdicts/<agent>.json`, written when the subagent completes and never by hand.
+You are the terminal gate. Verify every tier-required section of `.claude/reviews/<branch>.md` holds real evidence. A reviewer counts only by its receipt, `.claude/reviews/<branch>.verdicts/<agent>.json`, written when the subagent completes and never by hand.
 
 ## Step 1 — Open and parse
 
 Open `.claude/reviews/<current-branch>.md`. If absent, refuse and tell the user to run `/review-init`.
 
-Parse the Tier field. If missing or not `0`, `1`, `2`, or `3`, refuse.
+Refuse if the Tier field is missing or not `0`–`3`.
 
-Check the tier against the diff (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). If the declared tier is lower, say so and raise it; the gate blocks otherwise.
+Check the tier against the diff (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). If the declared tier is lower, raise it.
 
 ## Step 1b — Read the lane
 
 Read `**Lane:**`. Absent, use the committed `.claude/exloom-lane`, else `standard`.
 
-**Sprint caps the required set at Tier 1**: L1 review, smoke test, proof. Mark adversarial, cross-layer and runbook sections `N/A — Sprint lane`. Sprint does **not** waive the proof receipt, the derived tier, or the security auditor when the diff's *surface* demands it (a dependency manifest, a deserialization entry point). **Sprint at Tier 3 is refused by the gate**: do not lower the tier; offer `/harden`.
+**Sprint caps the required set at Tier 1**: L1 review, smoke test, proof. Mark adversarial, cross-layer and runbook sections `N/A — Sprint lane`. Sprint does **not** waive the proof receipt, the derived tier, or the security auditor when the diff's *surface* demands it. **Sprint at Tier 3 is refused by the gate**: do not lower the tier; offer `/harden`.
 
 **Certified**: anything under `## Escape hatches used` blocks the push, and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch.
 
@@ -41,11 +41,11 @@ Each receipt carries `"round_needed"`, from the `ROUND NEEDED AFTER FIX:` line. 
 grep -h '"round_needed"' .claude/reviews/<branch>.verdicts/*.json
 ```
 
-If that holds, ship. Do not run another round to be thorough.
+If that holds, ship; no extra round to be thorough.
 
-`"round_needed":"UNKNOWN"` counts as `YES`. Re-dispatch that one reviewer, not the whole set.
+`"round_needed":"UNKNOWN"` counts as `YES`; re-dispatch only that reviewer.
 
-**Minor, out-of-scope and pre-existing findings go to the ledger**, `.claude/reviews/<branch>.ledger.md`, written by the hook: no ruling, no round, no fixing during the loop. After the final review, tick each item with the user — fixed, ticket id, or dropped — and commit it with the checklist. After a compaction, read the ledger and receipts to resume.
+**Minor, out-of-scope and pre-existing findings go to the ledger**, `.claude/reviews/<branch>.ledger.md`, written by the hook: no ruling, no round, no fixing during the loop. After the final review, tick each item with the user — fixed, ticket id, or dropped — and commit it with the checklist. After a compaction, resume from the ledger and receipts.
 
 **A REJECTED review is closed by rulings, not another round.** For each recorded finding, add one line under `## Rulings`:
 
@@ -59,7 +59,7 @@ The gate accepts the REJECTED receipt once every in-scope finding has a ruling. 
 
 ### Tier 0 required
 - L1: `l1-reviewer.json` receipt, findings listed (or "no findings"), resolution for each Critical/Important.
-- Other sections marked `N/A - Tier 0` or left at defaults are fine.
+- Other sections may be `N/A - Tier 0` or default.
 
 ### Tier 1 required
 - L1, as Tier 0.
@@ -71,7 +71,7 @@ The gate accepts the REJECTED receipt once every in-scope finding has a ruling. 
   bash "$PROVE"
   ```
 
-  `PROVED_BY_MUTATION` (repo-pinned mutation command) and `NOT_APPLICABLE` (tests cannot compile without the change) also pass; the receipt's `method` field says which. `NOT_PROVED` blocks: fix the tests, do not re-run. Applies to **every tier from 1 up**.
+  `PROVED_BY_MUTATION` (repo-pinned mutation command) and `NOT_APPLICABLE` (tests cannot compile without the change) also pass; the receipt's `method` field says which. `NOT_PROVED` blocks: fix the tests, do not re-run.
 
 ### Tier 2 required (Tier 1 +)
 - Adversarial review: `adversarial-reviewer.json` receipt, findings with category and resolution, and the cross-layer contract check's grep output with each orphan resolved.
@@ -80,7 +80,7 @@ The gate accepts the REJECTED receipt once every in-scope finding has a ruling. 
 - Security review: `security-auditor.json` receipt, tool output pasted, findings dispositioned.
 - Runbook path filled and the file exists.
 - **What reverting does not fix** filled; `nothing` is valid but must be written.
-- **What would recover it** filled: a named mechanism, or `NOT RECOVERABLE` with a stated reason. Do not push back on it.
+- **What would recover it** filled: a named mechanism, or `NOT RECOVERABLE` with a stated reason (accept it).
 - The Tier 3 box ticked.
 
 Do **not** ask whether recovery was tested, who verifies at deploy, or for a "rollback command". Every line must be answerable by the author, on this branch, before merge; a deferral names a ticket.
@@ -105,11 +105,11 @@ Print `Cannot mark complete. Missing or placeholder sections:` and one line per 
 - Runbook → ask the user for the path.
 - Reversal proof → ask which test exercises the rollback; if none, offer to write it rather than accepting prose.
 
-Dispatch missing reviewers without asking, with the `Agent`/`Task` tool and the agent type above. **Dispatch without a name**, with `model` set to `exloom_reviewer_model <agent>` (Opus unless `.claude/exloom-reviewer-model` says otherwise). A receipt with no `"verdict"` field means it was named: dispatch again, unnamed. Reviewing it yourself produces no receipt.
+Dispatch missing reviewers without asking, with the `Agent`/`Task` tool and the agent type above. **Dispatch without a name**, with `model` set to `exloom_reviewer_model <agent>` (Opus unless `.claude/exloom-reviewer-model` says otherwise). A receipt with no `"verdict"` field means it was named: re-dispatch unnamed. Reviewing yourself produces no receipt.
 
 ### The dispatch prompt — use this, do not write your own
 
-Copy this, fill the two blanks, send nothing else:
+Fill the two blanks, send nothing else:
 
 ```
 Review branch <branch> at <sha>. Diff: git diff <merge-base>...<sha>
@@ -135,22 +135,20 @@ Previous findings:
 
 **The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: answer with rulings. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings`; each line allows one dispatch. A commit made while a reviewer runs is not covered by its approval.
 
-**That is the whole prompt.** See "Do not steer the review".
-
 **Dispatch order:**
 
-1. **`l1-reviewer` alone, first, once over the whole branch** (tasks were reviewed during build, `exloom:executing-handoff-plans` step 7). Fix, then re-dispatch in verify mode.
-2. **Then `adversarial-reviewer` and `security-auditor`**, in parallel, once, after L1 settles, with the L1 findings. The gate's `approved <sha> — 3 commit(s) have landed since` does not block; a large number means they ran too early.
+1. **`l1-reviewer` alone, first, once over the whole branch** Fix, then re-dispatch in verify mode.
+2. **Then `adversarial-reviewer` and `security-auditor`**, in parallel, once, after L1 settles, with the L1 findings. The gate's `approved <sha> — 3 commit(s) have landed since` does not block.
 
-**A finding is a defect report, not a work order.** Implement defects ("dereferences null when X"). A proposed design — a new check, abstraction, validator, helper, test infrastructure, or a class-wide fix — goes to the ticket owner. Do not build a guard unless you can point to the type, schema or contract behind its rule; if one was built and reverted, pin the case with a test.
+**A finding is a defect report, not a work order.** Implement defects. A proposed design — new check, abstraction, validator, helper, test infrastructure, class-wide fix — goes to the ticket owner. Do not build a guard unless you can point to the type, schema or contract behind its rule; if one was built and reverted, pin the case with a test.
 
-**Cost discipline.** `l1-reviewer` runs at low effort, per commit. `adversarial-reviewer` and `security-auditor` run at medium effort, once, before push.
+**Cost discipline.** `l1-reviewer` at low effort, per commit; `adversarial-reviewer` and `security-auditor` at medium effort, once, before push.
 
 ## How to respond to a finding
 
-Deliver what was asked, at the scope intended; if it seems mistaken, say so in a sentence and continue as asked.
+Deliver what was asked; if it seems mistaken, say so in a sentence and continue.
 
-**The fix is made by `exloom:fixer`, not this session.** During the fix loop this session makes no code edits or code commits; exloom refuses its code commit while a REJECTED finding has no ruling. Dispatch the fixer, unnamed, with exactly:
+**The fix is made by `exloom:fixer`, not this session.** During the fix loop this session makes no code edits or commits; exloom refuses them while a REJECTED finding has no ruling. Dispatch the fixer, unnamed, with exactly:
 
 ```
 Fix these review findings on branch <branch>, round <n>. Findings, verbatim:
@@ -162,7 +160,7 @@ Rulings that allow more than a minimal fix:
 Round 3 gets a fresh fixer with `model` set to `opus`. Each `NEEDS RULING` line it returns goes to the user, never back to the fixer. Then re-dispatch the reviewer in verify mode.
 
 - **Fix what is cited, at the line cited.**
-- **Before adding a new file, class, method, or test class for a finding, stop and ask**, stating the minimal fix and what you would add.
+- **Before adding a new file, class, method, or test class for a finding, stop and ask**, stating the minimal fix.
 - **The branch should stay roughly its size at review start.**
 - **A finding that needs architecture goes to a ticket**: record `DEFERRED <ticket>` under `## Rulings` and move on.
 
@@ -172,23 +170,23 @@ Round 3 gets a fresh fixer with `model` set to `opus`. Each `NEEDS RULING` line 
 - **Do not tell it what not to flag** ("ignore the docs changes", "pre-existing").
 - **Do not pre-rate a severity.**
 - **Do not summarise what you changed or why.**
-- **Do not say what you already verified.** The proof receipt covers that.
+- **Do not say what you already verified.**
 
-**Do not invent process** — your own freeze, re-review trigger, or same-commit rule. Where you think exloom is wrong, say so and continue as written.
+**Do not invent process** — your own freeze, re-review trigger, or same-commit rule. If exloom seems wrong, say so and continue.
 
 Wait for the user. Do NOT mark complete while anything is missing.
 
 ## Step 5 — If everything is present
 
-Regenerate the evidence block from the receipts; do not write it by hand:
+Regenerate the evidence block from the receipts, never by hand:
 
 ```bash
 exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-It records HEAD as the reviewed code commit, so run it before committing.
+It records HEAD as the reviewed commit; run it before committing.
 
-Stage the checklist **and the verdict receipts** and commit them together:
+Stage the checklist **and the verdict receipts** together:
 
 ```bash
 git add .claude/reviews/<branch>.md ".claude/reviews/<branch>.verdicts" ".claude/reviews/<branch>.ledger.md"
@@ -206,11 +204,11 @@ A checklist from the old template (a `## Final verdict` section with tick boxes)
 
 Print:
 
-> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now run `git push` or open a PR; the push gate will no longer block this branch.
+> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now `git push` or open a PR.
 
 ## Rules
 
 - All-or-nothing per the tier's required sections.
 - Do NOT accept "I'll do that later".
 - A skipped narrative step with written justification under "Escape hatches used" counts as addressed; an unjustified skip does not. **An under-declared tier and a missing reviewer receipt have no escape hatch.**
-- Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in the Claude Code session env (`settings.json` `env`), not inline. It works on every lane, verifies no justification, and writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.
+- Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in the Claude Code session env (`settings.json` `env`), not inline. It works on every lane, verifies no justification, writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.
