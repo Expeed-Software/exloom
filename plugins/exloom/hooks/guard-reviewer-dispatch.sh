@@ -89,13 +89,29 @@ if [[ -z "$REASON" && "$KEY" == "final" && -n "$START" ]] && git cat-file -e "${
   fi
 fi
 
+# A grant is a committed '- Extra round — "<words>"' line. It covers the code at
+# the commit that added it, and only until the next dispatch, used or not.
+_valid_grant() {
+  local line g dh
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    g="$(git log -1 --format=%H -S"$line" -- "$CHECKLIST" 2>/dev/null)"
+    [[ -n "$g" ]] || continue
+    git diff --quiet "$g" HEAD -- . ':(exclude).claude' 2>/dev/null || continue
+    while IFS= read -r dh; do
+      [[ -n "$dh" ]] && git merge-base --is-ancestor "$g" "$dh" 2>/dev/null && continue 2
+    done < <(sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p' "$DLOG" 2>/dev/null)
+    GRANT="$line"; return 0
+  done < <(MSYS_NO_PATHCONV=1 git show "HEAD:${CHECKLIST}" 2>/dev/null | tr -d '\r' \
+             | grep -E '^- Extra round[[:space:]]*—[[:space:]]*("[^"]{3,}"|“[^”]{3,}”)')
+  return 1
+}
+
 EXTRA=false
 if [[ -n "$REASON" ]]; then
-  granted="$(grep -cE '^- Extra round[[:space:]]*—[[:space:]]*("[^"]{3,}"|“[^”]{3,}”)' "$CHECKLIST" 2>/dev/null)"
-  used="$(grep -c '"extra":true' "$DLOG" 2>/dev/null)"
-  if [[ "${granted:-0}" -gt "${used:-0}" ]]; then
+  if _valid_grant; then
     EXTRA=true
-    echo "exloom: dispatch allowed by an 'Extra round' line in ${CHECKLIST} ($((used + 1)) of ${granted})." >&2
+    echo "exloom: dispatch allowed by '${GRANT}' in ${CHECKLIST}." >&2
   else
     cat >&2 <<EOF
 exloom: reviewer dispatch REFUSED — ${REASON}
@@ -105,7 +121,8 @@ Another round is not how this review ends. Rule on each open finding under
 gate accepts the REJECTED receipt. If the user wants another round anyway, ask
 them, record their answer under '## Rulings' as
   - Extra round — "<their words>"
-and dispatch again. Do not write that line unless they said it.
+commit it, and dispatch again. It allows one dispatch, at the commit it was
+written, before any other dispatch. Do not write that line unless they said it.
 EOF
     exit 2
   fi

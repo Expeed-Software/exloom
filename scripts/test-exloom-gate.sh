@@ -2747,8 +2747,13 @@ printf -- '- Extra round — sure\n' >> "$BC"
 ok "an extra-round line without the user's quoted words grants nothing" \
    "$(disp t6b 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
 printf -- '- Extra round — "one more, then we ship"\n' >> "$BC"
-ok "...unless the user granted an extra round" "$(disp t7 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "an uncommitted grant grants nothing" "$(disp t6c 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+git add -A >/dev/null 2>&1; git commit -qm grant >/dev/null 2>&1
+ok "...a committed grant allows one more round" "$(disp t7 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
 ok "...and the grant is used once" "$(disp t8 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — "after this fix only"\n' >> "$BC"; git add -A >/dev/null 2>&1; git commit -qm grant2 >/dev/null 2>&1
+printf 'more\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm 'new code' >/dev/null 2>&1
+ok "a grant written before a code change expires with it" "$(disp t9 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
 ok "the final review runs once" "$(disp f1 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "0"
 ok "...a second final review is refused" "$(disp f2 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "2"
 ok "...one scoped re-review is allowed" "$(disp f3 'Verify fixes on branch feat/plan. Fix range: a..b' adversarial-reviewer)" "0"
@@ -2798,8 +2803,8 @@ ok "a commit made during the review cannot inherit its approval" \
    "$(exloom_check_verdicts "$BC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
 ok "committing receipts does not raise the round count" "$(exloom_round_count "$BC" HEAD)" "1"
 
+printf -- '- Extra round — "check the fix"\n' >> "$BC"; git add "$BC" >/dev/null 2>&1; git commit -qm grant >/dev/null 2>&1
 H2="$(git rev-parse HEAD)"
-printf -- '- Extra round — "check the fix"\n' >> "$BC"
 disp b2 'Review branch feat/plan at y. Diff: git diff m...y' l1-reviewer nolaunch >/dev/null
 stop ag2 'VERDICT: APPROVED
 ROUND NEEDED AFTER FIX: NO'
