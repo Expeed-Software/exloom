@@ -1,7 +1,8 @@
 {
   "name": "exloom",
   "description": "Evidence for team code review on Claude Code — a spec, a plan, a mechanical proof that your tests notice your change, and reviewer receipts, gated once at push.",
-  "version": "6.0.0",
+  "version": "6.0.1",
+  "icon": "assets/icon.svg",
   "author": {
     "name": "Expeed Software",
     "email": "support@expeed.com"

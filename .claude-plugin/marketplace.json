@@ -12,7 +12,7 @@
       "description": "Team-oriented development workflow for Claude Code \u2014 discipline, handoff, and an enforced evidence-based review gate. Brings brainstorming, planning, execution, review, a mechanical test proof, and brownfield-aware knowledge to Claude Code, from one developer to a whole org.",
       "source": "./plugins/exloom",
       "category": "development-workflow",
-      "version": "6.0.0"
+      "version": "6.0.1"
     },
     {
       "name": "exloom-qa",

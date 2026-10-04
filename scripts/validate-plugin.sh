@@ -111,6 +111,16 @@ for plugin in $PLUGINS; do
     done
   fi
 
+  # 2b. Commands and agents need frontmatter with a name and a description too.
+  for f in "$PLUGIN_ROOT"/commands/*.md "$PLUGIN_ROOT"/agents/*.md; do
+    [ -f "$f" ] || continue
+    if ! head -1 "$f" | grep -q '^---' \
+       || ! sed -n '/^---$/,/^---$/p' "$f" | grep -q '^name:' \
+       || ! sed -n '/^---$/,/^---$/p' "$f" | grep -q '^description:'; then
+      fail "${f#"$PLUGIN_ROOT/"} has no frontmatter with name and description"
+    fi
+  done
+
   # 3. Plugin-specific checks
   case "$plugin" in
     exloom)

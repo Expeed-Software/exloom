@@ -1,3 +1,8 @@
+---
+name: harden
+description: Promote the current branch to a stricter lane (Sprint to Standard, or Standard to Certified) when a spike turned out to matter. Recovers the spec from the diff and names what the higher bar requires; nothing is regenerated.
+---
+
 # /harden
 
 Promote the current branch from Sprint to Standard (or Standard to Certified) when a spike turned out to matter. Nothing is regenerated: code, receipts and history stay. The steps Sprint skipped now get done against working software.
