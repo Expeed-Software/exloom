@@ -70,6 +70,7 @@ Optional, all committed:
 | `.claude/exloom-max-rounds` | fix rounds per plan task, default 3 |
 | `.claude/exloom-proof.disabled` | turns the proof off, for a suite that cannot run from tracked files alone |
 | `.claude/exloom-test-command` | the command the proof runs — pin one that is valid at any base, not one naming this branch's test classes |
+| `scripts/record-smoke.sh` (in the plugin) | runs a CLI or API smoke check and records the receipt the gate accepts at Tier 0–2 |
 | `.claude/exloom-test-patterns` | extra globs, one per line, for files the proof should treat as tests |
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |

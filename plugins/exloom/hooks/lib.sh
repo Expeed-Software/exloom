@@ -1713,6 +1713,15 @@ exloom_render_report() {   # exloom_render_report <branch>
       printf '| %s | %s | %s | %s | %s |\n' "$a" "$v" "${h:0:12}" "${mode:-full}" "${m:-—}"
       [[ -n "$m" && " $models " != *" $m "* ]] && models="${models:+$models }$m"
     done
+    printf '\n### Smoke test\n\n'
+    line="$(tail -1 "${vdir}/smoke.json" 2>/dev/null)"
+    if printf '%s\n' "$human" | grep -q '^## Smoke test'; then printf 'pasted under ## Smoke test\n'
+    elif [[ -n "$line" ]]; then
+      printf 'agent-run: `%s`, exit %s, at %s (output in smoke.out)\n' \
+        "$(printf '%s' "$line" | sed -n 's/.*"cmd":"\([^"]*\)".*/\1/p')" \
+        "$(printf '%s' "$line" | sed -n 's/.*"exit":\([0-9]*\).*/\1/p')" \
+        "$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{12\}\).*/\1/p')"
+    else printf 'none recorded\n'; fi
     printf '\n### Findings\n\n'
     for a in l1-reviewer adversarial-reviewer security-auditor; do
       [[ -f "${vdir}/${a}.findings.jsonl" ]] || continue
@@ -1740,6 +1749,7 @@ exloom_next_step() {   # exloom_next_step <branch>
     *"Review has run"*|*"Remedy choices"*|*"Re-find"*) echo rulings ;;
     *"did NOT approve"*) echo fix ;;
     *"Never dispatched"*|*"has since changed"*|*"never reached exloom"*) echo review ;;
+    *"smoke test"*) echo smoke ;;
     *"proof"*|*"Proof"*) echo proof ;;
     *) echo blocked ;;
   esac
@@ -1790,6 +1800,38 @@ exloom_status_line() {   # exloom_status_line <branch>
   tasks="$(exloom_task_progress "$branch")"
   printf 'Tier %s%s · round %s/%s · proof %s · %s rulings · next: %s\n' \
     "$tier" "${tasks:+ · task $tasks}" "$(exloom_round_count "$cl" HEAD)" "$(exloom_max_rounds)" "$proof" "$rulings" "$next"
+}
+
+# Smoke evidence for a generated report. A CLI or API change at Tier 1-2 may use
+# an agent-run receipt from record-smoke.sh; a UI change or Tier 3 needs a result
+# pasted under '## Smoke test'.
+exloom_check_smoke() {   # exloom_check_smoke <checklist> <tip> <reviewed-sha> <action> <tier>
+  local cl="$1" tip="$2" reviewed="$3" action="$4" tier="$5" content pasted fork ui=0 line sha
+  [[ "$tier" -ge 1 ]] 2>/dev/null || return 0
+  content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${cl}" 2>/dev/null | tr -d '\r' \
+    | awk '/^<!-- exloom:report/{skip=1} !skip{print} /^<!-- \/exloom:report -->/{skip=0}')"
+  pasted="$(printf '%s\n' "$content" | awk '/^## Smoke test/{f=1; next} /^## /{f=0} f' \
+    | grep -vE '^[[:space:]]*$|^[[:space:]]*none[[:space:].]*$|<[^>]+>')"
+  fork="$(exloom_fork_point "$reviewed" 2>/dev/null || true)"
+  [[ -n "$fork" ]] && git diff --name-only "$fork" "$reviewed" -- . ':(exclude).claude' 2>/dev/null \
+    | grep -Eq '\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte)$|\.component\.ts$|(^|/)(templates|views|pages|components)/' && ui=1
+  [[ -n "$pasted" ]] && return 0
+  if [[ $ui -eq 1 || "$tier" -ge 3 ]]; then
+    _exloom_block "$action" "This change needs a pasted smoke test result: it $( [[ $ui -eq 1 ]] && echo 'changes UI' || echo 'is Tier 3' ).
+Run /smoke-test and paste what you saw under '## Smoke test' in ${cl}; an agent-run receipt does not cover it."
+    return 2
+  fi
+  line="$(MSYS_NO_PATHCONV=1 git show "${tip}:$(exloom_verdict_dir "$cl")/smoke.json" 2>/dev/null | tail -1)"
+  sha="$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+  if [[ "$line" == *'"exit":0,'* && -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null \
+     && { [[ -z "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude' 2>/dev/null)" ]] \
+          || ! exloom_diff_is_behavioural "$sha" "$reviewed"; }; then
+    return 0
+  fi
+  _exloom_block "$action" "No passing smoke test covers this commit.
+Run /smoke-test: for a CLI or API change it runs the check with record-smoke.sh;
+otherwise paste what you saw under '## Smoke test' in ${cl}."
+  return 2
 }
 
 # ---------- proof-of-testedness receipt ----------
@@ -2145,6 +2187,9 @@ derivation is wrong for your repo, that is a rule to fix, not a review to skip."
     # and it is the cheapest evidence exloom produces. Sprint keeps it.
     if [[ "$tier" -ge 1 ]]; then
       exloom_check_proof "$checklist" "$tip" "$reviewed_sha" "$action" "$tier" || return 2
+    fi
+    if [[ $is_report -eq 1 ]]; then
+      exloom_check_smoke "$checklist" "$tip" "$reviewed_sha" "$action" "$tier" || return 2
     fi
 
     # A remedy the reviewer left open is a decision, not a defect, and it is

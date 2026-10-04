@@ -39,7 +39,16 @@ Require specifics: not "the widget should appear" but "the 'Widgets' list should
 
 ## Step 4 — Capture the evidence
 
-Tell the user:
+**Agent-run, for a CLI or API change at Tier 0–2 with no UI files in the diff:** run the check yourself through the recorder, which writes the receipt the gate reads:
+
+```bash
+SMOKE="$(find ~/.claude/plugins -path '*exloom*/scripts/record-smoke.sh' | sort -V | tail -1)"
+bash "$SMOKE" -- <the command or curl call that exercises the change>
+```
+
+It records the command, exit code and commit in `<branch>.verdicts/smoke.json` and the output in `smoke.out`. Check the output shows the expected result; a non-zero exit is a failed smoke test. Commit both files, then go to Step 6.
+
+**Pasted, for a UI change or Tier 3:** the gate does not accept an agent-run receipt. Tell the user:
 
 > Run the boot command. When the system is up, perform the user action. Then paste back: (a) the log lines or API response showing the action completed, (b) the evidence of the user-visible result (UI screenshot link / log excerpt / DB row dump / API response body). If it failed, paste the failure output and we will stop the smoke test here — the change is not ready.
 
@@ -47,7 +56,7 @@ Wait for the paste. If they say "it worked, I don't have output to paste", refus
 
 ## Step 5 — Fill the section
 
-Update the Smoke Test section with:
+For a pasted result, add a `## Smoke test` section above `## Rulings` in the checklist (outside the generated evidence block) with:
 
 - The exact boot command used (including prerequisites).
 - The exact user action, as a numbered list.

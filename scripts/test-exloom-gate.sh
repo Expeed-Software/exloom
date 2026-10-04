@@ -3068,6 +3068,7 @@ printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null
 RH="$(git rev-parse HEAD)"
 printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","mode":"full","model":"claude-opus-5-5"}\n' "$RH" > "$RPV/l1-reviewer.json"
 printf '{"check":"change-is-tested","result":"PROVED","method":"three-run","head":"%s","matrix":""}\n' "$RH" > "$RPV/proof.json"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$RH" > "$RPV/smoke.json"
 exloom_render_report feat/plan >/dev/null 2>&1
 ok "a first render writes the skeleton and the evidence block" \
    "$(grep -cE '^## Rulings$|^<!-- exloom:report|^<!-- /exloom:report -->$' "$RPC")" "3"
@@ -3114,6 +3115,9 @@ exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git 
 ok "reviewed but no proof -> proof" "$(exloom_next_step feat/plan)" "proof"
 printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$NSH" > "$NSV/proof.json"
 exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm proof >/dev/null 2>&1
+ok "proved but no smoke test -> smoke" "$(exloom_next_step feat/plan)" "smoke"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$NSH" > "$NSV/smoke.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm smoke >/dev/null 2>&1
 ok "everything in place -> push" "$(exloom_next_step feat/plan)" "push"
 ok "the status is one line" "$(exloom_status_line feat/plan | grep -c .)" "1"
 ok "...naming tier, proof and the next step" \
@@ -3171,6 +3175,34 @@ sed -i 's/^none$/- src\/a.go:1 — PARKED: kept/' "$FLC"; git add -A >/dev/null 
 printf 'c\n' > src/b.go; git add src/b.go
 ok "once every finding is ruled, the session commits again" "$(fl 'git commit -m next')" "0"
 ok "an ordinary command is not judged" "$(fl 'git status')" "0"
+
+section "smoke evidence: agent-run for CLI and API at Tier 0-2, pasted for UI and Tier 3"
+
+subrepo smoke
+SMC=".claude/reviews/feat/plan.md"; SMV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$SMV"
+SMOKE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/record-smoke.sh"
+printf 'echo 4\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm calc >/dev/null 2>&1
+SMH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$SMH" > "$SMV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$SMH" > "$SMV/proof.json"
+smchk() { exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+  exloom_validate_checklist "$SMC" HEAD 1 test 2>&1 >/dev/null; }
+ok "no smoke evidence -> blocked" "$(smchk | grep -c 'smoke test' | head -1)" "1"
+bash "$SMOKE" -- bash src/calc.sh >/dev/null 2>&1
+ok "the script records the command, exit code and commit" \
+   "$(tail -1 "$SMV/smoke.json" | grep -cE "\"head\":\"$(git rev-parse HEAD)\".*\"exit\":0")" "1"
+ok "...and the output it printed" "$(grep -c '^4$' "$SMV/smoke.out")" "1"
+ok "an agent-run receipt satisfies a Tier 1 CLI change" "$(smchk | grep -c 'smoke test' | head -1)" "0"
+bash "$SMOKE" -- false >/dev/null 2>&1
+ok "a failing command does not" "$(smchk | grep -c 'smoke test' | head -1)" "1"
+mkdir -p web; printf '<p/>\n' > web/page.html; git add -A >/dev/null 2>&1; git commit -qm ui >/dev/null 2>&1
+SMH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$SMH" >> "$SMV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$SMH" >> "$SMV/proof.json"
+bash "$SMOKE" -- true >/dev/null 2>&1
+ok "a UI change needs a pasted result, not an agent receipt" "$(smchk | grep -c 'pasted' | head -1)" "1"
+sed -i 's/^## Rulings$/## Smoke test\n\nOpened \/page.html; the paragraph rendered.\n\n## Rulings/' "$SMC"
+ok "...and the pasted section satisfies it" "$(smchk | grep -c 'smoke test' | head -1)" "0"
 
 section "the bypass leaves a trace"
 
