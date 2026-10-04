@@ -63,7 +63,7 @@ ok() {
   fi
 }
 
-cleanup() { cd / 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { cd / 2>/dev/null; rm -rf "$WORK" "$REG"; }
 trap cleanup EXIT
 
 # ---------- fixture ----------
