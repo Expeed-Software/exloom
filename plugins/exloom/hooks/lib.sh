@@ -853,48 +853,41 @@ exloom_severity_trend() {   # exloom_severity_trend <checklist> <tip>
   printf '%s' "$out"
 }
 
-# How many unresolved CRITICAL findings are on record? This is what decides the
-# recommendation — a branch with an open critical is not ready however many
-# rounds it has had, and a branch with none is ready however many it took.
-exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
-  local vdir all n=0
+# The CRITICAL findings each reviewer's latest pass left open, one JSON line each.
+# A latest pass that approved leaves nothing open, whatever an earlier pass found.
+_exloom_open_critical_lines() {   # _exloom_open_critical_lines <checklist> <tip>
+  local vdir all f agent last receipt head maxr pass addressed
   vdir="$(exloom_verdict_dir "$1")"
   all="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}" 2>/dev/null | grep 'findings.jsonl' || true)"
-  local last=""
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    agent="${f%.findings.jsonl}"
     last="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${f}" 2>/dev/null || true)"
-    local maxr
+    receipt="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${agent}.json" 2>/dev/null | grep '"verdict"' | tail -1)"
+    if [[ -n "$receipt" ]]; then
+      printf '%s' "$receipt" | grep -q '"verdict":"APPROVED"' && continue
+      head="$(printf '%s' "$receipt" | sed -n 's/.*"head":"\([0-9a-f]*\)".*/\1/p')"
+      last="$(printf '%s\n' "$last" | grep -F "\"head\":\"${head}\"")"
+    fi
     maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
     [[ -n "$maxr" ]] || continue
-    # DISTINCT defects, by fingerprint, not finding lines. The same defect
-    # reported in three passes is one thing still open; counting lines would
-    # report "3 critical findings" beside a single cite.
-    n=$(( n + $(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep '"severity":"HIGH"' \
-                 | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u | awk 'END{print NR}') ))
+    pass="$(printf '%s\n' "$last" | grep "\"round\":${maxr},")"
+    addressed="$(printf '%s\n' "$pass" | grep -F '"scope":"ADDRESSED"' | sed -n 's/.*"cite":"\([^"]*\)".*/"cite":"\1"/p')"
+    printf '%s\n' "$pass" | grep '"severity":"HIGH"' | grep -vF '"scope":"ADDRESSED"' \
+      | { if [[ -n "$addressed" ]]; then grep -vF -e "$addressed"; else cat; fi; }
   done <<< "$all"
-  printf '%s' "$n"
 }
 
-# WHICH criticals are open, not how many. The cap question asks the user to
-# choose between merging and fixing, and "2 open criticals" is not enough to
-# choose on — a number is a score, a cite is a defect. Echoes up to four
-# `file:line` cites from the latest round.
+# How many unresolved CRITICAL findings are open? This decides the recommendation.
+# Counted by fingerprint: one defect reported in three passes is one thing open.
+exloom_open_criticals() {   # exloom_open_criticals <checklist> <tip>
+  _exloom_open_critical_lines "$1" "$2" | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p' | sort -u | awk 'END{printf "%d", NR}'
+}
+
+# WHICH criticals are open: up to four `file:line` cites, so the user chooses on defects, not a score.
 exloom_open_critical_cites() {   # exloom_open_critical_cites <checklist> <tip>
-  local vdir all f last maxr out=""
-  vdir="$(exloom_verdict_dir "$1")"
-  all="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}" 2>/dev/null | grep 'findings.jsonl' || true)"
-  while IFS= read -r f; do
-    [[ -n "$f" ]] || continue
-    last="$(MSYS_NO_PATHCONV=1 git show "${2}:${vdir}/${f}" 2>/dev/null || true)"
-    maxr="$(printf '%s\n' "$last" | sed -n 's/.*"round":\([0-9]*\).*/\1/p' | sort -un | tail -1)"
-    [[ -n "$maxr" ]] || continue
-    out="${out}$(printf '%s\n' "$last" | grep "\"round\":${maxr}," | grep '"severity":"HIGH"' \
-                 | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')
-"
-  done <<< "$all"
-  printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort -u | head -4 | paste -sd', ' - 2>/dev/null \
-    || printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort -u | head -4 | tr '\n' ' '
+  _exloom_open_critical_lines "$1" "$2" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p' \
+    | sort -u | head -4 | paste -sd', ' - 2>/dev/null
 }
 
 # Did the LAST review pass look at code anyone had changed?

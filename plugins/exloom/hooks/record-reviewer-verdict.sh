@@ -415,6 +415,9 @@ unparsed_blocking=0
 cur_sev=""
 item_sev=""
 cur_scope="IN-SCOPE"
+in_prev=0
+skip_sec=0
+item_open=0
 
 while IFS= read -r fline; do
   # A heading switches the active severity, and closes it for non-finding sections.
@@ -424,6 +427,12 @@ while IFS= read -r fline; do
       cur_sev=""
       item_sev=""
       cur_scope="IN-SCOPE"
+      item_open=0
+      in_prev=0; skip_sec=0
+      case "$(printf '%s' "$head_txt" | sed 's/^#*[[:space:]]*//')" in
+        previous\ findings*) in_prev=1 ;;
+        clean*|tools\ run*|honest\ caveat*|*meta-notes*) skip_sec=1 ;;
+      esac
       # Normalised across agents: l1 says Critical/Important/Minor, adversarial
       # says Blocking, security says High/Medium/Low. Without normalising, the
       # same defect reported by two reviewers never matches as a re-find.
@@ -444,8 +453,27 @@ while IFS= read -r fline; do
       [[ "$MODE" == "task" && "$head_txt" == *spec* ]] && cur_sev="MED"
       continue ;;
   esac
+  [[ $skip_sec -eq 1 ]] && continue
   not_addressed=0
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
+  # A finding is a list item, or the indented line under one that has no cite yet
+  # (adversarial and security put the cite there). Prose that names a file is not.
+  is_item=0
+  printf '%s' "$fline" | grep -qE '^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]' && is_item=1
+  if [[ -n "$cite" ]]; then
+    if [[ $is_item -eq 0 ]] && ! { [[ $item_open -eq 1 ]] && printf '%s' "$fline" | grep -qE '^[[:space:]]'; }; then
+      item_open=0; continue
+    fi
+    item_open=0
+    if [[ "$MODE" == "verify" && $in_prev -eq 1 ]] \
+       && ! printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*([A-Za-z]+[[:space:]]+)?ADDRESSED'; then
+      continue
+    fi
+  elif [[ $is_item -eq 1 ]]; then
+    item_open=1
+  elif ! printf '%s' "$fline" | grep -qE '^[[:space:]]+[^[:space:]]'; then
+    item_open=0
+  fi
   # Anything but a plain ADDRESSED (NOT, PARTIALLY, …) is still open.
   if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*([A-Za-z]+[[:space:]]+)?ADDRESSED'; then
     if printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*ADDRESSED'; then

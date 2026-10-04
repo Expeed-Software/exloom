@@ -2234,8 +2234,9 @@ ok "...and nothing is printed to stdout (that would be a decision)" \
 # The recommendation comes from OPEN criticals, not from the round number — and
 # the fix option names the DEFECTS. "2 open criticals" is a score; a cite is
 # something a person can decide about.
+RCH="$(sed -n 's/.*"head":"\([0-9a-f]*\)".*/\1/p' "$RCV/l1-reviewer.json" | tail -1)"
 printf '{"round":3,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"c1","head":"%s","at":"n"}\n' \
-  "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
+  "$RCH" > "$RCV/l1-reviewer.findings.jsonl"
 git add -A >/dev/null 2>&1; git commit -qm crit >/dev/null 2>&1
 ok "an open critical -> recommend fixing, not another pass" \
    "$(capmsg | grep -c 'RECOMMENDATION: FIX, THEN RE-REVIEW' | head -1)" "1"
@@ -2244,7 +2245,7 @@ ok "...and the fix option names the cite, not a count" \
 ok "...and the cites come from exloom_open_critical_cites" \
    "$(exloom_open_critical_cites "$RC" HEAD)" "src/one.go:1"
 printf '{"round":3,"agent":"l1-reviewer","severity":"LOW","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"m1","head":"%s","at":"n"}\n' \
-  "$(git rev-parse HEAD)" > "$RCV/l1-reviewer.findings.jsonl"
+  "$RCH" > "$RCV/l1-reviewer.findings.jsonl"
 git add -A >/dev/null 2>&1; git commit -qm minor >/dev/null 2>&1
 ok "only minors open -> recommend merge" \
    "$(capmsg | grep -c 'RECOMMENDATION: MERGE' | head -1)" "1"
@@ -3553,6 +3554,69 @@ printf '@startuml\n' > docs/architecture/flow.puml; rpcommit puml
 ok "a committed patterns file in place at review adds the type" "$(rpchk)" "0"
 printf 'x: 1\n' > docs/architecture/deploy.yaml; rpcommit yaml
 ok "...and nothing else" "$(rpchk)" "2"
+
+section "open criticals come from each reviewer's latest pass; commentary is not a finding"
+
+subrepo opencrit
+OCC=".claude/reviews/feat/plan.md"; OCF=".claude/reviews/feat/plan.verdicts/l1-reviewer.findings.jsonl"
+mkdir -p .claude/reviews/feat; printf '# c\n\n## Rulings\n' > "$OCC"
+printf 'l1\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+ocfeed() {
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+}
+ocfix() { printf '%s\n' "$1" >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1; git rev-parse HEAD; }
+OC0="$(git rev-parse HEAD)"
+ocfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — null dereference
+The caller in src/a.go:3 was read for context and is fine.
+ROUND NEEDED AFTER FIX: YES'
+ok "a sentence under a severity heading is not a finding" "$(grep -c 'src/a.go:3' "$OCF")" "0"
+OC1="$(ocfix f1)"
+ocfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${OC0}..${OC1}
+## Previous findings
+- src/a.go:1 — NOT ADDRESSED: still dereferences null
+ROUND NEEDED AFTER FIX: YES"
+OC2="$(ocfix f2)"
+ocfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${OC1}..${OC2}
+## Previous findings
+- src/a.go:1 — NOT ADDRESSED: the null path is still reachable
+- see src/a.go:3, a critical-looking call that is fine
+The critical branch at src/a.go:2 is now guarded by the check the fix added.
+ROUND NEEDED AFTER FIX: YES"
+ok "round 3: an explanatory sentence is not a finding" \
+   "$(grep "\"head\":\"${OC2}\"" "$OCF" | grep -c 'src/a.go:2')" "0"
+ok "round 3: in verify mode a previous-findings line without NOT ADDRESSED is not a finding" \
+   "$(grep "\"head\":\"${OC2}\"" "$OCF" | grep -c 'src/a.go:3')" "0"
+ok "round 3: the NOT ADDRESSED critical is the one open" "$(exloom_open_criticals "$OCC" HEAD)" "1"
+OC3="$(ocfix f3)"
+ocfeed 'VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+ok "then an approval with no findings leaves nothing open" "$(exloom_open_criticals "$OCC" HEAD)" "0"
+ok "...and no open cites" "$(exloom_open_critical_cites "$OCC" HEAD)" ""
+
+subrepo opencrit2
+OCC=".claude/reviews/feat/plan.md"; mkdir -p .claude/reviews/feat; printf '# c\n\n## Rulings\n' > "$OCC"
+printf 'l1\nl2\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+OC0="$(git rev-parse HEAD)"
+ocfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — null dereference
+ROUND NEEDED AFTER FIX: YES'
+OC1="$(ocfix f1)"
+ocfeed "VERDICT: APPROVED
+MODE: VERIFY ${OC0}..${OC1}
+## Previous findings
+- src/a.go:1 — ADDRESSED
+ROUND NEEDED AFTER FIX: NO"
+ok "a critical the latest pass marked ADDRESSED is not open" "$(exloom_open_criticals "$OCC" HEAD)" "0"
 
 section "the bypass leaves a trace"
 
