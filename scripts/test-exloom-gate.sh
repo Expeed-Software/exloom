@@ -453,7 +453,8 @@ printf '{"check":"change-is-tested","result":"NOT_APPLICABLE","method":"not-appl
 ' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm pna
 ok "NOT_APPLICABLE receipt -> allowed at Tier 1" "$(pchk)" "0"
-ok "...but not at Tier 2" "$(pchk 2)" "2"
+ok "...and at Tier 2" "$(pchk 2)" "0"
+ok "...and at Tier 3" "$(pchk 3)" "0"
 ok "...and says so rather than passing silently"    "$(exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null | grep -c 'NOT_APPLICABLE')" "1"
 
 # The weak result is still bound to the commit. Accepting it must not also mean
