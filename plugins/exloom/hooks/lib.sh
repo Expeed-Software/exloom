@@ -1842,7 +1842,7 @@ otherwise paste what you saw under '## Smoke test' in ${cl}."
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4" tier="${5:-1}"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_na_blocked=0 seen_nnb_blocked=0
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_nnb_blocked=0
 
   # On whenever the gate is on. A repo whose suite needs untracked local state
   # opts out with a COMMITTED .claude/exloom-proof.disabled.
@@ -1894,8 +1894,7 @@ exloom_check_proof() {
           if [[ "$tier" -le 1 ]] || MSYS_NO_PATHCONV=1 git show "${tip}:${checklist}" 2>/dev/null \
                | grep -qE '^-?[[:space:]]*Proof:[^—]*—[[:space:]]*[^[:space:]]'; then ok=1; break
           else seen_nnb_blocked=1; fi ;;
-        *'"result":"NOT_APPLICABLE"'*)
-          if [[ "$tier" -le 1 ]]; then ok=1; seen_notapplicable=1; else seen_na_blocked=1; fi ;;
+        *'"result":"NOT_APPLICABLE"'*) ok=1; seen_notapplicable=1 ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
@@ -1917,13 +1916,6 @@ exloom_check_proof() {
 code. At Tier ${tier} that also needs the user's ruling in ${checklist}, e.g.
   - Proof: deletion only — <their reason>
 Ask them; do not write it for them."
-  elif [[ $seen_na_blocked -eq 1 ]]; then
-    detail="The proof recorded NOT_APPLICABLE: the tests do not compile without the change,
-so the three-run proof could not ask its question. That is accepted only at
-Tier 1; this branch is Tier ${tier}. Make the tests compile at the base (for
-example by testing through an interface that already exists), then re-run:
-
-    bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\""
   elif [[ $seen_cmdswap -eq 1 ]]; then
     detail="A proof receipt covers this commit, but .claude/exloom-test-command has changed
 since it was written, so the receipt proves a command that is no longer the one
