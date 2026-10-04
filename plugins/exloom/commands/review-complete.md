@@ -150,7 +150,7 @@ Previous findings:
 
 Deliver what was asked, at the scope intended; if it seems mistaken, say so in a sentence and continue as asked.
 
-**The fix is made by `exloom:fixer`, not this session.** During the fix loop this session makes no code edits or code commits. Dispatch the fixer, unnamed, with exactly:
+**The fix is made by `exloom:fixer`, not this session.** During the fix loop this session makes no code edits or code commits; exloom refuses its code commit while a REJECTED finding has no ruling. Dispatch the fixer, unnamed, with exactly:
 
 ```
 Fix these review findings on branch <branch>, round <n>. Findings, verbatim:

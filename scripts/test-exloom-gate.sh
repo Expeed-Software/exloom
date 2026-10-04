@@ -554,7 +554,7 @@ ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
       | grep -v '\.claude-plugin/plugin\.json$' | wc -l | tr -d ' ')" "0"
 ok "...while the manifest, where it IS interpolated, still uses it" \
-   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "6"
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "7"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
 section "record-reviewer-verdict hook (a real dispatch writes one)"
@@ -3142,6 +3142,35 @@ ok "a committed setting names the reviewer's model" "$(exloom_reviewer_model l1-
 ok "...and leaves the others on opus" "$(exloom_reviewer_model security-auditor)" "opus"
 ok "the ignore check lists it" \
    "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-reviewer-model')" "1"
+
+section "during the fix loop only the fixer commits code"
+
+subrepo fixloop
+FLC=".claude/reviews/feat/plan.md"; FLV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$FLV"
+printf '# r\n\n## Rulings\n\nnone\n' > "$FLC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+FLH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T10:00:00Z"}\n' "$FLH" > "$FLV/l1-reviewer.json"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:1","fingerprint":"f","head":"%s","at":"n"}\n' "$FLH" > "$FLV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+fl() {   # fl <command> [agent_id] -> exit code of the hook
+  python3 -c "
+import json,sys
+d={'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash','tool_input':{'command':sys.argv[1]}}
+if sys.argv[2]: d.update(agent_id=sys.argv[2], agent_type='exloom:fixer')
+print(json.dumps(d))" "$1" "${2:-}" | bash "$HOOKS_ABS/guard-fix-loop.sh" >/dev/null 2>&1; echo $?
+}
+printf 'b\n' > src/a.go; git add src/a.go
+ok "the main session committing code with an open rejection -> refused" "$(fl 'git commit -m fix')" "2"
+ok "...the fixer subagent committing it -> allowed" "$(fl 'git commit -m fix' agent-1)" "0"
+git reset -q src/a.go
+printf 'x\n' > .claude/reviews/feat/note.md; git add .claude/reviews/feat/note.md
+ok "committing only review files -> allowed" "$(fl 'git commit -m review')" "0"
+git commit -qm note >/dev/null 2>&1
+sed -i 's/^none$/- src\/a.go:1 — PARKED: kept/' "$FLC"; git add -A >/dev/null 2>&1; git commit -qm ruled >/dev/null 2>&1
+printf 'c\n' > src/b.go; git add src/b.go
+ok "once every finding is ruled, the session commits again" "$(fl 'git commit -m next')" "0"
+ok "an ordinary command is not judged" "$(fl 'git status')" "0"
 
 section "the bypass leaves a trace"
 
