@@ -65,6 +65,13 @@ for plugin in $PLUGINS; do
     else
       echo "OK: plugin.json is valid JSON and name matches"
     fi
+    pv=$(python -c "import json; print(json.load(open('$MANIFEST')).get('version',''))")
+    mv=$(python -c "import json; print(next((p.get('version','') for p in json.load(open('$MARKETPLACE'))['plugins'] if p['name']=='$plugin'),''))")
+    if [ "$pv" != "$mv" ]; then
+      fail "$plugin: plugin.json version '$pv' differs from marketplace.json '$mv'"
+    else
+      echo "OK: plugin.json and marketplace.json both say $pv"
+    fi
   fi
 
   # 2. Every SKILL.md has valid frontmatter with name + description matching its folder
@@ -109,7 +116,7 @@ for plugin in $PLUGINS; do
     exloom)
       TEMPLATES_DIR="$PLUGIN_ROOT/assets/claude-md-templates"
       EXPECTED_TEMPLATES=(
-        default.md spring.md micronaut.md nodejs.md strapi.md fastapi.md react.md angular.md
+        default.md spring.md micronaut.md nodejs.md strapi.md fastapi.md react.md angular.md dotnet.md flutter.md
       )
       for tpl in "${EXPECTED_TEMPLATES[@]}"; do
         if [ ! -f "$TEMPLATES_DIR/$tpl" ]; then

@@ -40,6 +40,8 @@
 #                       question cannot be asked. Recorded, not waived - the
 #                       receipt carries method=not-applicable and the gate says
 #                       so on every push. Weakest of the three.
+#   NO_NEW_BEHAVIOUR    no test changed and the diff adds no behavioural source
+#                       line (a deletion); the full suite passes at the tip.
 #
 # NOT_PROVED is reserved for the actual finding: the tests ran without the change
 # and passed anyway. Reporting an additive change as NOT_PROVED made a new class
@@ -122,6 +124,16 @@ if [[ -z "$TESTCMD" ]]; then
   elif [[ -f pytest.ini || -f pyproject.toml || -f setup.cfg ]]; then TESTCMD="pytest -q"
   elif [[ -f go.mod         ]]; then TESTCMD="go test ./... -count=1"
   elif [[ -f Cargo.toml     ]]; then TESTCMD="cargo test"
+  elif [[ -f pubspec.yaml   ]]; then TESTCMD="flutter test"
+  else
+    shopt -s nullglob; _sln=( *.sln ); _proj=( *.csproj ); shopt -u nullglob
+    if [[ ${#_sln[@]} -eq 1 && ${#_proj[@]} -eq 0 ]]; then TESTCMD="dotnet test ${_sln[0]}"
+    elif [[ ${#_sln[@]} -eq 0 && ${#_proj[@]} -eq 1 ]]; then TESTCMD="dotnet test ${_proj[0]}"
+    elif [[ $(( ${#_sln[@]} + ${#_proj[@]} )) -gt 1 ]]; then
+      # Plain `dotnet test` fails here with "multiple project/solution files".
+      echo "more than one .NET solution or project at the root — commit the one to test in .claude/exloom-test-command" >&2
+      exit 2
+    fi
   fi
 fi
 [[ -n "$TESTCMD" ]] || {
@@ -141,10 +153,22 @@ is_test() {
     */src/main/*|*/main/java/*|*/main/kotlin/*|*/main/scala/*|*/main/resources/*|*/app/src/main/*) return 1 ;;
   esac
   case "$1" in
-    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*) return 0 ;;
+    */test/*|*/tests/*|*/spec/*|*/__tests__/*|test/*|tests/*|spec/*|integration_test/*|*/integration_test/*) return 0 ;;
     *Test.java|*Tests.java|*IT.java|*Spec.groovy|*_test.go|*_test.py|test_*.py) return 0 ;;
     *.test.ts|*.test.js|*.test.tsx|*.spec.ts|*.spec.js|*.spec.tsx) return 0 ;;
+    test-*.sh|*/test-*.sh|*.bats|*_test.dart) return 0 ;;
+    *Test.cs|*Tests.cs|*.*Tests/*|*.Test/*) return 0 ;;
   esac
+  # A repo adds its own globs, one per line, in a COMMITTED file.
+  local pat
+  if [[ -f .claude/exloom-test-patterns ]] && git ls-files --error-unmatch .claude/exloom-test-patterns >/dev/null 2>&1; then
+    while IFS= read -r pat; do
+      pat="${pat%$'\r'}"
+      [[ -z "$pat" || "$pat" == \#* ]] && continue
+      # shellcheck disable=SC2254
+      case "$1" in $pat) return 0 ;; esac
+    done < .claude/exloom-test-patterns
+  fi
   return 1
 }
 
@@ -171,7 +195,17 @@ _receipt_early() {
 }
 
 [[ -n "$SRC" ]] || { echo "no source changes to prove (docs/tests only)" >&2; exit 2; }
+NNB=0
 if [[ -z "$TST" ]]; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../hooks" && pwd)/lib.sh"
+  # Only for a committed change: the classifier compares commits.
+  if git diff --quiet HEAD -- . ':(exclude).claude' 2>/dev/null \
+     && [[ -z "$(git ls-files --others --exclude-standard -- . ':(exclude).claude' 2>/dev/null)" ]]; then
+    exloom_diff_adds_behaviour "$BASE" HEAD || NNB=1
+  fi
+fi
+if [[ -z "$TST" && $NNB -eq 0 ]]; then
   BASE="$BASE" TESTCMD="${TESTCMD:-none}" _receipt_early NOT_PROVED
   echo "NOT PROVED: this change touches source but adds or changes NO test."
   printf '  source changed:\n%s\n' "$(printf '%s\n' "$SRC" | sed 's/^/    /')"
@@ -219,8 +253,8 @@ _criteria_from_reports() {   # _criteria_from_reports <worktree>
   [[ -n "$reports" ]] || return 0
 
   if command -v python3 >/dev/null 2>&1; then
-    ( cd "$wt" && printf '%s\n' "$reports" | python3 -c '
-import sys, re, xml.etree.ElementTree as ET
+    ( cd "$wt" && printf '%s\n' "$reports" | PAIRS="${2:-}" PYTHONIOENCODING=utf-8 python3 -c '
+import os, sys, re, xml.etree.ElementTree as ET
 REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
 # XXE and billion-laughs both need a DTD, and a JUnit report never has one, so
 # refusing any file that declares one closes both without needing defusedxml —
@@ -229,6 +263,7 @@ REF = re.compile(r"F-?(\d+)[/_]R-?(\d+)[/_]AC-?(\d+)")
 # whatever is on disk, and that is not the same trust boundary.
 DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.I)
 found = set()
+tests = {}
 for line in sys.stdin:
     path = line.strip()
     if not path:
@@ -248,9 +283,15 @@ for line in sys.stdin:
             continue
         for attr in ("name", "classname"):
             for m in REF.finditer(tc.get(attr) or ""):
-                found.add("F-%s/R-%s/AC-%s" % (m.group(1), m.group(2), m.group(3)))
-print(" ".join(sorted(found)))
-' 2>/dev/null )
+                ref = "F-%s/R-%s/AC-%s" % (m.group(1), m.group(2), m.group(3))
+                found.add(ref)
+                tests.setdefault(ref, "%s.%s" % (tc.get("classname") or "", tc.get("name") or ""))
+if os.environ.get("PAIRS"):
+    for ref in sorted(tests):
+        print("%s\t%s" % (ref, re.sub(r"[\"\\;=\t\n]", "", tests[ref])))
+else:
+    print(" ".join(sorted(found)))
+' 2>/dev/null | tr -d '\r' )
   else
     # No python3: name-only scan. Cannot tell a passing case from a failing one,
     # so it reports nothing rather than reporting a criterion that failed as
@@ -278,11 +319,12 @@ _receipt() {
   mkdir -p "$vdir" 2>/dev/null || return 0
   local cmdhash="none"
   [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
-  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","at":"%s"}\n' \
+  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","matrix":"%s","at":"%s"}\n' \
     "$result" "$method" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
     "$cmdhash" \
     "${CRITERIA_RAN:-}" \
+    "${MATRIX:-}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
@@ -298,6 +340,21 @@ _receipt() {
 #     vendor and target are absent and every run fails on a missing dependency;
 #   - a broken runner, an OOM, a daemon crash, or a `--cmd` that always fails.
 # The control turns all of those into "the environment cannot run the suite".
+if [[ $NNB -eq 1 ]]; then
+  git -C "$WT" checkout -q "$(git rev-parse HEAD)" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
+  echo "no test changed and the diff adds no behavioural line: running the full suite at the tip…"
+  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.tip-out" 2>&1
+  if [[ $? -eq 0 ]]; then
+    _receipt NO_NEW_BEHAVIOUR full-suite
+    echo "NO_NEW_BEHAVIOUR — the change only removes code, and the suite passes at the tip."
+    exit 0
+  fi
+  _receipt NOT_PROVED full-suite
+  echo "NOT PROVED — the change only removes code, but the suite fails at the tip:"
+  tail -25 "$WT/.tip-out" 2>/dev/null
+  exit 1
+fi
+
 echo "run 1/3: base source + base tests (control — must pass)…"
 ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
 base_rc=$?
@@ -334,7 +391,8 @@ fi
 copied=0
 while IFS= read -r t; do
   [[ -z "$t" ]] && continue
-  [[ -f "$t" ]] || continue
+  # A test the branch deleted must not run against the change it was replaced for.
+  [[ -f "$t" ]] || { rm -f "$WT/$t"; copied=$((copied+1)); continue; }
   mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
   cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
 done <<< "$TST"
@@ -366,7 +424,8 @@ fi
 # do not pass on the change they were written for.
 if [[ $rc -ne 0 ]]; then
   while IFS= read -r sf; do
-    [[ -n "$sf" && -f "$sf" ]] || continue
+    [[ -n "$sf" ]] || continue
+    [[ -f "$sf" ]] || { rm -f "$WT/$sf"; continue; }
     mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
     cp "$sf" "$WT/$sf" 2>/dev/null
   done <<< "$SRC"
@@ -478,6 +537,13 @@ if [[ $rc -ne 0 ]]; then
     done
     CRITERIA_RAN="$(printf '%s' "${CRITERIA_PROVED:-}" | tr -s ' ' | sed 's/^ //;s/ $//')"
     CRITERIA_UNPROVED="$(printf '%s' "$CRITERIA_UNPROVED" | tr -s ' ' | sed 's/^ //;s/ $//')"
+    # criterion=test=fails-without-the-change, for the evidence report's matrix.
+    MATRIX=""
+    while IFS=$'\t' read -r _c _t; do
+      [[ -n "$_c" ]] || continue
+      case " $CRITERIA_BASE_OK " in *" $_c "*) _f=no ;; *) _f=yes ;; esac
+      MATRIX="${MATRIX:+${MATRIX};}${_c}=${_t}=${_f}"
+    done < <(_criteria_from_reports "$WT" pairs)
   fi
   _receipt PROVED
   echo

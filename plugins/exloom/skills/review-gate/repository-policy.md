@@ -2,10 +2,9 @@
 
 ## Why it exists
 
-Tier derivation matches hard-coded words: `auth`, `tenant`, `secret`, `crypto`,
-`jwt`, `apikey`, `migrations/`. A repository that calls the same thing
-`identity`, `iam`, `rbac`, `membership` or `access-control` derives a *lower*
-tier for a change that should be the highest one.
+Tier derivation matches built-in words: `auth`, `oauth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`, `security`, `password`, `credential`, `encrypt`, `cipher`, `rbac`, `acl`, `sso`, `saml`, `oidc`, `iam` and `migrations/`.
+A repository that calls the same thing `identity`, `membership` or
+`access-control` derives a *lower* tier for a change that should be the highest one.
 
 That is not a configuration inconvenience. The tier is the one thing with no
 escape hatch, precisely because it decides which gates apply — so a tier that
@@ -26,8 +25,7 @@ risk:
   tier3:
     paths:
       - "**/identity/**"
-      - "**/iam/**"
-      - "**/rbac/**"
+      - "**/membership/**"
       - "**/access-control/**"
   tier2:
     paths:
@@ -131,7 +129,7 @@ before any path rule, and a glob matching a `.md` file does not make it code.
 
 ## Seeing what it does
 
-`/exloom-config` prints the effective configuration: built-in rules, repository
+`/exloom-setup` prints the effective configuration: built-in rules, repository
 rules, the derived tier for the current diff, and which rule produced it.
 
 `/review-init` writes the same reasoning into the checklist under **Tier derived

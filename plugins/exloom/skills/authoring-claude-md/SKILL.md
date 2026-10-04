@@ -7,90 +7,30 @@ description: Use when scaffolding or updating a repo's CLAUDE.md — auto-detect
 
 ## Overview
 
-CLAUDE.md tells Claude what the project is, how it builds and runs, what conventions the team follows, and what patterns to use.
-
-This skill operates in two primary modes: **greenfield** (new repo, template-based, fast) and **brownfield** (existing repo, inference-based, respects what's already there). A third mode, **update**, handles repos that already have a CLAUDE.md. In all three modes, the baselines are layered in — but only where they are compatible with what the codebase already does.
-
-The brownfield principle is non-negotiable: **existing code wins**. If the repo uses tabs and your org's coding conventions say spaces, the CLAUDE.md says tabs. If the repo uses a stricter error handling pattern than your org recommends, keep the stricter pattern. Baselines exist for new code in repos with no established convention — they are defaults, not mandates.
-
-Update mode deserves special emphasis: if a CLAUDE.md already exists, you never overwrite it. You read it, propose changes as an annotated diff, and let the user review. The existing file represents decisions the team already made.
-
-**At a glance** (the rest of this skill is the detail behind these five steps):
-1. Detect the stack and read 3-5 real source files to learn the *actual* conventions.
-2. Pick a stack template from `../../assets/claude-md-templates/` (all are populated — `spring`, `angular`, `nodejs`, `fastapi`, etc.), or use the inline "CLAUDE.md Structure" below if none fits.
-3. Draft the file documenting what the code *does*, never what it *should* do.
-4. Add the Baselines, and put every conflict-with-reality in an Overrides section.
-5. Present for review — never auto-commit. Existing code always wins over baselines.
+Three modes: **greenfield** (new repo, template-based), **brownfield** (existing repo, inference-based), **update** (CLAUDE.md exists — never overwrite; propose an annotated diff). Document what the code *does*, never what it *should* do. Baselines apply only where compatible with the codebase. **Existing code wins**: if the repo uses tabs and the org says spaces, the CLAUDE.md says tabs; every conflict goes in Overrides. Never auto-commit.
 
 ## Process
 
 ### Brownfield Mode (existing repo)
 
-Use this when the repo has code and either no CLAUDE.md or a thin one that needs expansion.
+Use when the repo has code and either no CLAUDE.md or a thin one.
 
-**Step 1: Detect stack.**
+**Step 1: Detect stack.** Scan the repo root and common subdirectories for `package.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `go.mod`, `composer.json`. Identify language and version, framework, test framework, and package manager from each; polyglot repos need every stack.
 
-Scan for build and config files at the repo root and common subdirectories: `package.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `go.mod`, `composer.json`.
+**Step 2: Scan file structure.** Map the top two levels: source roots, test roots, configuration directories, generated or vendor directories to exclude (`node_modules/`, `build/`, `dist/`, `target/`), and monorepo indicators (multiple `package.json` files, `modules/`, `packages/`).
 
-Read the contents of each found file to identify:
-- Primary language and version
-- Framework (Spring Boot, Micronaut, Express, FastAPI, React, Angular, etc.)
-- Test framework (JUnit, Jest, pytest, etc.)
-- Build tooling and package manager
+**Step 3: Sample existing conventions.** Read 3-5 source files from different layers (controller, service, model, utility). Record naming, indentation, error handling, import ordering, comment style and test naming. If inconsistent, say so and let the user decide.
 
-Technique: check for multiple build files — some repos are polyglot. A single repo can have a `pom.xml` and a `package.json` and those are two different stacks that both need to be documented.
+**Step 4: Choose template.** Select from `../../assets/claude-md-templates/` by detected stack. No match (e.g. Quarkus): `default.md`, not a near fit. Polyglot: primary backend template plus a section per additional stack.
 
-Bad pattern: stopping at the first build file found. A `package.json` in a Java project might just be for frontend tooling or linting configuration.
-
-**Step 2: Scan file structure.**
-
-List the top two directory levels. Map what you find:
-- Source roots (`src/main/java`, `src/`, `app/`, `lib/`)
-- Test roots (`src/test/java`, `__tests__/`, `tests/`, `spec/`)
-- Configuration directories (`config/`, `resources/`, `.env*`)
-- Generated or vendor directories to exclude (`node_modules/`, `build/`, `dist/`, `target/`)
-- Any monorepo indicators (multiple `package.json` files, `modules/`, `packages/`)
-
-Technique: folder names reveal the framework. `src/main/java` means Maven/Gradle Java. `app/` suggests Rails, Django, or FastAPI. `pages/` or `app/` with `next.config` means Next.js. `prisma/` at root means Prisma ORM.
-
-Bad pattern: assuming a flat `src/` directory is always Node.js. Read the files inside it — it could be a Go project, a Rust project, or a C++ project.
-
-**Step 3: Sample existing conventions.**
-
-Read 3-5 representative source files from different parts of the codebase. Choose files from different layers (controller, service, model, utility) to get a cross-section. Document what you observe:
-- Naming style: camelCase, snake_case, PascalCase, kebab-case for files
-- Indentation: tabs vs spaces, indent width (2 or 4)
-- Error handling: thrown exceptions, Result types, error codes, callback patterns
-- Import ordering: stdlib first? grouped by type? sorted alphabetically?
-- Comment style: JSDoc, Javadoc, docstrings, inline comments, none
-- Test naming: `*Test.java`, `*.spec.ts`, `test_*.py`, `*_test.go`
-
-If the codebase is inconsistent across files, note the inconsistency explicitly. Do not pick a winner — document that conventions vary and let the user decide which to standardize on.
-
-Bad pattern: reading only one file and assuming the whole codebase follows its style. One file might be legacy, refactored, or written by a different team.
-
-**Step 4: Choose template.**
-
-Select from `../../assets/claude-md-templates/` based on the detected stack. If the stack does not match any available template, use `default.md`. If the repo is polyglot, use the primary backend template as the base and add sections for each additional stack.
-
-Bad pattern: forcing a template that almost-but-not-quite fits. If it is a Quarkus project, use `default.md` and fill it manually rather than stretching `spring.md`. If it is a Hono project, use `nodejs.md` but note the differences from Express conventions.
-
-**Step 5: Draft CLAUDE.md.**
-
-Fill the template with conventions OBSERVED in steps 1-3. The draft should include:
+**Step 5: Draft CLAUDE.md.** Fill the template with conventions OBSERVED in steps 1-3, never aspirational ones (JUnit 4 in the code means JUnit 4 in the doc). Include:
 - Stack details (language, framework, versions, package manager)
 - Project structure (directory map with one-line descriptions)
-- Naming conventions (exactly what the code uses, not what it "should" use)
-- Error handling patterns (documented from actual code, not from a style guide)
-- Test approach (framework, locations, naming, how to run)
-- Build and run commands (prefer to verify by running them — but be cautious: an unfamiliar repo's build, test, or start scripts can have side effects like network calls, database migrations, code generation, or writing files. Read the script first; if it looks like it mutates state or reaches external systems, document the command from the config without executing it rather than running an unknown script blind)
+- Naming conventions, error handling patterns, test approach (framework, locations, naming, how to run)
+- Build and run commands — run one only after reading it; if it mutates state or reaches external systems, document it from config without executing
 - Notable architectural patterns (DDD, hexagonal, layered, event-driven)
 
-Bad pattern: writing aspirational conventions. If the tests use JUnit 4, document JUnit 4 — do not write JUnit 5 because it is "better." If the code has no integration tests, say so — do not add a section on integration testing conventions.
-
-**Step 6: Annotate with the baselines.**
-
-Add the Baselines section. Standard baselines to include:
+**Step 6: Annotate with the baselines.** Add the Baselines section:
 - Planning: use `exloom:planning-for-handoff` for non-trivial changes (3+ steps or architectural decisions)
 - Review: run `/review-complete` before opening a PR
 - New code follows your org's naming standards; existing code is not refactored to match
@@ -98,57 +38,38 @@ Add the Baselines section. Standard baselines to include:
 - Secrets: environment variables only, never committed to source control
 - Logging: structured logging with correlation IDs for services
 
-For each baseline, check if it conflicts with what exists. Conflicts go in the Overrides section with a clear explanation. Example: if the repo already has 60% coverage with no test infrastructure for legacy modules, do not write "80% coverage required" without an Override entry explaining the gap.
+Every baseline conflicting with what exists goes in Overrides with its reason.
 
-Bad pattern: silently overriding an existing convention with a baseline. The Overrides section exists precisely for these situations — use it.
-
-**Step 7: Present to user for review.**
-
-Show the complete draft to the user. Ask two questions:
+**Step 7: Present to user for review.** Show the full draft first. Ask:
 1. "Does this accurately reflect your project's conventions?"
 2. "Any baselines that should go in Overrides?"
 
-Apply their feedback. Never auto-commit a CLAUDE.md. The user has final say on the document that governs how Claude operates in their repo.
-
-Bad pattern: writing the file to disk without presenting it first. Even if you are confident in the output, the user may know details that a file scan cannot reveal.
+Apply feedback.
 
 ### Greenfield Mode (new project)
 
-Use this when the repo has no code yet or only scaffolding.
+Use when the repo has no code yet or only scaffolding.
 
-1. **Ask for stack.** One question: "What stack is this project using?" Do not present a multi-field form or a comparison menu. If the answer is ambiguous ("Java"), follow up with one clarifying question about the framework.
-
-2. **Pick template.** Select the matching template from `../../assets/claude-md-templates/`. If no template matches the stated stack, use `default.md` and fill it in manually.
-
-3. **Fill template.** Add the project name, description, and team context. Apply all the baselines — there are no existing conventions to conflict with. Leave the Overrides section in place but empty, with a line saying what it is for: `_(Empty by default — record here any baseline this repo deliberately departs from, with the reason.)_`
-
-4. **Commit with permission.** Propose the commit message `docs: add CLAUDE.md for [project name]` and wait for user approval before committing.
+1. **Ask for stack.** One question: "What stack is this project using?" If ambiguous ("Java"), ask one follow-up about the framework.
+2. **Pick template** from `../../assets/claude-md-templates/`; `default.md` if none matches.
+3. **Fill template.** Add project name, description, team context and all baselines. Leave the Overrides section in place but empty, with: `_(Empty by default — record here any baseline this repo deliberately departs from, with the reason.)_`
+4. **Commit with permission.** Propose `docs: add CLAUDE.md for [project name]` and wait for approval.
 
 ### Update Mode (CLAUDE.md exists)
 
-When a CLAUDE.md is already present, the operating principle is: do not overwrite.
+Do not overwrite.
 
-1. **Read the existing file completely.** Understand its structure, what it covers, and what decisions it encodes. Note any Overrides already documented — these are deliberate.
+1. **Read the existing file completely.**
+2. **Identify what needs changing**: codebase drift, a missing or incomplete Baselines section, dead file references, wrong commands.
+3. **Propose changes as an annotated diff**, each with what and why, e.g. "Build command: changed from `mvn clean install` to `./gradlew build` — project migrated to Gradle".
+4. **Let the user review.** Apply only approved changes; accept rejections without argument.
+5. **Preserve existing structure.** Do not restructure to the org template. Add the Baselines section at the end.
 
-2. **Identify what needs changing.** Compare the existing CLAUDE.md against:
-   - Current codebase state (did the build tool change? new modules added?)
-   - The baselines (is the Baselines section present? complete?)
-   - Accuracy (does it reference files that no longer exist? wrong commands?)
-
-3. **Propose changes as an annotated diff.** For each proposed change, state what it is and why. Examples:
-   - "Build command: changed from `mvn clean install` to `./gradlew build` — project migrated to Gradle"
-   - "Adding the Baselines section — none of these conflict with existing conventions"
-   - "Removing reference to `src/legacy/` — directory was deleted in commit abc123"
-
-4. **Let the user review.** Apply only approved changes. If the user rejects a change, respect the decision without argument.
-
-5. **Preserve existing structure.** If the existing CLAUDE.md does not follow your org's template structure, do not restructure it. Add the Baselines section at the end and leave the rest of the organization untouched.
-
-If the existing CLAUDE.md contradicts a baseline, the existing file wins. Note the conflict in an Overrides section but do not change what the team already documented. Never remove an Override entry without explicit user confirmation — Overrides exist for a reason the original author understood.
+If the existing file contradicts a baseline, it wins; record the conflict in Overrides. Never remove an Override entry without explicit user confirmation.
 
 ## CLAUDE.md Structure (works without a template)
 
-The templates are a convenience, not a dependency. If the template directory is missing, a template fails to load, or no template fits the stack, you can author a complete CLAUDE.md from this canonical structure alone. Every CLAUDE.md, template-derived or not, should contain these sections:
+If no template loads or fits, use these sections:
 
 ```markdown
 # [Project Name]
@@ -181,11 +102,9 @@ The templates are a convenience, not a dependency. If the template directory is 
  with a one-line reason. Empty section with a placeholder comment if none.]
 ```
 
-The two sections most often treated as "defined elsewhere" are spelled out here on purpose: **the Baselines** is the list in Step 6, and **Overrides** is where every baseline-vs-reality conflict is recorded with its justification. A reader with no template files can produce a correct CLAUDE.md from this skeleton.
-
 ## Templates Reference
 
-Templates live at `../../assets/claude-md-templates/`. Each is a Markdown file with placeholder sections that get filled during the authoring process. If a listed template is absent or unreadable, fall back to the inline structure above and fill it from the conventions you detected — never block on a missing template.
+Templates live at `../../assets/claude-md-templates/`; if one is unreadable, use the structure above.
 
 | Template | Stack | When to Use |
 |----------|-------|-------------|
@@ -197,19 +116,19 @@ Templates live at `../../assets/claude-md-templates/`. Each is a Markdown file w
 | `fastapi.md` | Python 3.12+ / FastAPI | `pyproject.toml` or `requirements.txt` with `fastapi` |
 | `react.md` | React 18+ / TypeScript | `package.json` with `react` — CRA, Vite, or Next.js frontend |
 | `angular.md` | Angular 17+ | `angular.json` present, `package.json` with `@angular/core` |
+| `dotnet.md` | C# 12+ / ASP.NET Core 8.x | a `*.sln` or `*.csproj` at the root |
+| `flutter.md` | Dart 3.x / Flutter 3.x | `pubspec.yaml` with a `flutter` SDK dependency |
 
-If no template matches, use `default.md` and fill in detected conventions manually. Do not create new template files — extend the default.
+Do not create new template files — extend `default.md`.
 
 ## Decision Points
 
 | Situation | Decision |
 |---|---|
-| Repo uses conventions that conflict with the baselines | Existing code wins. Document the conflict in Overrides with justification. |
-| Repo has no established conventions (inconsistent, chaotic) | Use the baselines as the starting point. Note "inferred — no established pattern found." |
+| Repo has no established conventions (inconsistent, chaotic) | Start from the baselines. Note "inferred — no established pattern found." |
 | Polyglot repo (e.g., Java backend + React frontend) | One CLAUDE.md at the repo root covering both stacks. Section headers per stack. |
 | Monorepo with multiple projects | One CLAUDE.md per project root for project-specific conventions, plus one at the monorepo root for shared conventions. |
-| User disagrees with an inferred convention | User wins. Update the CLAUDE.md to match their stated intent immediately. |
-| Existing CLAUDE.md is comprehensive but not in your org's structure | Do not restructure it. Add the Baselines section at the end. Respect existing organization. |
+| User disagrees with an inferred convention | User wins. Update the CLAUDE.md to match. |
 | No build file found (scripts, notebooks, plain files) | Use `default.md` template. Ask the user to describe the stack and tooling. |
 
 ## Failure Modes
@@ -222,8 +141,6 @@ See [worked-example.md](worked-example.md).
 
 ## Integration
 
-- **You arrive here from:** starting work on a repo that is new to you and has no CLAUDE.md, or one whose CLAUDE.md has drifted from what the code now does.
-- **You leave here toward:** the CLAUDE.md is committed and becomes the project's working constitution. Future skills read it for project context — every other skill benefits from a well-authored CLAUDE.md.
-- **If the CLAUDE.md reveals a baseline conflict worth standardizing:** route to `exloom:capturing-learnings` so the conflict, its context, and its resolution are preserved for future projects facing the same situation.
-- **Why it matters:** CLAUDE.md is the first thing read when anyone — person or model — picks the repo up cold. A thorough one directly improves how fast someone switches into the project with full Claude assistance.
-- **Templates reference:** `../../assets/claude-md-templates/`
+- **You arrive here from:** a repo new to you with no CLAUDE.md, or one whose CLAUDE.md has drifted from the code.
+- **You leave here toward:** a committed CLAUDE.md that every other skill reads for project context.
+- **If the CLAUDE.md reveals a baseline conflict worth standardizing:** route to `exloom:capturing-learnings`.

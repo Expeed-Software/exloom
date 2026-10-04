@@ -1,7 +1,7 @@
 {
   "name": "exloom",
   "description": "Evidence for team code review on Claude Code — a spec, a plan, a mechanical proof that your tests notice your change, and reviewer receipts, gated once at push.",
-  "version": "5.5.0",
+  "version": "6.0.0",
   "author": {
     "name": "Expeed Software",
     "email": "support@expeed.com"
@@ -13,8 +13,6 @@
     "development",
     "planning",
     "code-review",
-    "debugging",
-    "test-driven-development",
     "brownfield",
     "team",
     "review",
@@ -34,6 +32,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/guard-reviewer-dispatch.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
@@ -48,6 +55,15 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/block-unverified-push.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/guard-fix-loop.sh"
           }
         ]
       }
@@ -73,5 +89,13 @@
         ]
       }
     ]
+  },
+  "userConfig": {
+    "verbose": {
+      "type": "boolean",
+      "title": "Full gate messages",
+      "description": "Show the full explanation when the gate blocks, instead of one line and '/exloom' for the rest.",
+      "default": false
+    }
   }
 }

@@ -20,6 +20,7 @@ set -u
 # why. The suite tests what the gate does when it is ON; the bypass is tested by
 # setting it deliberately, never by inheriting it.
 unset EXLOOM_REVIEW_SKIP
+export EXLOOM_VERBOSE=1
 
 LIB="plugins/exloom/hooks/lib.sh"
 HOOKS="plugins/exloom/hooks"
@@ -81,7 +82,51 @@ git checkout -q -b feat/x
 # shellcheck source=/dev/null
 . "$LIB_ABS"
 
-echo "== tier derivation (declared tier cannot go below this) =="
+section() { echo "== $1 =="; }
+PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+istest() {   # istest <path> -> test|source, using the script's own function
+  bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
+    is_test "$1" && echo test || echo source' _ "$1"
+}
+sp() {   # sp <path> -> derived tier for a branch changing only that path
+  git checkout -q -B "t/$RANDOM" main
+  mkdir -p "$(dirname "$1")"; printf 'x\n' > "$1"; git add -A >/dev/null 2>&1; git commit -qm p >/dev/null 2>&1
+  exloom_derive_tier HEAD 2>/dev/null
+}
+
+deny() { printf '%s' "$1" | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?; }
+
+PROVE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+
+proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
+  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null
+  git config user.email t@e.com; git config user.name t
+  # The gate marker and a feature branch are REQUIRED, not decoration:
+  # prove-change-is-tested.sh returns before writing a receipt when either is
+  # missing. Without them a fixture asserts exit codes on a path where the
+  # receipt-minting branch is dead code — and a fixture that never reaches the
+  # code it names is worse than none, because it reports green.
+  : > .claude/exloom-gate.enabled
+  : > .claude/exloom-proof.enabled
+  printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
+  printf '%s\n' "$3" > src/calc.sh
+  printf '%s\n' "$2" > tests/calc_test.sh
+  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+  git checkout -q -b feat/proof 2>/dev/null
+  # Sets a global rather than echoing: `$(proofrepo ...)` would run the whole
+  # function in a subshell and its `cd` would not survive, so the fixture files
+  # would land in the wrong directory.
+  BASESHA="$(git rev-parse HEAD)"
+}
+prove() { bash "$PROVE" --base "$1" >/dev/null 2>&1; echo $?; }
+# The exit code is the smaller half of the contract. What the gate actually reads
+# is the receipt, so assert on that too — an exit code alone cannot distinguish
+# "proved" from "wrote nothing and happened to return 0".
+proofres() { sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' \
+               ".claude/reviews/feat/proof.verdicts/proof.json" 2>/dev/null | tail -1; }
+
+section "tier derivation (declared tier cannot go below this)"
 
 printf 'a\n' > README.md; git add -A; git commit -qm docs
 ok "docs-only -> 0" "$(exloom_derive_tier HEAD)" "0"
@@ -132,7 +177,7 @@ printf 'a
 ok "authz -> 3" "$(exloom_derive_tier HEAD)" "3"
 git checkout -q feat/x
 
-echo "== verdict receipts (dispatch is recorded, not claimed) =="
+section "verdict receipts (dispatch is recorded, not claimed)"
 
 CHECK=".claude/reviews/feat/x.md"
 mkdir -p "$(dirname "$CHECK")"
@@ -182,7 +227,7 @@ exloom_check_verdicts "$C2" 1 HEAD "$R2" "test" 2>/dev/null
 ok "uncommitted receipt -> blocked" "$?" "2"
 git checkout -q feat/x
 
-echo "== staleness by change class (a typo fix must not demand another round) =="
+section "staleness by change class (a typo fix must not demand another round)"
 
 # Invalidating a review on ANY code change, combined with fixing findings,
 # guarantees another round after every round — the loop has no terminating state.
@@ -260,7 +305,7 @@ exloom_check_verdicts "$CC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null
 ok "behavioural commit after review -> review invalidated" "$?" "2"
 git checkout -q feat/x
 
-echo "== code-reviewer verdicts (a REJECTED review does not satisfy the gate) =="
+section "code-reviewer verdicts (a REJECTED review does not satisfy the gate)"
 
 # A receipt states a conclusion or it states nothing. REJECTED and UNKNOWN both
 # fail the gate, and a line with no verdict key at all records a launch rather
@@ -326,7 +371,7 @@ git add -A; git commit -qm r2
 ok "old APPROVED does not vouch for a new REJECTED" "$(chk)" "2"
 git checkout -q feat/x
 
-echo "== a remedy the reviewer left open is not the author's to pick =="
+section "a remedy the reviewer left open is not the author's to pick"
 
 subrepo choices noorigin
 CH=".claude/reviews/feat/ch.md"; mkdir -p "$(dirname "$CH")"
@@ -374,21 +419,21 @@ ok "...and counts once committed" "$(cchk)" "0"
 
 cd "$WORK" || exit 1
 
-echo "== proof receipt (the tested-ness check cannot be skipped by forgetting) =="
+section "proof receipt (the tested-ness check cannot be skipped by forgetting)"
 
 git checkout -q -b feat/proof main
 CP=".claude/reviews/feat/proof.md"; mkdir -p "$(dirname "$CP")"
 CPD="$(exloom_verdict_dir "$CP")"; mkdir -p "$CPD"
-pchk() { exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null; echo $?; }
-
-ok "without the marker the proof is not required" "$(pchk)" "0"
-: > .claude/exloom-proof.enabled
-ok "an untracked marker does not enable it" "$(pchk)" "0"
-git add -A; git commit -qm enable
+pchk() { exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" "test" "${1:-1}" 2>/dev/null; echo $?; }
 
 printf 'a\n' > src/p.go; git add -A; git commit -qm p
 RP="$(git rev-parse HEAD)"
-ok "a committed marker enables it, and no receipt blocks" "$(pchk)" "2"
+ok "the proof is required by default, and no receipt blocks" "$(pchk)" "2"
+: > .claude/exloom-proof.disabled
+ok "an untracked opt-out marker does not turn it off" "$(pchk)" "2"
+git add -A; git commit -qm disable
+ok "a committed opt-out marker turns it off" "$(pchk)" "0"
+git rm -q .claude/exloom-proof.disabled; git commit -qm reenable
 
 printf '{"check":"change-is-tested","result":"NOT_PROVED","head":"%s"}\n' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm p2
@@ -407,7 +452,8 @@ ok "PROVED receipt covering the commit -> allowed" "$(pchk)" "0"
 printf '{"check":"change-is-tested","result":"NOT_APPLICABLE","method":"not-applicable","head":"%s"}
 ' "$RP" > "$CPD/proof.json"
 git add -A; git commit -qm pna
-ok "NOT_APPLICABLE receipt -> allowed" "$(pchk)" "0"
+ok "NOT_APPLICABLE receipt -> allowed at Tier 1" "$(pchk)" "0"
+ok "...but not at Tier 2" "$(pchk 2)" "2"
 ok "...and says so rather than passing silently"    "$(exloom_check_proof "$CP" HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null | grep -c 'NOT_APPLICABLE')" "1"
 
 # The weak result is still bound to the commit. Accepting it must not also mean
@@ -441,9 +487,7 @@ ok "hand-writing a proof receipt -> denied" \
   "$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/proof.verdicts/proof.json"}}' | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?)" "2"
 git checkout -q feat/x
 
-echo "== protect-verdicts hook (a receipt cannot be written by hand) =="
-
-deny() { printf '%s' "$1" | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?; }
+section "protect-verdicts hook (a receipt cannot be written by hand)"
 
 ok "Write to a receipt -> denied" \
   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.verdicts/l1-reviewer.json"}}')" "2"
@@ -462,7 +506,7 @@ ok "reading a receipt -> allowed" \
 ok "unrelated command -> allowed" \
   "$(deny '{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}')" "0"
 
-echo "== protection: state file and wholesale deletion =="
+section "protection: state file and wholesale deletion"
 
 # Guarding `.verdicts/` alone is not enough: `rm -rf .claude/reviews` and
 # `git clean -fdx` name neither the directory nor the state file, and either one
@@ -473,7 +517,7 @@ ok "rm -rf of the reviews tree -> denied"   "$(deny '{"tool_name":"Bash","tool_i
 ok "git clean -fdx -> denied"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"git clean -fdx"}}')" "2"
 ok "reading the state file -> allowed"   "$(deny '{"tool_name":"Bash","tool_input":{"command":"cat .claude/reviews/feat/x.state"}}')" "0"
 
-echo "== remediation commands in block messages must actually run =="
+section "remediation commands in block messages must actually run"
 
 # ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is
 # NOT set in the Bash environment. A remediation command built from it fails with
@@ -510,10 +554,10 @@ ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
       | grep -v '\.claude-plugin/plugin\.json$' | wc -l | tr -d ' ')" "0"
 ok "...while the manifest, where it IS interpolated, still uses it" \
-   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "5"
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "7"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
-echo "== record-reviewer-verdict hook (a real dispatch writes one) =="
+section "record-reviewer-verdict hook (a real dispatch writes one)"
 
 git checkout -q -b feat/rec main
 RVD=".claude/reviews/feat/rec.verdicts"
@@ -529,10 +573,10 @@ record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"gene
 ok "general-purpose agent -> no receipt" "$(ls "$RVD" | wc -l | tr -d ' ')" "1"
 
 record '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"l1-reviewer"}}'
-ok "unprefixed reviewer name also matches" "$([[ -f "$RVD/l1-reviewer.json" ]] && echo yes || echo no)" "yes"
+ok "an unprefixed reviewer name writes no receipt" "$([[ -f "$RVD/l1-reviewer.json" ]] && echo yes || echo no)" "no"
 
 record '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
-ok "non-Task tool ignored" "$(ls "$RVD" | wc -l | tr -d ' ')" "2"
+ok "non-Task tool ignored" "$(ls "$RVD" | wc -l | tr -d ' ')" "1"
 
 # The whole gate is opt-in; with the marker gone, neither hook does anything.
 mv .claude/exloom-gate.enabled .claude/gate-off
@@ -543,7 +587,7 @@ ok "gate off -> receipt writes allowed" \
   "$(deny '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/x.verdicts/l1-reviewer.json"}}')" "0"
 mv .claude/gate-off .claude/exloom-gate.enabled
 
-echo "== verdicts (a dispatch is not a review) =="
+section "verdicts (a dispatch is not a review)"
 
 # A receipt that records only that a reviewer RAN enforces attendance, not
 # review: a REJECTED report would open the gate exactly like an approval. The
@@ -584,7 +628,7 @@ and I could not complete the review.'
 ok "echoed format template is not an approval" \
    "$(grep -c '"verdict":"APPROVED"' "$VF" 2>/dev/null | head -1)" "0"
 
-echo "== classifier: real code the old version called non-behavioural =="
+section "classifier: real code the old version called non-behavioural"
 
 # Each case below is a line a naive comment-stripper reads as inert. Getting any
 # of them wrong keeps a stale reviewer receipt "covering" a commit whose
@@ -640,7 +684,7 @@ printf '# a different python comment\nx = 1\n' > csrc/p.py
 ok "Python # comment change -> NOT behavioural" "$(beh pycmt "$CB")" "no"
 git checkout -q feat/x
 
-echo "== reviewer output parsed as the shipped agents actually print it =="
+section "reviewer output parsed as the shipped agents actually print it"
 
 # Fixtures copied from agents/l1-reviewer.md's own "Output format — strict"
 # block. Severity sits on the HEADING and the finding line carries only a cite;
@@ -697,7 +741,7 @@ ok "echoed template does not win over the real verdict" "$(vof)" "REJECTED"
 
 cd "$WORK" || exit 1
 
-echo "== classifier: near-misses of the comment-marker rules =="
+section "classifier: near-misses of the comment-marker rules"
 
 # Each case sits one character away from a rule above it. These are the shapes a
 # marker-based classifier gets wrong once it has been made to handle the obvious
@@ -730,7 +774,7 @@ printf 'cat <<EOF\n# heading TWO CHANGED\nEOF\n' > r2/e.sh
 ok "heredoc body in .sh -> behavioural" "$(r2beh heredoc "$RB")" "yes"
 git checkout -q feat/x
 
-echo "== verdict decoration: every form an LLM actually emits =="
+section "verdict decoration: every form an LLM actually emits"
 
 subrepo vdec
 printf '# plan\n- src/one.go\n' > docs/plans/p.md
@@ -762,7 +806,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 ok "'Critical (cleanup...)' still records findings" \
    "$(grep -c . "$VVD/l1-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-echo "== proof: the three-run protocol =="
+section "proof: the three-run protocol"
 
 PRV="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
 prv() { local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
@@ -790,7 +834,7 @@ ok "genuine behavioural test -> PROVED" "$(prvrun "$PB")" "0"
 ok "--cmd false -> PROOF VOID" \
    "$(bash "$PRV" --base "$PB" --cmd false >/dev/null 2>&1; echo $?)" "2"
 
-echo "== re-find disposition: next-line keyword, and legacy checklists =="
+section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
 LD=".claude/reviews/feat/plan.verdicts"; mkdir -p "$LD"
@@ -811,7 +855,7 @@ ok "legacy checklist (no ## Re-finds) still disposable" "$?" "0"
 
 cd "$WORK" || exit 1
 
-echo "== round-3 blockers: forgery, binding, writing ABOUT the guarded path =="
+section "round-3 blockers: forgery, binding, writing ABOUT the guarded path"
 
 # Matching command TEXT rather than command TARGETS denies anything that merely
 # MENTIONS the guarded path — a commit message about the guard, a note written
@@ -834,7 +878,7 @@ ok "a redirect INTO the path -> still denied" \
 ok "a quoted target -> still denied" \
    "$(deny "$(jbash "echo x | tee \"${GV}\"")")" "2"
 
-echo "== a shell redirection is not a refspec =="
+section "a shell redirection is not a refspec"
 
 # `git push origin 2>&1` must not parse as a push of a branch named `2>&1`. It
 # would make the block message tell the author to run /review-init for a branch
@@ -852,7 +896,7 @@ ok "git push origin feat/z 2>&1 -> feat/z"       "$(pt 'git push origin feat/z 2
 ok "git push origin HEAD -> HEAD"                "$(pt 'git push origin HEAD')" "HEAD"
 ok "git push origin other-branch -> other-branch" "$(pt 'git push origin other-branch')" "other-branch"
 
-echo "== SubagentStop: the verdict is captured at COMPLETION =="
+section "SubagentStop: the verdict is captured at COMPLETION"
 
 # PostToolUse fires at launch and carries no report; SubagentStop fires on
 # completion and carries it verbatim. Listening only to the first records every
@@ -905,7 +949,7 @@ ok "a pre-verdict receipt is no longer grandfathered" "$LRC" "2"
 ok "...and the block names the fix, not just the refusal" \
    "$(printf '%s' "$LOUT" | grep -c 'without a name')" "1"
 
-echo "== ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists =="
+section "ASYNC dispatch: PostToolUse fires at LAUNCH, before any report exists"
 
 # The payload of an async launch, verbatim. It carries no report at all, because
 # the reviewer has not run yet.
@@ -979,7 +1023,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 ok "a real report with no VERDICT line -> still UNKNOWN" \
    "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$ADV/l1-reviewer.json" 2>/dev/null | tail -1)" "UNKNOWN"
 
-echo "== payload shape: the field the harness actually sends =="
+section "payload shape: the field the harness actually sends"
 
 # The harness delivers a Task result as `tool_response`, a content-block array.
 # A fixture feeding `tool_output` as a bare string tests a shape nothing emits,
@@ -1000,7 +1044,7 @@ ok "tool_output bare string (older shape) -> still read" \
    "$(shape_verdict '{"tool_name":"Task","session_id":"s","tool_input":{"subagent_type":"exloom:l1-reviewer"},"tool_output":"VERDICT: APPROVED"}')" \
    "APPROVED"
 
-echo "== CONTRACT: every shipped agent's own output block, through the real parser =="
+section "CONTRACT: every shipped agent's own output block, through the real parser"
 
 # The producer and the consumer are separate files, and nothing else checks that
 # they agree. This drives EVERY agent's documented Output-format block through the
@@ -1034,7 +1078,7 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
 fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
 
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
   blk="$(agent_block "$a")"
   ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
 
@@ -1053,7 +1097,7 @@ for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"
 done
 
 # The verdict line each agent literally documents must not be self-defeating.
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
   vline="$(grep -m1 '^VERDICT: APPROVED' "$AGENTS_DIR/$a.md" || true)"
   ok "$a: documented verdict line is unambiguous (no '|')" \
      "$(printf '%s' "$vline" | grep -c '|')" "0"
@@ -1071,9 +1115,9 @@ VERDICT: REJECTED (1 items)'
 ok "adversarial: '## Non-blocking' is not recorded as blocking severity" \
    "$(grep -c '"severity":"HIGH"' "$CVD/adversarial-reviewer.findings.jsonl" 2>/dev/null | head -1)" "1"
 
-echo "== CONTRACT: every template placeholder is enforced, every alternation is written =="
+section "CONTRACT: every template placeholder is enforced, every alternation is written"
 
-TPL="$(cd "$(dirname "$LIB_ABS")/../templates" && pwd)/review-checklist.md"
+TPL="$(cd "$(dirname "$LIB_ABS")/../../../scripts/fixtures" && pwd)/legacy-review-checklist.md"
 PRE="$(sed -n "s/^  placeholder_re='\(.*\)'$/\1/p" "$LIB_ABS")"
 ok "placeholder_re extracted from lib.sh" "$([[ -n "$PRE" ]] && echo yes || echo no)" "yes"
 
@@ -1110,40 +1154,11 @@ ok "every scripts/*.sh named in a hook exists in the plugin" "$BAD" "0"
 
 cd "$WORK" || exit 1
 
-echo "== prove-change-is-tested (author-side, before review) =="
+section "prove-change-is-tested (author-side, before review)"
 
 # The three shapes this check exists to catch before review starts: a decorative
 # assertion, a write-path test with no read-path test, and a test task that
 # reports UP-TO-DATE and never runs.
-PROVE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
-
-proofrepo() {   # proofrepo <name> <base-test-body> <base-src-body>
-  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
-  git init -q -b main . 2>/dev/null
-  git config user.email t@e.com; git config user.name t
-  # The gate marker and a feature branch are REQUIRED, not decoration:
-  # prove-change-is-tested.sh returns before writing a receipt when either is
-  # missing. Without them a fixture asserts exit codes on a path where the
-  # receipt-minting branch is dead code — and a fixture that never reaches the
-  # code it names is worse than none, because it reports green.
-  : > .claude/exloom-gate.enabled
-  : > .claude/exloom-proof.enabled
-  printf 'bash tests/calc_test.sh\n' > .claude/exloom-test-command
-  printf '%s\n' "$3" > src/calc.sh
-  printf '%s\n' "$2" > tests/calc_test.sh
-  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
-  git checkout -q -b feat/proof 2>/dev/null
-  # Sets a global rather than echoing: `$(proofrepo ...)` would run the whole
-  # function in a subshell and its `cd` would not survive, so the fixture files
-  # would land in the wrong directory.
-  BASESHA="$(git rev-parse HEAD)"
-}
-prove() { bash "$PROVE" --base "$1" >/dev/null 2>&1; echo $?; }
-# The exit code is the smaller half of the contract. What the gate actually reads
-# is the receipt, so assert on that too — an exit code alone cannot distinguish
-# "proved" from "wrote nothing and happened to return 0".
-proofres() { sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' \
-               ".claude/reviews/feat/proof.verdicts/proof.json" 2>/dev/null | tail -1; }
 
 # A. A test that genuinely notices the change -> PROVED.
 proofrepo good 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
@@ -1179,7 +1194,7 @@ ok "no worktree left behind" "$(git worktree list | grep -c exloom-proof || true
 
 cd "$WORK" || exit 1
 
-echo "== the loop-termination signal is recorded, not just emitted =="
+section "the loop-termination signal is recorded, not just emitted"
 
 # Every agent emits `ROUND NEEDED AFTER FIX:` as a mandatory closing line. It is
 # the signal that lets a loop terminate, so it has to be recorded rather than
@@ -1211,7 +1226,7 @@ ok "decorated form still read" \
 ok "no line at all -> UNKNOWN, never silently NO" \
    "$(rn 'VERDICT: APPROVED')" "UNKNOWN"
 
-echo "== one dispatch leaves one receipt line, not eighteen =="
+section "one dispatch leaves one receipt line, not eighteen"
 
 # SubagentStop fires on EVERY turn a reviewer stops on, not only its last. A
 # reviewer that reads eight files stops eight times, and the seven intermediate
@@ -1280,7 +1295,7 @@ ok "a new commit gets its own line" "$(lines)" "5"
 
 cd "$WORK" || exit 1
 
-echo "== lanes: rigour earned by stakes, not imposed by process =="
+section "lanes: rigour earned by stakes, not imposed by process"
 
 # Tiers scale review DEPTH and are derived from the diff. They do not scale
 # CEREMONY, and ceremony is what a small change cannot afford — a single strict
@@ -1361,7 +1376,7 @@ ok "Standard still accepts a documented skip at Tier 3" \
 
 cd "$WORK" || exit 1
 
-echo "== a javadoc paragraph break is not a pointer dereference =="
+section "a javadoc paragraph break is not a pointer dereference"
 
 # A bare `*` line is how every javadoc block separates paragraphs. It strips to
 # `*`, which does not match the `'* '*` continuation case (that needs a trailing
@@ -1399,7 +1414,7 @@ ok "...and a pointer dereference is still code" \
 
 cd "$WORK" || exit 1
 
-echo "== a receipt goes to the repo the REVIEW is about, not the session's cwd =="
+section "a receipt goes to the repo the REVIEW is about, not the session's cwd"
 
 # A reviewer dispatched at a worktree completes while the session's cwd is
 # elsewhere. Resolving the repo from cwd alone finds no gate marker there and
@@ -1447,7 +1462,7 @@ ok "...and names what to do about it" \
 
 cd "$WORK" || exit 1
 
-echo "== the round a finding belongs to is derived, never read from a state file =="
+section "the round a finding belongs to is derived, never read from a state file"
 
 # The round has to come from the receipts themselves. Reading it from a state
 # file nothing writes lands every finding in round 0, and two things then fail
@@ -1478,7 +1493,7 @@ ok "open criticals counts DEFECTS, not finding lines" \
 
 cd "$WORK" || exit 1
 
-echo "== the gate says where it stands at every completion, not only at the end =="
+section "the gate says where it stands at every completion, not only at the end"
 
 # A session that hand-dispatches reviewers gets the same findings as the command,
 # so the two feel equivalent, and nothing contradicts that until the push is
@@ -1535,7 +1550,7 @@ ok "the status never changes the hook's exit code" \
 
 cd "$WORK" || exit 1
 
-echo "== reading a receipt is not writing one =="
+section "reading a receipt is not writing one"
 
 # Matching a bare `>` anywhere in the command denies two read-only forms:
 #
@@ -1571,7 +1586,7 @@ ok "touching the gate marker is denied"       "$(pv 'touch .claude/exloom-gate.e
 
 cd "$WORK" || exit 1
 
-echo "== the fork point is the NEAREST branch, not the first one named =="
+section "the fork point is the NEAREST branch, not the first one named"
 
 # Taking the FIRST candidate that resolves — origin/main, else master, else dev —
 # breaks in a repo that keeps main as a RELEASE branch and dev as the integration
@@ -1691,7 +1706,7 @@ ok "no candidate branch at all -> fails rather than guessing a base" \
 
 cd "$WORK" || exit 1
 
-echo "== criterion coverage is produced by the runner, never by a test's name =="
+section "criterion coverage is produced by the runner, never by a test's name"
 
 # The criterion-to-test join, done without a per-framework adapter: the ref goes
 # in the TEST NAME, and every runner that matters emits JUnit XML. One parser
@@ -1754,7 +1769,20 @@ ok "...and the run says so out loud, rather than dropping it silently" \
 ok "the receipt records a PROVED result alongside the criteria" \
    "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$PJ" | tail -1)" "PROVED"
 
-echo "== an additive change is provable by mutation, not by absence =="
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+SPECF="$REG/criteria/F-012-orders.md"
+printf 'R-3 · event\nAC-1 · unit\nAC-2 · unit\nAC-3 · unit\nR-9 · event\nAC-1 · unit\n' > "$SPECF"
+ok "the spec lists its criteria in ref form" \
+   "$(exloom_spec_criteria "$SPECF" | tr '\n' ' ')" "F-012/R-3/AC-1 F-012/R-3/AC-2 F-012/R-3/AC-3 F-012/R-9/AC-1 "
+MX="$(exloom_criteria_matrix .claude/reviews/feat/plan.md HEAD "$SPECF")"
+ok "matrix: a proved criterion names its test, failing without and passing with" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-3/AC-1 | T.F-012/R-3/AC-1 — notices the change | yes | yes |$')" "1"
+ok "matrix: a criterion whose test passes without the change says so" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-9/AC-1 | .* | no | yes |$')" "1"
+ok "matrix: a criterion with no test is open" \
+   "$(printf '%s\n' "$MX" | grep -c '^| F-012/R-3/AC-3 | — | open |')" "1"
+
+section "an additive change is provable by mutation, not by absence"
 
 # The three-run proof is structurally unsatisfiable for a purely additive change:
 # every test exercising a new API fails to COMPILE at base. Refusing to call that
@@ -1847,7 +1875,7 @@ ok "...and it is not recorded as a mutation result" \
 
 cd "$WORK" || exit 1
 
-echo "== the spec linter: structural errors block, judgement calls warn =="
+section "the spec linter: structural errors block, judgement calls warn"
 
 # The line between ERROR and WARN is the whole design. Errors are structural and
 # a machine cannot be wrong about them; warns are judgement and a machine
@@ -2000,7 +2028,7 @@ ok "a CRLF spec lints identically" "$(lintrc)" "0"
 
 cd "$WORK" || exit 1
 
-echo "== the proof binds the COMMAND it proved, not just its own presence =="
+section "the proof binds the COMMAND it proved, not just its own presence"
 
 # The receipt records the hash of the pinned test command, and the gate compares
 # it. Without that comparison a repo could prove with a real suite, then point
@@ -2020,7 +2048,7 @@ printf 'true\n' > .claude/exloom-test-command
 git add -A >/dev/null 2>&1; git commit -qm swap >/dev/null 2>&1
 ok "test command swapped after the proof -> blocked" "$(prf)" "2"
 
-echo "== security review is triggered by SURFACE, not only by tier =="
+section "security review is triggered by SURFACE, not only by tier"
 
 # Dependency and deserialization changes derive to Tier 1 or 2, so requiring
 # security-auditor by tier alone would never reach them — and the skill promises
@@ -2054,17 +2082,12 @@ ok "ordinary source -> NOT a security surface (no over-block)" \
 
 cd "$WORK" || exit 1
 
-echo "== test-vs-source classification: a production package named spec/ =="
+section "test-vs-source classification: a production package named spec/"
 
 # A production package can be named `spec`. If `*/spec/*` matched inside
 # src/main, the proof would revert part of a production package and keep the
 # rest: the tree would not compile, and the run would fail for a reason that has
 # nothing to do with the tests.
-PRVS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
-istest() {   # istest <path> -> test|source, using the script's own function
-  bash -c 'set -u; '"$(sed -n '/^is_test() {/,/^}/p' "$PRVS")"'
-    is_test "$1" && echo test || echo source' _ "$1"
-}
 ok "src/main spec package -> source" \
    "$(istest 'svc/src/main/java/com/example/orchestration/spec/TopicSpec.java')" "source"
 ok "src/main anything -> source" \
@@ -2075,8 +2098,19 @@ ok "ruby spec/ dir -> test" "$(istest 'spec/models/order_spec.rb')" "test"
 ok "js .spec.ts -> test"     "$(istest 'src/order.spec.ts')" "test"
 ok "go _test.go -> test"     "$(istest 'internal/order/order_test.go')" "test"
 ok "plain source -> source"  "$(istest 'internal/order/order.go')" "source"
+for p in scripts/test-all.sh test-gate.sh hooks/gate.bats lib/widgets/card_test.dart \
+         src/MyApp.Tests/OrderTests.cs src/MyApp.UnitTests/Order.cs src/MyApp.IntegrationTests/Api.cs \
+         src/MyApp.Test/Order.cs src/Orders/OrderServiceTest.cs; do
+  ok "$p -> test" "$(istest "$p")" "test"
+done
+ok "a C# source file -> source" "$(istest 'src/MyApp/OrderService.cs')" "source"
+printf 'checks/*.check\n' > .claude/exloom-test-patterns
+ok "an uncommitted repo pattern is ignored" "$(istest 'checks/a.check')" "source"
+git add .claude/exloom-test-patterns >/dev/null 2>&1; git commit -qm pat >/dev/null 2>&1
+ok "a committed repo pattern extends the list" "$(istest 'checks/a.check')" "test"
+git rm -q .claude/exloom-test-patterns; git commit -qm unpat >/dev/null 2>&1
 
-echo "== the shipped template must not block a branch that filled it honestly =="
+section "the shipped template must not block a branch that filled it honestly"
 
 # A placeholder example left in the document BODY blocks every branch: a
 # developer who correctly used no escape hatch leaves the line alone, and the
@@ -2085,7 +2119,7 @@ echo "== the shipped template must not block a branch that filled it honestly ==
 # The placeholder-coverage test above cannot catch that. It asks whether each
 # token is RECOGNISED, not whether an honestly-completed checklist survives the
 # scan — which is a different question, and this is where it is asked.
-TPL="$HOOKS_ABS/../templates/review-checklist.md"
+TPL="$HOOKS_ABS/../../../scripts/fixtures/legacy-review-checklist.md"
 for tier in 0 1 2 3; do
   filled="$(sed -e 's/<[^>]*>/filled/g' \
                 -e 's/- \[ \]/- [x]/g' "$TPL")"
@@ -2099,7 +2133,7 @@ done
 ok "no placeholder example outside a comment in Escape hatches" \
    "$(awk '/^## Escape hatches used/,/^## Provenance/' "$TPL" | grep -v '^ *<!--' | grep -vE '^ ' | grep -c '<step name>' | head -1)" "0"
 
-echo "== reviewers are decoupled: only L1 must cover the shipped commit =="
+section "reviewers are decoupled: only L1 must cover the shipped commit"
 
 # Requiring every reviewer to approve the SAME commit is what stops a loop
 # converging: a fix cancels approvals from reviewers that were already satisfied,
@@ -2134,7 +2168,7 @@ ok "...and it names the agent that is behind" \
 ok "...while L1, which covers the tip, is NOT reported behind" \
    "$(exloom_check_verdicts "$DC" 2 HEAD "$(git rev-parse HEAD)" "test" 2>&1 >/dev/null | grep -c 'l1-reviewer approved' | head -1)" "0"
 
-echo "== the round cap: three rounds, then a person decides =="
+section "the round cap: three rounds, then a person decides"
 
 subrepo roundcap
 RC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$RC")"
@@ -2232,9 +2266,21 @@ ok "...and the cap report says so, rather than counting it" \
 # to "did anyone approve this".
 printf '\n## Escape hatches used\n- User approved at round cap — approved after 3 passes\n' >> "$RC"
 git add -A >/dev/null 2>&1; git commit -qm userok >/dev/null 2>&1
-ok "the answer does not waive a reviewer that REJECTED the code" "$(rchk)" "2"
+ok "the answer does not waive a REJECTED review with no rulings" "$(rchk)" "2"
 ok "...and says which question it actually answered" \
    "$(capmsg | grep -c 'does not answer' | head -1)" "1"
+REJ="$(sed -n 's/.*"head":"\([0-9a-f]*\)","verdict":"REJECTED".*/\1/p' "$RCV/l1-reviewer.json" | tail -1)"
+printf '{"round":4,"agent":"l1-reviewer","severity":"MED","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"i9","head":"%s","at":"n"}\n' \
+  "$REJ" >> "$RCV/l1-reviewer.findings.jsonl"
+printf '\n## Rulings\n- src/one.go:1 — PARKED: the retry covers it\n' >> "$RC"
+git add -A >/dev/null 2>&1; git commit -qm ruled >/dev/null 2>&1
+ok "...but with a ruling on each open finding the gate passes" "$(rchk)" "0"
+python3 -c "
+import sys,re
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+s=s.replace('\n## Rulings\n- src/one.go:1 — PARKED: the retry covers it\n','\n')
+open(p,'w',encoding='utf-8',newline='').write(s)" "$RC"
+git add -A >/dev/null 2>&1; git commit -qm unruled >/dev/null 2>&1
 
 # With the reviewer satisfied, the same recorded answer ships the branch: the cap
 # is a counter a person answers, and their answer stands.
@@ -2259,7 +2305,7 @@ ok "4 rounds all APPROVED -> still asks (a counter only goes up)" "$(rchk)" "2"
 ok "...and the report says every reviewer is satisfied" \
    "$(capmsg | grep -c 'every required reviewer is satisfied' | head -1)" "1"
 
-echo "== the cap is configurable, but only from a COMMITTED file =="
+section "the cap is configurable, but only from a COMMITTED file"
 
 ok "default cap" "$(exloom_max_rounds)" "3"
 printf '5\n' > .claude/exloom-max-rounds
@@ -2267,7 +2313,7 @@ ok "uncommitted config is ignored" "$(exloom_max_rounds)" "3"
 git add -A >/dev/null 2>&1; git commit -qm cap >/dev/null 2>&1
 ok "committed config is honoured" "$(exloom_max_rounds)" "5"
 
-echo "== a pipeline that records nothing is not a clean branch =="
+section "a pipeline that records nothing is not a clean branch"
 
 # When receipt capture degrades, every line records a launch and no conclusion,
 # and every mechanism downstream reads blank and renders blank as fine: the cap
@@ -2308,7 +2354,7 @@ git add -A >/dev/null 2>&1; git commit -qm real >/dev/null 2>&1
 ok "one real verdict clears the blindness" \
    "$(exloom_evidence_blind "$BCL" HEAD >/dev/null 2>&1 && echo blind || echo ok)" "ok"
 
-echo "== the cap override answers the round question, and only that =="
+section "the cap override answers the round question, and only that"
 
 # Checked below the receipt evaluation, not above it. Returning early would let a
 # recorded 'merge as-is' waive the requirement that reviewers ran at all — which
@@ -2337,7 +2383,7 @@ git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
 exloom_check_verdicts "$CCL" 1 HEAD "$(git rev-parse HEAD)" "push" >/dev/null 2>&1
 ok "...but ships once the reviewers are real" "$?" "0"
 
-echo "== the status line stops driving the loop at the cap =="
+section "the status line stops driving the loop at the cap"
 
 # exloom_gate_status runs after every reviewer completes, and a fix commit always
 # leaves the L1 receipt behind the tip — so an unconditional "covers an earlier
@@ -2415,7 +2461,758 @@ ok "under the cap it still reports a stale receipt" \
    "$(printf '%s' "$UOUT" | grep -c 'covers an earlier commit')" "1"
 ok "...and does not say STOP" "$(printf '%s' "$UOUT" | grep -c 'STOP -')" "0"
 
-echo "== the bypass leaves a trace =="
+section "rulings close a REJECTED review, one finding at a time"
+
+subrepo rulings
+RUC=".claude/reviews/feat/plan.md"; RUV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RUV"
+printf '# checklist\n\n## Rulings\n' > "$RUC"
+printf 'r1\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+RUH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$RUH" > "$RUV/l1-reviewer.json"
+{ printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/one.go:1","fingerprint":"c1","head":"%s","at":"n"}\n' "$RUH"
+  printf '{"round":1,"agent":"l1-reviewer","severity":"MED","scope":"IN-SCOPE","cite":"src/one.go:2","fingerprint":"i1","head":"%s","at":"n"}\n' "$RUH"
+  printf '{"round":1,"agent":"l1-reviewer","severity":"MED","scope":"PRE-EXISTING","cite":"src/old.go:9","fingerprint":"p1","head":"%s","at":"n"}\n' "$RUH"
+} > "$RUV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ruchk() { exloom_check_verdicts "$RUC" "${1:-1}" HEAD "$(git rev-parse HEAD)" "test" "${2:-standard}" >/dev/null 2>&1; echo $?; }
+rule() { printf '%s\n' "$1" >> "$RUC"; git add -A >/dev/null 2>&1; git commit -qm rule >/dev/null 2>&1; }
+unrule() { python3 -c "
+import sys
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+open(p,'w',encoding='utf-8',newline='').write(s.split('## Rulings\n')[0]+'## Rulings\n')" "$RUC"
+  git add -A >/dev/null 2>&1; git commit -qm unrule >/dev/null 2>&1; }
+
+ok "no rulings -> REJECTED blocks" "$(ruchk)" "2"
+ok "...and the block names each unruled cite" \
+   "$(exloom_check_verdicts "$RUC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 | grep -cE 'src/one.go:(1|2)' | head -1)" "2"
+rule '- src/one.go:1 — FIXED: the null check at the cited line'
+ok "one of two findings ruled -> still blocks" "$(ruchk)" "2"
+rule '- src/one.go:2 — DEFERRED: later'
+ok "DEFERRED with no ticket is not a ruling" "$(ruchk)" "2"
+rule '- src/one.go:2 — DEFERRED ABC-123: the retry path is rewritten there'
+ok "every in-scope finding ruled -> passes; pre-existing needs none" "$(ruchk)" "0"
+ok "...and the gate prints the rulings" \
+   "$(exloom_check_verdicts "$RUC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 | grep -c 'ABC-123' | head -1)" "1"
+ok "Certified lane: a Critical ruled without the user's words -> blocks" "$(ruchk 1 certified)" "2"
+rule '- src/one.go:1 — PARKED: user said "ship it, the flag is off in prod"'
+ok "...with their words quoted -> passes" "$(ruchk 1 certified)" "0"
+
+unrule
+rule '- src/one.go:10 — PARKED: a different line'
+rule '- src/one.go:2 — PARKED: fine'
+ok "a ruling on src/one.go:10 does not rule src/one.go:1" "$(ruchk)" "2"
+unrule
+rule '- src/one.go:1 — not FIXED yet'
+rule '- src/one.go:2 — PARKED: fine'
+ok "the disposition must follow the cite, not appear anywhere" "$(ruchk)" "2"
+unrule
+rule '    - src/one.go:1 — PARKED: an indented example'
+rule '    - src/one.go:2 — PARKED: an indented example'
+ok "an indented example line is not a ruling" "$(ruchk)" "2"
+
+unrule
+rule '- src/one.go:1 — PARKED: x'
+rule '- src/one.go:2 — PARKED: x'
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"UNKNOWN","round_needed":"UNKNOWN"}\n' "$RUH" >> "$RUV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm unknown >/dev/null 2>&1
+ok "an UNKNOWN verdict cannot be ruled away" "$(ruchk)" "2"
+
+printf 'r2\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm r2 >/dev/null 2>&1
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$(git rev-parse HEAD)" >> "$RUV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm blind >/dev/null 2>&1
+ok "a REJECTED review with no findings recorded cannot be ruled away" "$(ruchk)" "2"
+
+section "verify mode: a re-review covers only the fix range"
+
+subrepo verify
+VC=".claude/reviews/feat/plan.md"; VV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$VV"
+printf '# checklist\n\n## Rulings\n' > "$VC"
+printf 'l1\nl2\nl3\nl4\nl5\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+VA="$(git rev-parse HEAD)"
+vfeed() {   # vfeed <report>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+vfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:2 — IN-SCOPE — null dereference
+ROUND NEEDED AFTER FIX: YES'
+ok "a full review records mode full" "$(grep -c '"mode":"full"' "$VV/l1-reviewer.json")" "1"
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'l1\nl2 fixed\nl3\nl4\nl5\nl6\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+VB="$(git rev-parse HEAD)"
+vfeed "VERDICT: REJECTED (2 items)
+MODE: VERIFY ${VA}..${VB}
+## Previous findings
+- src/a.go:2 — ADDRESSED
+## Critical (must fix before merge)
+- src/a.go:4 — IN-SCOPE — a line the fix did not touch
+- src/a.go:6 — IN-SCOPE — a line the fix added
+ROUND NEEDED AFTER FIX: YES"
+ok "a verify review records its mode and range" \
+   "$(tail -1 "$VV/l1-reviewer.json" | grep -c "\"mode\":\"verify\",\"range\":\"${VA}..${VB}\"")" "1"
+ok "a finding outside the fix range is recorded out of scope" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:4' | grep -c 'OUT-OF-SCOPE')" "1"
+ok "a finding inside the fix range stays in scope" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:6' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "an ADDRESSED finding is not recorded again" \
+   "$(grep "\"head\":\"${VB}\"" "$VV/l1-reviewer.findings.jsonl" | grep -c 'src/a.go:2')" "0"
+git add -A >/dev/null 2>&1; git commit -qm r2 >/dev/null 2>&1
+vchk() { exloom_check_verdicts "$VC" 1 HEAD "$(git rev-parse HEAD)" test 2>&1 >/dev/null; }
+ok "the in-range finding blocks" "$(vchk | grep -c 'src/a.go:6')" "1"
+ok "...and the out-of-range one is not asked for a ruling" "$(vchk | grep -c 'src/a.go:4')" "0"
+printf -- '- src/a.go:6 — FIXED: removed the added line\n' >> "$VC"
+git add -A >/dev/null 2>&1; git commit -qm rule >/dev/null 2>&1
+ok "ruling the in-range finding passes; the out-of-range one cannot reject" \
+   "$(exloom_check_verdicts "$VC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${VB}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:2 — NOT ADDRESSED: still dereferences null
+ROUND NEEDED AFTER FIX: YES"
+ok "a NOT ADDRESSED finding is recorded in scope with its earlier severity" \
+   "$(grep "\"head\":\"$(git rev-parse HEAD)\"" "$VV/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep '"scope":"IN-SCOPE"' | grep -c '"severity":"HIGH"')" "1"
+printf 'l7\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY $(git rev-parse HEAD)..$(git rev-parse HEAD)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — empty range
+ROUND NEEDED AFTER FIX: YES"
+ok "a verify range that does not start at the last reviewed head is not verify mode" \
+   "$(grep 'src/a.go:1' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
+
+
+printf 'l7\nl8\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more2 >/dev/null 2>&1
+VL="$(sed -n 's/.*"head":"\([0-9a-f]*\)","verdict".*/\1/p' "$VV/l1-reviewer.json" | tail -1)"
+vfeed "VERDICT: REJECTED (1 items)
+MODE: VERIFY ${VL}..$(git rev-parse HEAD)
+## Critical (must fix before merge)
+- a.go:8 — IN-SCOPE — cited by its file name only
+ROUND NEEDED AFTER FIX: YES"
+ok "a cite by file name alone still counts as in the fix range" \
+   "$(grep 'a.go:8' "$VV/l1-reviewer.findings.jsonl" | tail -1 | grep -c '"scope":"IN-SCOPE"')" "1"
+
+subrepo verify2
+V2V=".claude/reviews/feat/plan.verdicts"; mkdir -p "$V2V"
+printf 'l1\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+V2A="$(git rev-parse HEAD)"
+vfeed 'VERDICT: REJECTED (2 items)
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — first defect
+- src/a.go:3 — IN-SCOPE — second defect
+## Pre-existing (backlog, not this branch)
+- src/a.go:2 — PRE-EXISTING — old leak
+ROUND NEEDED AFTER FIX: YES'
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'l1 fixed\nl2\nl3\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+vfeed "VERDICT: APPROVED
+MODE: VERIFY ${V2A}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:1 — ADDRESSED
+- src/a.go:2 — NOT ADDRESSED: still leaks
+ROUND NEEDED AFTER FIX: NO"
+V2B="$(git rev-parse HEAD)"
+ok "a blocking finding left out of the verify prompt is carried forward" \
+   "$(grep "\"head\":\"${V2B}\"" "$V2V/l1-reviewer.findings.jsonl" | grep 'src/a.go:3' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "...and the verify pass cannot approve over it" \
+   "$(tail -1 "$V2V/l1-reviewer.json" | grep -c '"verdict":"REJECTED"')" "1"
+ok "a pre-existing finding not addressed stays pre-existing" \
+   "$(grep "\"head\":\"${V2B}\"" "$V2V/l1-reviewer.findings.jsonl" | grep 'src/a.go:2' | grep -c '"scope":"PRE-EXISTING"')" "1"
+
+subrepo verify3
+V3V=".claude/reviews/feat/plan.verdicts"; mkdir -p "$V3V"
+printf 'guard\nwork\nmore\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+V3A="$(git rev-parse HEAD)"
+vfeed 'VERDICT: REJECTED (1 items)
+## Critical (must fix before merge)
+- src/a.go:3 — IN-SCOPE — first defect
+ROUND NEEDED AFTER FIX: YES'
+git add -A >/dev/null 2>&1; git commit -qm r1 >/dev/null 2>&1
+printf 'work\nmore\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm 'delete the guard' >/dev/null 2>&1
+vfeed "VERDICT: REJECTED (2 items)
+MODE: VERIFY ${V3A}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:3 — PARTIALLY ADDRESSED: still reachable
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — the deleted guard leaves this unchecked
+ROUND NEEDED AFTER FIX: YES"
+V3B="$(git rev-parse HEAD)"
+ok "a finding at a deletion the fix made is in the fix range" \
+   "$(grep "\"head\":\"${V3B}\"" "$V3V/l1-reviewer.findings.jsonl" | grep 'src/a.go:1' | grep -c '"scope":"IN-SCOPE"')" "1"
+ok "PARTIALLY ADDRESSED counts as not addressed" \
+   "$(grep "\"head\":\"${V3B}\"" "$V3V/l1-reviewer.findings.jsonl" | grep 'src/a.go:3' | grep -c '"scope":"IN-SCOPE"')" "1"
+
+section "the ledger: minor findings never enter the fix loop"
+
+subrepo ledger
+LC=".claude/reviews/feat/plan.md"; LV=".claude/reviews/feat/plan.verdicts"; LL=".claude/reviews/feat/plan.ledger.md"
+mkdir -p "$LV"; printf '# checklist\n\n## Rulings\n' > "$LC"
+printf 'a\nb\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+lfeed() {
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+MINOR_ONLY='VERDICT: REJECTED (1 items)
+## Minor (may defer with a reason in the checklist)
+- src/a.go:1 — IN-SCOPE — the name says count, it holds a total
+## Pre-existing (backlog, not this branch)
+- src/a.go:2 — PRE-EXISTING — an old unchecked return
+ROUND NEEDED AFTER FIX: YES'
+lfeed "$MINOR_ONLY"
+ok "a minor finding goes to the ledger" "$(grep -c 'src/a.go:1' "$LL" 2>/dev/null)" "1"
+ok "...and so does a pre-existing one" "$(grep -c 'src/a.go:2' "$LL" 2>/dev/null)" "1"
+ok "a minor-only report does not ask for another round" \
+   "$(tail -1 "$LV/l1-reviewer.json" | grep -c '"round_needed":"NO"')" "1"
+lfeed "$MINOR_ONLY"
+ok "the same report twice adds nothing to the ledger" "$(grep -c 'src/a.go:1' "$LL")" "1"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ok "a minor-only REJECTED needs no ruling" \
+   "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+
+printf 'c\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
+lfeed 'VERDICT: REJECTED (2 items)
+## Critical (must fix before merge)
+- the whole retry path leaks connections
+## Minor (may defer with a reason in the checklist)
+- src/a.go:3 — IN-SCOPE — a name
+ROUND NEEDED AFTER FIX: YES'
+ok "a Critical the parser could not cite keeps the round open" \
+   "$(tail -1 "$LV/l1-reviewer.json" | grep -c '"round_needed":"YES"')" "1"
+git add -A >/dev/null 2>&1; git commit -qm mixed >/dev/null 2>&1
+ok "...and the gate does not pass it on the minor alone" \
+   "$(exloom_check_verdicts "$LC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+
+section "per-task review: a spec verdict, kept apart from the branch's rounds"
+
+subrepo tasks
+TV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$TV"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm task3 >/dev/null 2>&1
+tfeed() {
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1',
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[1]}))" "$1" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+tfeed 'VERDICT: REJECTED (1 items)
+MODE: TASK 3
+SPEC: EXTRA
+## Spec
+- src/a.go:1 — EXTRA — a retry helper the task does not ask for
+ROUND NEEDED AFTER FIX: YES'
+ok "a task review is recorded in the task receipt" \
+   "$(grep -c '"task":"3","spec":"EXTRA"' "$TV/l1-reviewer.tasks.json" 2>/dev/null)" "1"
+ok "...and not in the branch receipt, so it is not a branch round" \
+   "$( [[ -f "$TV/l1-reviewer.json" ]] && echo present || echo absent)" "absent"
+ok "code beyond the task's text is recorded as a blocking spec finding" \
+   "$(grep 'src/a.go:1' "$TV/l1-reviewer.findings.jsonl" | grep '"severity":"MED"' | grep -c '"scope":"IN-SCOPE"')" "1"
+
+section "the dispatch budget is enforced at dispatch, and a receipt is bound to it"
+
+subrepo budget
+BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
+printf '# checklist\n\n## Rulings\n' > "$BC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+disp() {   # disp <tool_use_id> <prompt> [agent] [nolaunch] -> exit code of the guard
+  local rc
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:'+sys.argv[3],'prompt':sys.argv[2]}}))" "$1" "$2" "${3:-l1-reviewer}" \
+  | bash "$HOOKS_ABS/guard-reviewer-dispatch.sh" >/dev/null 2>&1; rc=$?
+  if [[ $rc -eq 0 && -z "${4:-}" ]]; then
+    python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:'+sys.argv[3],'prompt':sys.argv[2]},
+ 'tool_response':{'isAsync':True,'status':'async_launched','agentId':'ag-'+sys.argv[1]}}))" "$1" "$2" "${3:-l1-reviewer}" \
+      | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  fi
+  echo $rc
+}
+ok "a task's first review is allowed" "$(disp t1 'Review task 3 of p.md. Diff: git diff a..b')" "0"
+ok "...a second full review of the same task is refused" "$(disp t2 'Review task 3 of p.md. Diff: git diff a..b')" "2"
+ok "fix round 1 is allowed" "$(disp t3 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "fix round 2 is allowed" "$(disp t4 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "fix round 3 is allowed" "$(disp t5 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "a fourth fix round is refused" "$(disp t6 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — sure\n' >> "$BC"
+ok "an extra-round line without the user's quoted words grants nothing" \
+   "$(disp t6b 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — "one more, then we ship"\n' >> "$BC"
+ok "an uncommitted grant grants nothing" "$(disp t6c 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+git add -A >/dev/null 2>&1; git commit -qm grant >/dev/null 2>&1
+ok "...a committed grant allows one more round" "$(disp t7 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "0"
+ok "...and the grant is used once" "$(disp t8 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+printf -- '- Extra round — "after this fix only"\n' >> "$BC"; git add -A >/dev/null 2>&1; git commit -qm grant2 >/dev/null 2>&1
+printf 'more\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm 'new code' >/dev/null 2>&1
+ok "a grant written before a code change expires with it" "$(disp t9 'Verify fixes for task 3 on branch feat/plan. Fix range: a..b')" "2"
+ok "the final review runs once" "$(disp f1 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "0"
+ok "...a second final review is refused" "$(disp f2 'Review branch feat/plan at x. Diff: git diff m...x' adversarial-reviewer)" "2"
+ok "...one scoped re-review is allowed" "$(disp f3 'Verify fixes on branch feat/plan. Fix range: a..b' adversarial-reviewer)" "0"
+ok "...a second fix wave is refused" "$(disp f4 'Verify fixes on branch feat/plan. Fix range: a..b' adversarial-reviewer)" "2"
+ok "each dispatch records the commit and a prompt hash" \
+   "$(grep '"tool_use_id":"t1"' "$BV/dispatches.jsonl" | grep -cE '"dispatch_head":"[0-9a-f]{40}","prompt_hash":"[0-9a-f]{40}"')" "1"
+
+ok "a dispatch that never launched does not spend the budget" \
+   "$(disp n1 'Review branch feat/plan at x.' security-auditor nolaunch; disp n2 'Review branch feat/plan at x.' security-auditor)" "0
+0"
+seq 1 150 > src/big.go; git add -A >/dev/null 2>&1; git commit -qm grow >/dev/null 2>&1
+ok "planned work does not count as growth: a new task is still reviewed" \
+   "$(disp g0 'Review task 9 of p.md. Diff: git diff a..b')" "0"
+ok "growth since the final review started refuses the next fix round" \
+   "$(disp g1 'Verify fixes on branch feat/plan. Fix range: a..b' security-auditor)" "2"
+
+subrepo binding
+BC=".claude/reviews/feat/plan.md"; BV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$BV"
+printf '# checklist\n' > "$BC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+H1="$(git rev-parse HEAD)"
+post() {   # post <tool_use_id> <agent_id> <response-json>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent','tool_use_id':sys.argv[1],
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review branch feat/plan'},
+ 'tool_response':dict(json.loads(sys.argv[3]),agentId=sys.argv[2],resolvedModel='claude-opus-5-5')}))" "$1" "$2" "$3" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+stop() {   # stop <agent_id> <report>
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':sys.argv[1],
+ 'agent_type':'exloom:l1-reviewer','last_assistant_message':sys.argv[2]}))" "$1" "$2" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+}
+disp b1 'Review branch feat/plan at x. Diff: git diff m...x' l1-reviewer nolaunch >/dev/null
+post b1 ag1 '{"isAsync":true,"status":"async_launched"}'
+printf 'b\n' >> src/a.go; git add -A >/dev/null 2>&1; git commit -qm during >/dev/null 2>&1
+stop ag1 'VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+ok "an async review's receipt names the commit it was dispatched at" \
+   "$(tail -1 "$BV/l1-reviewer.json" | grep -c "\"head\":\"${H1}\",\"verdict\":\"APPROVED\"")" "1"
+ok "...and records the model that ran" "$(tail -1 "$BV/l1-reviewer.json" | grep -c '"model":"claude-opus-5-5"')" "1"
+git add -A >/dev/null 2>&1; git commit -qm receipts >/dev/null 2>&1
+ok "a commit made during the review cannot inherit its approval" \
+   "$(exloom_check_verdicts "$BC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+ok "committing receipts does not raise the round count" "$(exloom_round_count "$BC" HEAD)" "1"
+
+printf -- '- Extra round — "check the fix"\n' >> "$BC"; git add "$BC" >/dev/null 2>&1; git commit -qm grant >/dev/null 2>&1
+H2="$(git rev-parse HEAD)"
+disp b2 'Review branch feat/plan at y. Diff: git diff m...y' l1-reviewer nolaunch >/dev/null
+stop ag2 'VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+ok "a foreground result is held until PostToolUse maps it" \
+   "$(grep -c "\"head\":\"${H2}\"" "$BV/l1-reviewer.json"; [[ -f "$BV/held/ag2.json" ]] && echo held)" "0
+held"
+post b2 ag2 '{"content":[{"type":"text","text":"VERDICT: APPROVED"}]}'
+ok "...then recorded against the dispatch commit" \
+   "$(grep -c "\"head\":\"${H2}\",\"verdict\":\"APPROVED\"" "$BV/l1-reviewer.json")" "1"
+
+T1="$(git rev-parse HEAD)"
+disp k1 'Review task 4 of p.md. Diff: git diff a..b' >/dev/null
+stop ag-k1 'VERDICT: REJECTED (1 items)
+MODE: TASK 4
+SPEC: MATCHES
+## Critical (must fix before merge)
+- src/a.go:1 — IN-SCOPE — bad
+ROUND NEEDED AFTER FIX: YES'
+printf 'fixed\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm taskfix >/dev/null 2>&1
+disp k2 'Verify fixes for task 4 on branch feat/plan. Fix range: a..b' >/dev/null
+stop ag-k2 "VERDICT: APPROVED
+MODE: VERIFY ${T1}..$(git rev-parse HEAD)
+## Previous findings
+- src/a.go:1 — ADDRESSED
+ROUND NEEDED AFTER FIX: NO"
+ok "a task's verify pass goes to the task receipt, with its range" \
+   "$(tail -1 "$BV/l1-reviewer.tasks.json" | grep -c "\"mode\":\"verify\",\"range\":\"${T1}\.\..*\"task\":\"4\"")" "1"
+ok "...and is not a branch round" "$(grep -c '"verify"' "$BV/l1-reviewer.json")" "0"
+
+section "the latest verdict counts, and a same-commit re-run cannot overturn a rejection"
+
+subrepo reroll
+RR=".claude/reviews/feat/plan.md"; RRV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RRV"
+printf '# checklist\n\n## Rulings\n' > "$RR"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+RRH="$(git rev-parse HEAD)"
+rline() { printf '{"agent":"l1-reviewer","head":"%s","verdict":"%s","round_needed":"NO"}\n' "$RRH" "$1"; }
+rrchk() { git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+  exloom_check_verdicts "$RR" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?; }
+{ rline APPROVED; rline REJECTED; } > "$RRV/l1-reviewer.json"
+ok "APPROVED then REJECTED at the same commit -> blocks" "$(rrchk)" "2"
+{ rline REJECTED; rline APPROVED; } > "$RRV/l1-reviewer.json"
+ok "REJECTED then a re-run APPROVED at the same commit -> still blocks" "$(rrchk)" "2"
+{ rline UNKNOWN; rline APPROVED; } > "$RRV/l1-reviewer.json"
+ok "UNKNOWN then APPROVED at the same commit -> passes" "$(rrchk)" "0"
+{ rline APPROVED; printf '{"agent":"l1-reviewer","head":"%s","dispatch":true}\n' "$RRH"; } > "$RRV/l1-reviewer.json"
+ok "a launch line after an approval does not change the verdict" "$(rrchk)" "0"
+
+section "only exloom's own reviewers write receipts"
+
+subrepo names
+NV=".claude/reviews/feat/plan.verdicts"; NC=".claude/reviews/feat/plan.md"; mkdir -p "$NV"
+printf '# checklist\n' > "$NC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'x',
+ 'agent_type':'myplugin:l1-reviewer','last_assistant_message':'VERDICT: APPROVED'}))" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "an agent merely named *l1-reviewer writes no receipt" "$([[ -f "$NV/l1-reviewer.json" ]] && echo yes || echo no)" "no"
+printf '{"agent":"l1-reviewer","subagent_type":"myplugin:l1-reviewer","head":"%s","verdict":"APPROVED"}\n' "$(git rev-parse HEAD)" > "$NV/l1-reviewer.json"
+git add -A >/dev/null 2>&1; git commit -qm forged >/dev/null 2>&1
+ok "the gate ignores a receipt line from another agent" \
+   "$(exloom_check_verdicts "$NC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+
+section "no base branch blocks; an empty diff passes"
+
+subrepo nobase noorigin
+git branch -m main production >/dev/null 2>&1
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+exloom_derive_tier HEAD >/dev/null 2>&1; ok "no base branch -> derive returns 1" "$?" "1"
+NBC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$NBC")"
+printf '**Tier:** 1\n**Base branch:** auto\n\n## Final verdict\n- [x] All required gates passed for declared tier\n- [x] Checklist committed\n- [x] Ready to ship\n\nReviewed code commit: %s\n' "$(git rev-parse HEAD)" > "$NBC"
+git add -A >/dev/null 2>&1; git commit -qm cl >/dev/null 2>&1
+ok "...and the gate blocks, asking for the base branch" \
+   "$(exloom_validate_checklist "$NBC" HEAD 1 test 2>&1 >/dev/null | grep -c 'Base branch:' | head -1)" "1"
+sed -i 's/^\*\*Base branch:\*\* auto/**Base branch:** production/' "$NBC"
+git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+ok "a recorded base clears that block" \
+   "$(exloom_validate_checklist "$NBC" HEAD 1 test 2>&1 >/dev/null | grep -c 'cannot find the branch' | head -1)" "0"
+git branch main production; git checkout -q -b feat/empty main
+exloom_derive_tier HEAD >/dev/null 2>&1; ok "an empty diff -> derive returns 2" "$?" "2"
+git checkout -q feat/plan
+
+section "security paths derive Tier 3 whatever their case"
+
+subrepo secpaths
+for p in src/OAuth2Config.java src/security/Filter.java src/PasswordEncoder.java src/EncryptionService.java \
+         app/SECRETS.py src/rbac/Roles.go src/HTTPSecurity.java src/IAMPolicy.go src/sso/x.go src/acl.go; do
+  ok "$p -> Tier 3" "$(sp "$p")" "3"
+done
+for p in src/authoring/x.go src/Author.java src/diameter.go src/oracle.go src/decipherable.go; do
+  ok "$p -> not Tier 3" "$(sp "$p")" "1"
+done
+
+section "docs-only means Markdown, READMEs and top-level docs/"
+
+subrepo docsonly
+for p in requirements.txt src/docs/Handler.java; do
+  ok "$p -> not docs-only" "$(sp "$p")" "1"
+done
+for p in docs/guide.txt README notes/x.md; do
+  ok "$p -> docs-only" "$(sp "$p")" "0"
+done
+
+section "the base comes from origin, not from a local branch near HEAD"
+
+subrepo localbase
+mkdir -p src/auth; printf 'x\n' > src/auth/login.go; git add -A >/dev/null 2>&1; git commit -qm auth >/dev/null 2>&1
+git branch -f main HEAD
+printf 'y\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/null 2>&1
+ok "a local main moved up to HEAD does not shrink the diff" "$(exloom_derive_tier HEAD 2>/dev/null)" "3"
+subrepo localonly noorigin
+printf 'y\n' > src/one.go; git add -A >/dev/null 2>&1; git commit -qm one >/dev/null 2>&1
+ok "with no origin, a local base is used" "$(exloom_derive_tier HEAD 2>/dev/null)" "1"
+ok "...with a warning" "$(exloom_derive_tier HEAD 2>&1 >/dev/null | grep -c 'no origin/' | head -1)" "1"
+
+section "a comment line is a comment only when nothing follows it"
+
+subrepo comments
+printf 'int a = 1;\n' > src/c.java; git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+cbeh() {   # cbeh <added line> -> behavioural|inert
+  local b; b="$(git rev-parse HEAD)"
+  printf 'int a = 1;\n%s\n' "$1" > src/c.java; git add -A >/dev/null 2>&1; git commit -qm x >/dev/null 2>&1
+  if exloom_diff_is_behavioural "$b" HEAD; then echo behavioural; else echo inert; fi
+  git reset -q --hard "$b"
+}
+ok "/**/ code(); -> behavioural" "$(cbeh '/**/ code();')" "behavioural"
+ok "*/ code(); -> behavioural" "$(cbeh '*/ code();')" "behavioural"
+ok "/* note */ -> inert" "$(cbeh '/* note */')" "inert"
+ok "/** opening a javadoc -> inert" "$(cbeh '/**')" "inert"
+ok "*/ closing it -> inert" "$(cbeh ' */')" "inert"
+ok "// line comment -> inert" "$(cbeh '// note')" "inert"
+
+section "hand-written receipts: cd, node -e and git apply"
+
+subrepo handwrite
+bashj() { python3 -c "import json,sys; print(json.dumps({'tool_name':'Bash','tool_input':{'command':sys.argv[1]}}))" "$1"; }
+ok "cd into the verdicts folder, then a relative redirect -> denied" \
+   "$(deny "$(bashj 'cd .claude/reviews/feat/plan.verdicts && echo {} > l1-reviewer.json')")" "2"
+ok "...but cd there to list it -> allowed" \
+   "$(deny "$(bashj 'cd .claude/reviews/feat/plan.verdicts && ls -la')")" "0"
+ok "node -e writing a receipt -> denied" \
+   "$(deny "$(bashj "node -e \"require('fs').writeFileSync('.claude/reviews/feat/plan.verdicts/l1-reviewer.json','{}')\"")")" "2"
+printf -- '--- a/.claude/reviews/feat/plan.verdicts/l1-reviewer.json\n+++ b/.claude/reviews/feat/plan.verdicts/l1-reviewer.json\n@@ -0,0 +1 @@\n+{}\n' > fix.patch
+ok "git apply of a patch that writes a receipt -> denied" "$(deny "$(bashj 'git apply fix.patch')")" "2"
+printf -- '--- a/src/a.go\n+++ b/src/a.go\n@@ -0,0 +1 @@\n+x\n' > ok.patch
+ok "git apply of an ordinary patch -> allowed" "$(deny "$(bashj 'git apply ok.patch')")" "0"
+
+section "a tier's placeholder scan skips the sections that tier does not need"
+
+subrepo tiersections
+TSC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$TSC")"
+for tier in 1 2; do
+  awk '/^## What a revert will not undo/{keep=1} /^## /&&!/^## What a revert will not undo/{keep=0} {print keep?$0:"@@"$0}' \
+      "$HOOKS_ABS/../../../scripts/fixtures/legacy-review-checklist.md" \
+    | sed -e '/^@@/s/<[^>]*>/filled/g' -e 's/^@@//' -e 's/- \[ \]/- [x]/g' \
+          -e "s/^\*\*Tier:\*\* .*/**Tier:** ${tier}/" > "$TSC"
+  ok "tier ${tier}: the Tier 3 section's placeholders do not block" \
+     "$(exloom_validate_checklist "$TSC" HEAD 1 test 2>&1 >/dev/null | grep -c 'runbook' | head -1)" "0"
+done
+
+section "the proof applies the branch's deletions"
+
+proofrepo replaced 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+printf 'for t in tests/*_test.sh; do bash "$t" || exit 1; done\n' > .claude/exloom-test-command
+git rm -q tests/calc_test.sh; mkdir -p tests
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/new_test.sh
+printf 'echo 5\n' > src/calc.sh
+git add -A >/dev/null 2>&1; git commit -qm replace >/dev/null 2>&1
+ok "a replaced test is removed before the runs, so the change proves" "$(prove "$B")" "0"
+ok "...and the receipt says PROVED" "$(proofres)" "PROVED"
+
+section "a git-ignored .claude/ is named, file by file"
+
+subrepo ignored
+ok "nothing ignored -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
+printf '.claude/\n' > .gitignore
+ok "an ignored .claude/ lists the receipts and every committed-only setting" \
+   "$(exloom_ignored_settings feat/plan | grep -cE 'reviews/feat/plan.md|verdicts|exloom-test-command|exloom-max-rounds|exloom-proof.disabled|exloom-lane|exloom-mutation-command|exloom-protected-branches|exloom-skip-branches|exloom-test-patterns')" "10"
+printf '.claude/*\n!.claude/reviews/\n!.claude/exloom-*\n' > .gitignore
+ok "ignoring only local files -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
+
+section "a deletion with no new behaviour proves NO_NEW_BEHAVIOUR"
+
+proofrepo deletion 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4
+unused() { echo dead; }'; B="$BASESHA"
+printf 'echo 4\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm 'drop dead code' >/dev/null 2>&1
+ok "a pure deletion whose suite passes -> NO_NEW_BEHAVIOUR" "$(prove "$B"; proofres)" "0
+NO_NEW_BEHAVIOUR"
+proofrepo deletionbroken 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+: > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm 'delete too much' >/dev/null 2>&1
+ok "a deletion that breaks the suite -> NOT_PROVED" "$(prove "$B"; proofres)" "1
+NOT_PROVED"
+proofrepo addition 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'; B="$BASESHA"
+printf 'echo 4\nrm -rf /tmp/x\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
+ok "an added behavioural line with no test -> NOT_PROVED" "$(prove "$B"; proofres)" "1
+NOT_PROVED"
+
+NC=".claude/reviews/feat/proof.md"; NV=".claude/reviews/feat/proof.verdicts"; mkdir -p "$NV"
+printf '# checklist\n' > "$NC"
+printf '{"check":"change-is-tested","result":"NO_NEW_BEHAVIOUR","head":"%s"}\n' "$(git rev-parse HEAD)" > "$NV/proof.json"
+git add -A >/dev/null 2>&1; git commit -qm nnb >/dev/null 2>&1
+nnb() { exloom_check_proof "$NC" HEAD "$(git rev-parse HEAD)" test "$1" >/dev/null 2>&1; echo $?; }
+ok "NO_NEW_BEHAVIOUR passes at Tier 1" "$(nnb 1)" "0"
+ok "...not at Tier 2 without a ruling" "$(nnb 2)" "2"
+printf -- '- Proof: deletion only — the helper had no callers\n' >> "$NC"
+git add -A >/dev/null 2>&1; git commit -qm ruling >/dev/null 2>&1
+ok "...and at Tier 2 with one" "$(nnb 2)" "0"
+
+section "the proof detects .NET and Flutter test commands"
+
+detect() {   # detect <name> <files...> -> the command the proof chose, or its refusal
+  local d="$REG/detect-$1"; shift; rm -rf "$d"; mkdir -p "$d/.claude" "$d/src"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+  : > .claude/exloom-gate.enabled; local f; for f in "$@"; do mkdir -p "$(dirname "$f")"; : > "$f"; done
+  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1; git checkout -q -b feat/x
+  printf 'x\n' > src/a.cs; mkdir -p t; printf 'x\n' > t/ATests.cs; git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+  bash "$PROVE" --base main 2>&1 | grep -E '^command:|no test command|more than one' | head -1
+}
+ok "pubspec.yaml -> flutter test" "$(detect flutter pubspec.yaml)" "command: flutter test"
+ok "one .sln at the root -> dotnet test <sln>" "$(detect onesln App.sln)" "command: dotnet test App.sln"
+ok "several .sln files -> a pinned command is required" \
+   "$(detect twosln A.sln B.sln | grep -c 'more than one .NET')" "1"
+ok "a .sln plus a loose .csproj -> a pinned command is required" \
+   "$(detect slnproj App.sln Tool.csproj | grep -c 'more than one .NET')" "1"
+cd "$WORK" || exit 1
+
+section "Flutter integration tests and package files"
+
+ok "integration_test/ -> test" "$(istest 'integration_test/app_test.dart')" "test"
+ok "a nested integration_test/ -> test" "$(istest 'packages/app/integration_test/login.dart')" "test"
+subrepo flutterdeps
+for p in pubspec.yaml pubspec.lock Directory.Packages.props; do
+  git checkout -q -B "d/$RANDOM" main; printf 'x\n' > "$p"; git add -A >/dev/null 2>&1; git commit -qm d >/dev/null 2>&1
+  ok "$p is a dependency surface" \
+     "$(exloom_security_surface "$(git rev-parse main)" HEAD && echo yes || echo no)" "yes"
+done
+
+section "a block is one line and a next action, unless asked for more"
+
+short="$(EXLOOM_VERBOSE=0 _exloom_block "push" "proof missing for this commit
+more detail that should not show" 2>&1)"
+ok "the default block is one line" "$(printf '%s\n' "$short" | grep -c .)" "1"
+ok "...naming the reason and /exloom" "$(printf '%s' "$short" | grep -c 'blocked — proof missing for this commit → run /exloom')" "1"
+ok "the user's verbose setting shows everything" \
+   "$(EXLOOM_VERBOSE=0 CLAUDE_PLUGIN_OPTION_VERBOSE=true _exloom_block push "a
+b" 2>&1 | grep -c 'Emergency bypass')" "1"
+
+section "strict mode is a committed repo setting"
+
+subrepo strict
+SC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$SC")"
+printf '**Tier:** 1\n**Lane:** standard\n\n## Escape hatches used\n- Skipped: smoke test — headless box\n' > "$SC"
+smsg() { exloom_validate_checklist "$SC" HEAD 1 test 2>&1 >/dev/null | grep -c 'Certified lane, which has no escape hatches' | head -1; }
+ok "no strict file -> the standard lane accepts the skip" "$(smsg)" "0"
+: > .claude/exloom-strict
+ok "an uncommitted strict file changes nothing" "$(smsg)" "0"
+git add .claude/exloom-strict >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "a committed strict file makes every branch Certified" "$(smsg)" "1"
+ok "...and the ignore check lists it" \
+   "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-strict')" "1"
+
+section "the evidence report is generated; people write only rulings"
+
+subrepo report
+RPC=".claude/reviews/feat/plan.md"; RPV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$RPV"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+RH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","mode":"full","model":"claude-opus-5-5"}\n' "$RH" > "$RPV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","method":"three-run","head":"%s","matrix":""}\n' "$RH" > "$RPV/proof.json"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$RH" > "$RPV/smoke.json"
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "a first render writes the skeleton and the evidence block" \
+   "$(grep -cE '^## Rulings$|^<!-- exloom:report|^<!-- /exloom:report -->$' "$RPC")" "3"
+ok "...with the derived tier, not a declared one" \
+   "$(grep -c '^\*\*Derived tier:\*\* 1$' "$RPC"; grep -c '^\*\*Tier:\*\*' "$RPC")" "1
+0"
+ok "...the reviewed commit" "$(grep -c "^Reviewed code commit: ${RH}$" "$RPC")" "1"
+ok "...each required reviewer's latest verdict and model" \
+   "$(grep -c "^| l1-reviewer | APPROVED | ${RH:0:12} | full | claude-opus-5-5 |$" "$RPC")" "1"
+ok "...and the provenance lines the gate reads" "$(grep -cE '^- (AI-assisted|Model\(s\)|Directed by|Base commit):' "$RPC")" "4"
+sed -i 's/^none$/- src\/a.go:1 — PARKED: kept on purpose/' "$RPC"
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "a re-render keeps the rulings and replaces only the block" \
+   "$(grep -c 'PARKED: kept on purpose' "$RPC"; grep -c '^<!-- exloom:report' "$RPC")" "1
+1"
+git add -A >/dev/null 2>&1; git commit -qm report >/dev/null 2>&1
+ok "the gate accepts a generated report with its receipts" \
+   "$(exloom_validate_checklist "$RPC" HEAD 1 test >/dev/null 2>&1; echo $?)" "0"
+git checkout -q -b feat/deep
+mkdir -p src/auth; printf 'x\n' > src/auth/login.go; git add -A >/dev/null 2>&1; git commit -qm auth >/dev/null 2>&1
+mkdir -p .claude/reviews/feat; cp "$RPC" .claude/reviews/feat/deep.md; cp -r "$RPV" .claude/reviews/feat/deep.verdicts
+exloom_render_report feat/deep >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm deep >/dev/null 2>&1
+ok "a report for a Tier 3 diff is held to Tier 3 without a declared tier" \
+   "$(exloom_validate_checklist .claude/reviews/feat/deep.md HEAD 1 test 2>&1 >/dev/null | grep -c 'Tier 3 requires a verdict receipt' | head -1)" "1"
+
+section "/exloom knows the next step"
+
+subrepo nextstep
+NSV=".claude/reviews/feat/plan.verdicts"
+ok "no checklist -> init" "$(exloom_next_step feat/plan)" "init"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+exloom_render_report feat/plan >/dev/null 2>&1
+ok "an uncommitted checklist -> commit" "$(exloom_next_step feat/plan)" "commit"
+git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+ok "no reviewer has run -> review" "$(exloom_next_step feat/plan)" "review"
+NSH="$(git rev-parse HEAD)"
+mkdir -p "$NSV"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$NSH" > "$NSV/l1-reviewer.json"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:1","fingerprint":"f","head":"%s","at":"n"}\n' "$NSH" > "$NSV/l1-reviewer.findings.jsonl"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+ok "a rejection with open findings -> fix" "$(exloom_next_step feat/plan)" "fix"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$NSH" > "$NSV/l1-reviewer.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
+ok "reviewed but no proof -> proof" "$(exloom_next_step feat/plan)" "proof"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$NSH" > "$NSV/proof.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm proof >/dev/null 2>&1
+ok "proved but no smoke test -> smoke" "$(exloom_next_step feat/plan)" "smoke"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$NSH" > "$NSV/smoke.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm smoke >/dev/null 2>&1
+ok "everything in place -> push" "$(exloom_next_step feat/plan)" "push"
+ok "the status is one line" "$(exloom_status_line feat/plan | grep -c .)" "1"
+ok "...naming tier, proof and the next step" \
+   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · round [0-9]+/3 · proof ✓ · 0 rulings · next: push$')" "1"
+mkdir -p docs/plans; printf '### Task 1 — a\n### Task 2 — b\n### Task 3 — c\n' > docs/plans/p.md
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","mode":"task","task":"1"}\n' "$NSH" > "$NSV/l1-reviewer.tasks.json"
+sed -i 's/^\*\*Lane:\*\* standard$/**Lane:** standard\n**Plan:** docs\/plans\/p.md/' .claude/reviews/feat/plan.md
+ok "with a plan, the status shows tasks reviewed and approved" \
+   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · task 1/3 · round ')" "1"
+printf '{"agent":"l1-reviewer","key":"final","kind":"review","tool_use_id":"t","dispatch_head":"%s","prompt_hash":"x","extra":false,"at":"2026-01-01T10:00:00Z"}\n' "$NSH" > "$NSV/dispatches.jsonl"
+sed -i 's/^none$/- src\/a.go:1 — PARKED: fine/' .claude/reviews/feat/plan.md
+ok "the branch summary line has duration, rounds, criteria and rulings" \
+   "$(exloom_branch_summary feat/plan "2026-01-01T10:42:00Z" | grep -cE '^42 min · [0-9]+ review rounds? · [0-9]+(/[0-9]+)? criteria proved · 1 ruling$')" "1"
+git checkout -q -- .claude/reviews/feat/plan.md
+rm -f .claude/exloom-gate.enabled
+ok "gate off -> setup" "$(exloom_next_step feat/plan)" "setup"
+
+section "the reviewer model is a committed per-repo setting, Opus by default"
+
+subrepo revmodel
+ok "no setting -> opus" "$(exloom_reviewer_model l1-reviewer)" "opus"
+printf 'l1-reviewer: sonnet\n' > .claude/exloom-reviewer-model
+ok "an uncommitted setting is ignored" "$(exloom_reviewer_model l1-reviewer)" "opus"
+git add .claude/exloom-reviewer-model >/dev/null 2>&1; git commit -qm model >/dev/null 2>&1
+ok "a committed setting names the reviewer's model" "$(exloom_reviewer_model l1-reviewer)" "sonnet"
+ok "...and leaves the others on opus" "$(exloom_reviewer_model security-auditor)" "opus"
+ok "the ignore check lists it" \
+   "$(printf '.claude/\n' > .gitignore; exloom_ignored_settings feat/plan | grep -c 'exloom-reviewer-model')" "1"
+
+section "during the fix loop only the fixer commits code"
+
+subrepo fixloop
+FLC=".claude/reviews/feat/plan.md"; FLV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$FLV"
+printf '# r\n\n## Rulings\n\nnone\n' > "$FLC"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+FLH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T10:00:00Z"}\n' "$FLH" > "$FLV/l1-reviewer.json"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:1","fingerprint":"f","head":"%s","at":"n"}\n' "$FLH" > "$FLV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+fl() {   # fl <command> [agent_id] -> exit code of the hook
+  python3 -c "
+import json,sys
+d={'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash','tool_input':{'command':sys.argv[1]}}
+if sys.argv[2]: d.update(agent_id=sys.argv[2], agent_type='exloom:fixer')
+print(json.dumps(d))" "$1" "${2:-}" | bash "$HOOKS_ABS/guard-fix-loop.sh" >/dev/null 2>&1; echo $?
+}
+printf 'b\n' > src/a.go; git add src/a.go
+ok "the main session committing code with an open rejection -> refused" "$(fl 'git commit -m fix')" "2"
+ok "...the fixer subagent committing it -> allowed" "$(fl 'git commit -m fix' agent-1)" "0"
+git reset -q src/a.go
+printf 'x\n' > .claude/reviews/feat/note.md; git add .claude/reviews/feat/note.md
+ok "committing only review files -> allowed" "$(fl 'git commit -m review')" "0"
+git commit -qm note >/dev/null 2>&1
+sed -i 's/^none$/- src\/a.go:1 — PARKED: kept/' "$FLC"; git add -A >/dev/null 2>&1; git commit -qm ruled >/dev/null 2>&1
+printf 'c\n' > src/b.go; git add src/b.go
+ok "once every finding is ruled, the session commits again" "$(fl 'git commit -m next')" "0"
+ok "an ordinary command is not judged" "$(fl 'git status')" "0"
+
+section "smoke evidence: agent-run for CLI and API at Tier 0-2, pasted for UI and Tier 3"
+
+subrepo smoke
+SMC=".claude/reviews/feat/plan.md"; SMV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$SMV"
+SMOKE="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/record-smoke.sh"
+printf 'echo 4\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm calc >/dev/null 2>&1
+SMH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$SMH" > "$SMV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$SMH" > "$SMV/proof.json"
+smchk() { exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+  exloom_validate_checklist "$SMC" HEAD 1 test 2>&1 >/dev/null; }
+ok "no smoke evidence -> blocked" "$(smchk | grep -c 'smoke test' | head -1)" "1"
+bash "$SMOKE" -- bash src/calc.sh >/dev/null 2>&1
+ok "the script records the command, exit code and commit" \
+   "$(tail -1 "$SMV/smoke.json" | grep -cE "\"head\":\"$(git rev-parse HEAD)\".*\"exit\":0")" "1"
+ok "...and the output it printed" "$(grep -c '^4$' "$SMV/smoke.out")" "1"
+ok "an agent-run receipt satisfies a Tier 1 CLI change" "$(smchk | grep -c 'smoke test' | head -1)" "0"
+bash "$SMOKE" -- false >/dev/null 2>&1
+ok "a failing command does not" "$(smchk | grep -c 'smoke test' | head -1)" "1"
+mkdir -p web; printf '<p/>\n' > web/page.html; git add -A >/dev/null 2>&1; git commit -qm ui >/dev/null 2>&1
+SMH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$SMH" >> "$SMV/l1-reviewer.json"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$SMH" >> "$SMV/proof.json"
+bash "$SMOKE" -- true >/dev/null 2>&1
+ok "a UI change needs a pasted result, not an agent receipt" "$(smchk | grep -c 'pasted' | head -1)" "1"
+sed -i 's/^## Rulings$/## Smoke test\n\nOpened \/page.html; the paragraph rendered.\n\n## Rulings/' "$SMC"
+ok "...and the pasted section satisfies it" "$(smchk | grep -c 'smoke test' | head -1)" "0"
+
+section "the bypass leaves a trace"
 
 # EXLOOM_REVIEW_SKIP turns the gate off unconditionally, and should. But an
 # announcement on stderr scrolls past, so without a committed trace nothing can
@@ -2456,7 +3253,7 @@ rm -f .claude/exloom-gate.enabled "$BP"
 printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
 ok "no receipt in a repo with the gate off" "$([[ -f "$BP" ]] && echo yes || echo no)" "no"
 
-echo "== the status line judges coverage the way the GATE does =="
+section "the status line judges coverage the way the GATE does"
 
 # A status line stricter than the check it reports on sends people to re-run a
 # reviewer the gate is content with. Once its demands are known to be inflated,
@@ -2493,6 +3290,40 @@ printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s",
 git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
 ok "a rejection is reported as a rejection, not as a stale receipt" \
    "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'did NOT approve')" "1"
+
+section "the early exit lets through every input a hook must judge"
+
+. "$HOOKS_ABS/prefilter.sh"
+pf() { if "$1" "$2"; then echo pass; else echo exit; fi; }
+bashp() { printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
+
+ok "receipts: a cd into the verdicts folder, then a relative redirect" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'cd .claude/reviews/feat/x.verdicts && echo {} > l1-reviewer.json')")" "pass"
+ok "receipts: node -e writing a receipt" \
+   "$(pf exloom_may_touch_receipts "$(bashp "node -e \\\"require('fs').writeFileSync('.claude/reviews/x.verdicts/l1-reviewer.json','{}')\\\"")")" "pass"
+ok "receipts: git apply of a patch that names no path" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'git apply fix.patch')")" "pass"
+ok "receipts: git clean -fdx" "$(pf exloom_may_touch_receipts "$(bashp 'git clean -fdx')")" "pass"
+ok "receipts: a Windows path to a receipt" \
+   "$(pf exloom_may_touch_receipts '{"tool_name":"Write","tool_input":{"file_path":"C:\\r\\.claude\\reviews\\x.verdicts\\l1-reviewer.json"}}')" "pass"
+ok "receipts: deleting the gate marker" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'rm .claude/exloom-gate.enabled')")" "pass"
+ok "receipts: an ordinary command exits early" \
+   "$(pf exloom_may_touch_receipts "$(bashp 'ls -la && git status')")" "exit"
+
+ok "push: git -C dir push" "$(pf exloom_may_publish "$(bashp 'git -C ../x push origin HEAD')")" "pass"
+ok "push: gh pr create" "$(pf exloom_may_publish "$(bashp 'gh pr create --fill')")" "pass"
+for t in mcp__github__push_files mcp__github__create_pull_request mcp__github__merge_pull_request mcp__github__delete_file mcp__github__create_or_update_file; do
+  ok "push: $t" "$(pf exloom_may_publish "{\"tool_name\":\"$t\",\"tool_input\":{}}")" "pass"
+done
+ok "push: an ordinary command exits early" "$(pf exloom_may_publish "$(bashp 'ls -la && git status')")" "exit"
+
+ok "receipt hook: a SubagentStop from a reviewer" \
+   "$(pf exloom_may_be_reviewer '{"hook_event_name":"SubagentStop","agent_type":"exloom:security-auditor"}')" "pass"
+ok "receipt hook: a Task dispatch of a reviewer" \
+   "$(pf exloom_may_be_reviewer '{"tool_name":"Agent","tool_input":{"subagent_type":"exloom:adversarial-reviewer"}}')" "pass"
+ok "receipt hook: any other agent exits early" \
+   "$(pf exloom_may_be_reviewer '{"hook_event_name":"SubagentStop","agent_type":"Explore"}')" "exit"
 
 cd "$WORK" || exit 1
 

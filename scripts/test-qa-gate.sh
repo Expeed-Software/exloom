@@ -167,6 +167,38 @@ run deny "a real create still denied when prefixed by an env assignment" \
   'ORG=https://dev.azure.com/acme az boards work-item create --type "Test Case" --title "x" --fields "System.Tags=exloom-qa:24501:TC-099"'
 
 echo ""
+echo "-- implicit POSTs and az rest are writes too --"
+cat > "$FIX/.claude/qa/24501.md" <<'EOF'
+## Approval Record
+Approved: TC-001..TC-005
+EOF
+run deny "curl -d to the workitems endpoint is an implicit POST" \
+  'curl -s -d @case.json "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1"'
+run deny "curl --data-binary likewise" \
+  'curl -s --data-binary @case.json "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1"'
+run deny "az rest --method post --uri creates a work item" \
+  'az rest --method post --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1" --body @case.json'
+run deny "az rest --method POST --url likewise" \
+  'az rest --method POST --url "https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1" --body @case.json'
+run deny "az rest --method delete is a delete" \
+  'az rest --method delete --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/24132?api-version=7.1"'
+run allow "az rest --method get is a read" \
+  'az rest --method get --uri "https://dev.azure.com/acme/proj/_apis/wit/workitems/24501?api-version=7.1"'
+
+echo ""
+echo "-- the early exit lets through every board write the gate must judge --"
+. plugins/exloom-qa/hooks/prefilter.sh
+pf() {   # pf <expected:pass|exit> <name> <command>
+  local got=exit
+  exloomqa_may_write_board "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$3\"}}" && got=pass
+  if [[ "$got" == "$1" ]]; then echo "  PASS  [$1] $2"; PASS=$((PASS + 1))
+  else echo "  FAIL  [expected $1, got $got] $2"; FAIL=$((FAIL + 1)); fi
+}
+pf pass "curl -d reaches the full check" 'curl -s -d @case.json https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case?api-version=7.1'
+pf pass "az rest --method post reaches the full check" 'az rest --method post --uri https://dev.azure.com/acme/proj/_apis/wit/workitems/$Test%20Case'
+pf exit "an ordinary command" 'ls -la && git status'
+
+echo ""
 echo "-- bypass --"
 set +e
 printf '%s' "$(CMD_ENV="$TC_CREATE" "$PY" -c '
@@ -182,6 +214,19 @@ else
   echo "  FAIL  [expected allow, got deny] EXLOOM_QA_SKIP=1 bypass"
   FAIL=$((FAIL + 1))
 fi
+
+BYP="$(mktemp -d)"
+printf '%s' "$(CMD_ENV="$TC_CREATE" "$PY" -c '
+import json, os
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":os.environ["CMD_ENV"]}}))')" \
+  | CLAUDE_PROJECT_DIR="$BYP" EXLOOM_QA_SKIP=1 bash "$HOOK" >/dev/null 2>&1
+if grep -q '"bypass":"EXLOOM_QA_SKIP"' "$BYP/.claude/qa/bypass.jsonl" 2>/dev/null \
+   && ! grep -q 'work-item create' "$BYP/.claude/qa/bypass.jsonl"; then
+  echo "  PASS  the bypass leaves a receipt, without the command text"; PASS=$((PASS + 1))
+else
+  echo "  FAIL  the bypass leaves no receipt"; FAIL=$((FAIL + 1))
+fi
+rm -rf "$BYP"
 
 echo ""
 echo "== $PASS passed, $FAIL failed =="

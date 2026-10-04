@@ -7,37 +7,37 @@ description: Use after plan execution and before code review — compares the ac
 
 ## Overview
 
-Given a plan and the git diff of the work that claims to implement it, this skill answers: was the plan followed? What deviated? Was every deviation justified and recorded? The output is a structured audit report that becomes the first artifact a code reviewer sees before reading a single line of code.
+Given a plan and its diff, answer: was the plan followed, what deviated, and was every deviation justified and recorded? The output is a structured audit report — the first thing a code reviewer sees.
 
-This skill runs between execution and code review. It separates "is this code good?" (code review) from "is this the code we planned?" (this audit). A high-deviation audit is a signal to route to `exloom:capturing-learnings` — it is a learning mechanism, not a punishment mechanism.
+Code review asks "is this code good?"; this audit asks "is this the code we planned?" A high-deviation audit routes to `exloom:capturing-learnings` — learning, not punishment.
 
 ## Process
 
 ### Inputs
 
-Before running the audit, gather four artifacts. All are required. If any is missing, stop and obtain it before proceeding — an audit with incomplete inputs produces incomplete results.
+Gather all four; if any is missing, stop and obtain it.
 
-**Spec file path.** The `F-nnn-*.md` the plan was built from. This is where the acceptance criteria are *defined*; the plan only cites them. Auditing against the plan's copy of the criteria cannot detect the failure that matters most here — a criterion the spec states and the plan never picked up — because that criterion is absent from the plan by definition.
+**Spec file path.** The `F-nnn-*.md` the plan was built from. The spec *defines* the acceptance criteria; the plan only cites them. Audit against the spec.
 
-**Plan file path.** The `.md` plan file the work was executed against. Usually in `.claude/plans/` or a similar location. If the path is unknown, check recent commits for the plan file or ask the PR author. The plan must contain at minimum:
-- A "Files to Touch" section listing every file expected to be created, modified, or deleted
+**Plan file path.** The executed plan, usually in `.claude/plans/`. If unknown, check recent commits or ask the PR author. It must contain:
+- A "Files to Touch" section listing every file to create, modify, or delete
 - Criteria refs (`F-012/R-3/AC-2`) on its tasks, citing the spec
 - A Deviation Log section (filled during `exloom:executing-handoff-plans`)
 
-If the plan lacks any of these sections, note it in the audit report. A plan without a "Files to Touch" section makes Step 1 impossible. A plan whose tasks cite no criteria makes half of Step 2 impossible — you can still audit the spec's criteria against the diff, but not against the plan, and "which task was this for?" becomes unanswerable. Proceed with whatever sections exist and flag the gaps.
+If a section is missing, proceed with what exists and flag the gap.
 
-**Diff range.** The git range covering the full scope of the executed work. (The shell snippets in this skill are bash — `sed`, `comm`, three-dot diff. On Windows, run them in Git Bash, which ships with Git; `comm` and `sed` do not exist in PowerShell. The git commands themselves are identical in any shell.)
+**Diff range.** The git range covering the full executed work. Snippets are bash; on Windows use Git Bash.
 
-First, determine the repository's default branch — do not assume it is `main`. It may be `master`, `develop`, or something else. Detect it:
+Detect the default branch — do not assume `main`:
 ```bash
 # The default branch this repo's origin points at:
 git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'
 ```
-This fails with "not a symbolic ref" on fresh clones and most CI checkouts, where `origin/HEAD` is not set. If it does, populate it first, then retry:
+If it fails with "not a symbolic ref", populate it and retry:
 ```bash
 git remote set-head origin --auto   # queries the remote and sets origin/HEAD
 ```
-If you cannot reach the remote (offline, restricted CI), fall back to asking the PR author or reading the target branch from the PR metadata (`gh pr view <N> --json baseRefName -q .baseRefName`). In the commands below, substitute the resolved name wherever `<base>` appears — do not just assume `main`.
+If the remote is unreachable, ask the PR author or read the PR's target (`gh pr view <N> --json baseRefName -q .baseRefName`). Use it as `<base>`.
 
 Typical commands:
 ```bash
@@ -46,34 +46,26 @@ gh pr diff <PR-number>          # PR diff via GitHub CLI (base is the PR's targe
 git diff --stat <base>...HEAD   # summary view for initial orientation
 ```
 
-Use the three-dot (`...`) syntax, not two-dot (`..`). Three-dot shows changes since the branch diverged from the base, which is what the plan covers. Two-dot includes changes to the base that happened after the branch was created, which pollutes the audit with unrelated files.
+Use three-dot (`...`), not two-dot (`..`), which pulls in later base changes. If the branch has merge commits from the base, or is stacked on another feature branch, use `git diff $(git merge-base <base> HEAD)..HEAD`, with `<base>` set to the actual parent branch for a stacked branch.
 
-If the branch has been rebased onto the base recently, the three-dot diff is still correct — it shows only the branch's own changes. If the branch has merge commits from the base, or is stacked on another feature branch rather than the default branch, use `git diff $(git merge-base <base> HEAD)..HEAD` to isolate branch-only changes — and set `<base>` to the actual parent branch, not the repo default, for a stacked branch.
-
-**Deviation Log.** Located inside the plan file, populated by the executor during `exloom:executing-handoff-plans`. If the Deviation Log section is empty, that is itself an audit signal — either execution was perfectly on-plan (rare) or deviations went unrecorded (common). An empty log on a non-trivial plan should raise your suspicion, not lower it.
+**Deviation Log.** Inside the plan. An empty log on a non-trivial plan is itself a signal — deviations more likely went unrecorded.
 
 ### Step 1: File Audit
 
-Compare the plan's "Files to Touch" list against the files actually changed in the diff.
-
-Extract the planned file list from the plan. Then extract the actual changed files (`<base>` = the repo's default or parent branch detected above):
+Compare the plan's "Files to Touch" against the files changed:
 ```bash
 git diff --name-only <base>...HEAD
 ```
 
-Compare the two lists line by line and categorize every file into one of three buckets:
+Put every file in one bucket:
 
-- **Planned + Changed (expected).** The file appears in the plan and in the diff. This is the normal case. No flag needed, but verify the nature of the change matches the plan's intent (modify vs. create vs. delete).
-- **Planned + Unchanged (potentially missed).** The file appears in the plan but not in the diff. This could mean the task was intentionally skipped (should be in the Deviation Log) or was accidentally missed. If not logged, flag it.
-- **Unplanned + Changed (drift).** The file appears in the diff but not in the plan. This is what the audit exists to catch. Check the Deviation Log — if the change is logged with justification, note it. If not logged, flag it as silent drift.
+- **Planned + Changed (expected).** Verify the change type matches (modify / create / delete). A planned "create" of an existing file means the plan was stale — note it.
+- **Planned + Unchanged (potentially missed).** Must have a Deviation Log entry explaining the skip; if not, flag it.
+- **Unplanned + Changed (drift).** Logged with justification → note it. Not logged → flag as silent drift.
 
-Record all three categories for the audit report. Do not skip the "expected" category — it confirms the plan was substantively followed and gives the reviewer confidence in the audit's thoroughness.
+Record all three buckets, including expected. Verify real paths; near-identical paths are different files.
 
-For files in the "expected" category, also verify the type of change matches the plan. If the plan said "modify `src/config.ts`" but the diff shows the file was deleted and recreated, that is a deviation even though the file appears in both lists. Similarly, if the plan said "create" but the file already existed and was modified, the plan was based on stale assumptions — note it.
-
-Pay attention to file paths. A plan that says `src/services/auth.ts` and a diff that shows `src/service/auth.ts` (singular) are different files. Path mismatches are easy to miss and indicate either a plan typo or a structural deviation. When in doubt, verify the actual filesystem path.
-
-**Automating the three-bucket comparison.** Eyeballing two file lists is error-prone — auditors miss files, especially on large diffs. Mechanize it. Put the plan's "Files to Touch" paths in a file (one per line) and compare against the actual diff:
+Mechanize the comparison; put the plan's paths in a file, one per line:
 
 ```bash
 # Save planned files (one path per line) to planned.txt, then:
@@ -90,11 +82,11 @@ comm -23 planned-sorted.txt actual.txt
 comm -13 planned-sorted.txt actual.txt
 ```
 
-The third bucket — `comm -13` — is the drift list. Every file it prints must have a Deviation Log entry or it is silent drift. This three-command check catches what manual comparison misses and takes 30 seconds.
+Every file `comm -13` prints needs a Deviation Log entry or it is silent drift.
 
 ### Step 2: Acceptance Criteria Verification
 
-**First, run the coverage check in both directions.** It is a grep, it takes a second, and it finds the two failures a criterion-by-criterion read is worst at spotting — because both are about something that is *absent*, and reading a list draws your eye to what is on it.
+**First, run the coverage check in both directions** to find what is *absent*.
 
 ```bash
 SPEC=docs/exloom/specs/F-012-slug.md
@@ -103,59 +95,47 @@ comm -23 <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$SPEC" | sort -u) \
          <(grep -oE 'F-[0-9]+/R-[0-9]+/AC-[0-9]+' "$PLAN" | sort -u)
 ```
 
-- **Criteria in the spec that no task cites — forgotten scope.** The user approved this and nobody built it. Nothing else in the review will catch it: every reviewer works from the diff, and a thing that was never built leaves no trace in a diff.
-- **Refs in the plan that the spec does not define — a criterion invented at plan time.** It looks like a requirement and carries the authority of one, and nobody approved it.
-- **Tasks citing no ref at all — scope creep**, in the form that survives review most easily, because the code is usually fine. It is simply work nobody asked for.
+- **Criteria in the spec that no task cites — forgotten scope.**
+- **Refs in the plan that the spec does not define — invented at plan time.**
+- **Tasks citing no ref at all — scope creep.**
 
-Report each as a finding with its ref. These are cheap to state and expensive to discover later.
+Report each as a finding with its ref.
 
-**Then read what the test run actually proved**, which is a different claim from what the plan cites:
+**Then read what the test run actually proved:**
 
 ```bash
 sed -n 's/.*"criteria":"\([^"]*\)".*/\1/p' .claude/reviews/<branch>.verdicts/proof.json | tail -1
 ```
 
-`prove-change-is-tested.sh` writes that field from the runner's own JUnit XML, counting only criteria whose test **passed with the change and did not pass without it**. A criterion the plan cites but this list omits has no test that notices it — the citation is a claim, this is the check on it. The proof run also prints any criterion whose test passes against the base source, which means the test does not exercise the change whatever its name says.
+`prove-change-is-tested.sh` lists only criteria whose test **passed with the change and did not pass without it**. A criterion the plan cites but this list omits has no test that notices it. A criterion the proof run reports as passing at the base is not exercised by its test.
 
-Then read each criterion from the **spec** — not the plan; the plan cites, the spec defines. For every criterion, assign one of three statuses:
+Then read each criterion from the **spec**, not the plan, and assign one status with cited evidence (file, function, test assertion, config):
 
-- **Verified.** You can see evidence in the diff that the criterion is met. This includes: code that directly implements the behavior, test assertions that validate it, configuration that enables it. Cite the specific file and change as evidence.
-- **Unverified.** You cannot determine from the diff alone whether the criterion is met. This is common for performance criteria, visual requirements, or integration behaviors that require a running system. Note what needs to be manually tested and where.
-- **Deviated.** The implementation does not match the specification. The criterion says one thing; the diff shows another. Check the Deviation Log — if the deviation is logged, note it. If not, flag it as silent drift on a criterion.
+- **Verified.** The diff shows code, test assertions, or config that meets it.
+- **Unverified.** The diff alone cannot tell (performance, visual, runtime integration). State what manual test would resolve it.
+- **Deviated.** The diff contradicts the criterion. Logged → note it; not logged → flag as silent drift on a criterion.
 
-Do not conflate "Unverified" with "Deviated." Unverified means you lack information. Deviated means you have evidence of a mismatch. Do not guess — if you cannot tell, mark it Unverified and specify what manual test would resolve it.
+Do not guess. "Verified" without evidence is not a finding.
 
-For each criterion, cite specific evidence. "Verified" without evidence is an assertion, not an audit finding. Point to the file, the function, the test assertion, or the configuration change that demonstrates the criterion is met. This specificity is what makes the audit useful to the reviewer — they can go directly to the cited location instead of searching the entire diff.
-
-Common acceptance criteria patterns and how to handle them:
-- **Behavioral criteria** ("returns 404 when not found"): look for the response code in route handlers and test assertions. Usually verifiable.
-- **Performance criteria** ("P95 latency under 200ms"): almost always Unverified from diff alone. Note what load test or monitoring check would confirm it.
-- **Negative criteria** ("does not expose internal IDs"): look for the absence of the field in response serializers. Verifiable if you can confirm the serializer excludes it, but fragile — mark as Unverified if there are multiple code paths.
-- **Integration criteria** ("sends email on signup"): look for the integration call in the diff. Verifiable if the call is present, but actual delivery needs runtime confirmation.
+Performance criteria are almost always Unverified — name the load test. Negative criteria are Unverified if multiple code paths could leak. For integrations, the call is verifiable; delivery needs runtime confirmation.
 
 ### Step 3: Deviation Log Review
 
-Read the plan's Deviation Log section. This was populated by the executor during `exloom:executing-handoff-plans`. For each logged deviation, evaluate:
+For each logged deviation, evaluate:
 
-- **Completeness.** Does the entry describe what changed and why? An entry that says "used a different approach" without explaining the reason is incomplete.
-- **Justification quality.** Was the deviation a justified response to a discovery during implementation? "Existing codebase uses pattern X, so I followed it instead of the planned pattern Y" is justified. "It seemed better" is not.
-- **Resolution.** Was the deviation resolved (approved by the author as acceptable) or left open for reviewer decision?
+- **Completeness.** Does it say what changed and why?
+- **Justification quality.** "Existing codebase uses pattern X" is justified; "it seemed better" is not.
+- **Resolution.** Approved by the author, or left open for the reviewer?
 
-Then look for unlisted deviations: files changed that are not in the plan AND not in the Deviation Log. These are silent improvisations — the most important finding an audit can produce. Silent drift means the executor changed scope without recording it, and the team's shared understanding of the work is now inaccurate.
-
-Cross-reference Step 1's "Unplanned + Changed" files against the Deviation Log entries. Every unplanned file should have a corresponding log entry. Every "Planned + Unchanged" file should also have an entry explaining why it was skipped. Any gap between the file audit and the deviation log is a finding.
-
-Silent drift is the highest-severity finding. This is different from a logged deviation, which is a deliberate, transparent decision.
+Cross-reference Step 1: every Unplanned + Changed and every Planned + Unchanged file needs a log entry. Any gap is silent drift — the highest-severity finding.
 
 ### Step 4: Produce Audit Report
 
-Compile all findings from Steps 1-3 into the structured format below. Post the report as a PR comment before code review begins — not inline in the PR description, but as a separate comment so it is distinguishable from author-provided context. The report is the reviewer's entry point into the PR.
+Compile Steps 1-3 into the format below. Post it as the first standalone PR comment, before code review.
 
-When producing the report:
-- Include every file from the file audit, not just the flagged ones. The "expected" entries demonstrate thoroughness.
-- Include every acceptance criterion, not just the failed ones. A complete list lets the reviewer see scope at a glance.
-- Quote deviation log entries verbatim. Do not paraphrase — the reviewer needs the executor's exact words to evaluate justification quality.
-- State the verdict clearly with a one-sentence justification. If the verdict is Fail, list the specific blockers as actionable items.
+- Include every file and every criterion, not just flagged ones.
+- Quote Deviation Log entries verbatim.
+- State one verdict with a one-sentence justification; on Fail, list blockers as actionable items.
 
 ## Audit Report Format
 
@@ -203,33 +183,26 @@ When producing the report:
 - **Fail** — significant unlogged deviations or unmet acceptance criteria
 ```
 
-Use exactly one verdict line, not all three. The three options above are the possible values — pick the one that fits. Include a brief justification after the verdict explaining the deciding factors.
-
 **Verdict definitions:**
 
-- **Pass.** All planned files were changed. No unrecorded deviations exist. All verifiable acceptance criteria are confirmed. Every deviation log entry is complete and justified. The reviewer can proceed to code review immediately with full confidence that the plan was followed.
-
-- **Pass with notes.** One or more acceptance criteria are "Unverified" (requiring manual testing), or deviation log entries exist that the reviewer should be aware of, but there are no blockers. Minor logged deviations that do not affect the plan's core intent fall here. The reviewer proceeds with specific items flagged for attention.
-
-- **Fail.** One or more of the following conditions exist: files changed but not in plan AND not in Deviation Log; acceptance criteria deviated AND not in Deviation Log; Deviation Log entries incomplete (missing justification); files in plan not changed AND not in Deviation Log. A Fail means the PR author must update the Deviation Log, revert unplanned changes, or complete missing work before code review begins. Do not proceed to `/review-complete` on a Fail verdict.
+- **Pass.** All planned files changed, no unrecorded deviations, all verifiable criteria confirmed, every log entry complete and justified.
+- **Pass with notes.** Some criteria Unverified, or logged deviations worth attention, but no blockers.
+- **Fail.** Any unlogged drift (unplanned file, deviated criterion, or skipped planned file), or a log entry missing justification. Do not proceed to `/review-complete` on a Fail.
 
 ## Decision Points
 
 | Situation | Decision |
 |---|---|
-| Small unplanned change (import reorder, formatting) | Note but do not flag as drift. Incidental changes are not deviations. They are mechanical consequences of touching nearby code. |
-| Unplanned file changed with real logic changes | Flag as drift. This is what the audit exists to catch. Logic changes in unplanned files mean scope expanded without agreement. |
-| Planned file not changed | Could be intentional (task was unnecessary) or missed. Check the Deviation Log. If not logged, flag it. |
-| Acceptance criterion cannot be verified from diff alone | Mark as "Unverified — needs manual testing." Do not guess. Specify what test would resolve it. |
-| Deviation log has a deviation but justification is weak | Flag it. "It seemed better" is not a justification. "Existing pattern required X because of Y" is. The bar is: would a teammate reading this in 6 months understand why? |
-| Everything matches perfectly | Rare but possible. Verify you did not miss anything — re-check the file lists and criteria counts before issuing a Pass verdict. |
-| Plan was clearly wrong but executor fixed it | Good judgment by the executor — but was it logged? Fixing a bad plan step without recording it is still silent improvisation. The deviation log exists for exactly this case. |
-| Multiple small drifts that individually seem harmless | Evaluate in aggregate. Five "harmless" unlogged changes suggest a pattern of not logging, which is a process failure even if the code is fine. |
-| Plan has no "Files to Touch" section | You cannot run Step 1. Note this in the report. Audit what you can (acceptance criteria, deviation log). Recommend the plan template be updated to require file lists. |
-| Executor says "I updated the plan as I went" | Check the git history of the plan file. If it was modified after execution started, without the author agreeing to the change, the plan no longer represents what the team approved — and auditing against it audits the executor's own homework. Flag it. |
-| Test files were added that are not in the plan | Test files that directly correspond to planned source files are expected even if not explicitly listed. Test files for unplanned source files are drift — they indicate scope expansion. |
-| Plan is split across a stack of PRs (PR 2 of 3) | Audit only the tasks the current PR claims to implement, not the whole plan. Use the diff range for THIS PR (`gh pr diff <N>`), not the cumulative branch diff. State in the report which plan tasks are in scope for this PR and which remain for later PRs. Acceptance criteria that span PRs are marked "Unverified — completes in PR 3." |
-| Auditing the final PR of a multi-PR plan | Now audit cumulative fidelity. Use the full diff range across all merged PRs (`git diff <base-before-PR1>...HEAD`) to confirm every planned file was eventually touched and every acceptance criterion is met across the combined work. The last audit is where you catch a task that fell through the cracks between PRs. |
+| Small unplanned change (import reorder, formatting) | Note, do not flag as drift. |
+| Deviation log justification is weak | Flag it: would a teammate understand why in 6 months? |
+| Everything matches perfectly | Re-check file lists and criteria counts before issuing Pass. |
+| Plan was clearly wrong but executor fixed it | Was it logged? An unrecorded fix is still silent improvisation. |
+| Multiple small drifts that individually seem harmless | Evaluate in aggregate; several unlogged changes are a process failure. |
+| Plan has no "Files to Touch" section | Skip Step 1, note it, audit criteria and log. |
+| Executor says "I updated the plan as I went" | Check the plan's git history; flag edits made after execution started without the author's agreement. |
+| Test files were added that are not in the plan | Tests for planned source files are expected; for unplanned ones, drift. |
+| Plan is split across a stack of PRs (PR 2 of 3) | Audit only the tasks this PR claims, using this PR's diff (`gh pr diff <N>`). State which tasks are in scope. Cross-PR criteria are "Unverified — completes in PR 3." |
+| Auditing the final PR of a multi-PR plan | Audit cumulatively (`git diff <base-before-PR1>...HEAD`): every planned file touched, every criterion met across the combined work. |
 
 ## Failure Modes
 
@@ -241,19 +214,11 @@ See [worked-example.md](worked-example.md).
 
 ## Integration
 
-**Timing.** Run this audit after the executor marks execution complete and before any code review begins. The audit is a gate — it determines whether the PR is ready for review or needs corrections first.
+**Timing.** After execution is complete, before `/review-complete` dispatches the reviewers; ideally run by the PR author.
 
-**You arrive here from:** execution complete, before `/review-complete` dispatches the reviewers. The executor has finished implementing the plan and the branch is ready for review.
+**On Fail.** The executor updates the log, reverts unplanned changes, or completes missed work, then re-audits from Step 1 — never partially. A second Fail: escalate to the team lead or route to `exloom:capturing-learnings`.
 
-**Audit report placement:** post the report as the first comment on the PR, before any code review comments. This gives the reviewer full context before they read a single line of code. The report should be a standalone comment, not embedded in the PR description — the PR description belongs to the author, and the audit report belongs to the auditor. Keeping them separate preserves accountability.
-
-**Who runs the audit:** ideally the PR author runs this before requesting review, so blockers are resolved proactively. If the author did not run it, the reviewer runs it as their first step. Either way, the audit must exist before code review comments begin.
-
-**If audit fails:** the executor addresses the issues — either by updating the deviation log with justifications, reverting unplanned changes, or completing missed work. Then re-audit. Do not proceed to code review on a failed audit.
-
-**If audit reveals the plan was wrong:** route to `exloom:capturing-learnings`. A plan that was correct at approval time but wrong at execution time means the planning process missed something — an unknown dependency, a misunderstood API, an incorrect assumption about the codebase. This is a learning opportunity, not a failure of execution. The learning should feed back into plan templates and estimation practices.
-
-**Re-audit workflow:** when an audit fails and the executor makes corrections, run the full audit again from Step 1. Do not partially re-audit — the corrections may have introduced new changes that need evaluation. A re-audit is fast because most findings will now be resolved. If the re-audit also fails, the pattern suggests a deeper issue — the executor may not understand the audit expectations, or the plan may need revision. Escalate to the team lead or route to `exloom:capturing-learnings`.
+**If the plan was wrong.** Route to `exloom:capturing-learnings`.
 
 **Related skills:**
 - `exloom:planning-for-handoff` — produces the plan this skill audits against

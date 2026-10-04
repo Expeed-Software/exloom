@@ -37,9 +37,17 @@ bash scripts/validate-plugin.sh
 
 On Windows, run this under **Git Bash** (not WSL or PowerShell) — it's a POSIX shell script. Claude Code runs the plugin's hooks through Git Bash automatically; only this manual validator needs you to pick the right shell.
 
-It must print `PASSED`. Then:
+It must print `PASSED`. Then run the tests:
 
-- Bump the `version` in `plugins/exloom/.claude-plugin/plugin.json` (any plugin change bumps the version).
+```bash
+bash scripts/test-all.sh            # every suite; in a Linux container when Docker is available
+bash scripts/test-all.sh --changed  # only what your change can affect
+bash scripts/test-all.sh --native   # on this host; run before a release, it catches Windows-only behaviour
+```
+
+Then:
+
+- Bump the `version` in the plugin's `plugin.json` and its entry in `.claude-plugin/marketplace.json` (any plugin change bumps the version; the validator fails if the two differ).
 - Keep the PR focused on one logical change.
 - Describe what changed and why.
 

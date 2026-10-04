@@ -21,20 +21,29 @@
 # Bypass: EXLOOM_QA_SKIP=1
 
 set -u
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/lib.sh"
-
-if [[ "${EXLOOM_QA_SKIP:-0}" == "1" ]]; then
-  echo "exloom-qa: publish gate bypassed via EXLOOM_QA_SKIP=1 (audit)" >&2
-  exit 0
-fi
 
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
-  HOOK_INPUT="$(cat 2>/dev/null || true)"
+  IFS= read -r -d '' HOOK_INPUT || true
 fi
 [[ -n "$HOOK_INPUT" ]] || exit 0
+
+SCRIPT_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$SCRIPT_DIR" == "${BASH_SOURCE[0]}" ]] && SCRIPT_DIR=.
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/prefilter.sh"
+exloomqa_may_write_board "$HOOK_INPUT" || exit 0
+
+# The receipt records who and when, never the command: it may carry a token.
+if [[ "${EXLOOM_QA_SKIP:-0}" == "1" ]]; then
+  echo "exloom-qa: publish gate bypassed via EXLOOM_QA_SKIP=1 (audit)" >&2
+  qdir="${CLAUDE_PROJECT_DIR:-$PWD}/.claude/qa"
+  mkdir -p "$qdir" 2>/dev/null && printf '{"bypass":"EXLOOM_QA_SKIP","who":"%s","at":"%s"}\n' \
+    "$(git config user.email 2>/dev/null | tr -cd 'A-Za-z0-9@._+-' || true)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" >> "$qdir/bypass.jsonl" 2>/dev/null
+  exit 0
+fi
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib.sh"
 
 CMD="$(exloomqa_command "$HOOK_INPUT")"
 [[ -n "$CMD" ]] || exit 0
@@ -56,15 +65,21 @@ classify_segment() {
   local prefix='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+)?'
   local is_ado=0
   printf '%s' "$seg" | grep -Eq "${prefix}az[[:space:]]+(boards|devops)([^[:alnum:]_]|$)" && is_ado=1
-  if printf '%s' "$seg" | grep -Eq "${prefix}curl([^[:alnum:]_]|$)" \
+  if printf '%s' "$seg" | grep -Eq "${prefix}(curl|az[[:space:]]+rest)([^[:alnum:]_]|$)" \
      && printf '%s' "$seg" | grep -Eq 'dev\.azure\.com|\.visualstudio\.com'; then
     is_ado=1
   fi
   [[ "$is_ado" -eq 1 ]] || return 0
 
-  # Does this segment use a mutating HTTP method?
+  # Does this segment use a mutating HTTP method? curl with a body and no -G is
+  # an implicit POST; az rest names its method with --method.
   local mutating=0
   printf '%s' "$seg" | grep -Eq -- '-X[[:space:]]*(POST|PATCH|PUT|DELETE)|--request[[:space:]]+(POST|PATCH|PUT|DELETE)' && mutating=1
+  printf '%s' "$seg" | grep -Eqi -- '--method[[:space:]]+(post|patch|put|delete)' && mutating=1
+  if printf '%s' "$seg" | grep -Eq -- '(^|[[:space:]])(-d|--data|--data-binary|--data-raw|--data-urlencode)([[:space:]=]|$)' \
+     && ! printf '%s' "$seg" | grep -Eq -- '(^|[[:space:]])(-G|--get)([[:space:]]|$)'; then
+    mutating=1
+  fi
 
   # ---- unconditional denials ----
   if printf '%s' "$seg" | grep -Eq 'az[[:space:]]+boards[[:space:]]+work-item[[:space:]]+delete'; then
@@ -72,7 +87,7 @@ classify_segment() {
       "This command deletes work items. exloom-qa never deletes anything on the board." \
       "If a published test case is genuinely wrong, remove it by hand in Azure DevOps."
   fi
-  if printf '%s' "$seg" | grep -Eq -- '-X[[:space:]]*DELETE|--request[[:space:]]+DELETE|_apis/test/testcases/[0-9]+'; then
+  if printf '%s' "$seg" | grep -Eqi -- '-X[[:space:]]*DELETE|--request[[:space:]]+DELETE|--method[[:space:]]+delete|_apis/test/testcases/[0-9]+'; then
     exloomqa_deny \
       "This command deletes board artifacts. exloom-qa never deletes anything." \
       "Test Case deletion is permanent with no recycle bin — do it by hand if it is truly intended."

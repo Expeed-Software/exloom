@@ -24,6 +24,8 @@ Spec-driven development for teams, with a review gate that's actually enforced. 
 /plugin install exloom@exloom
 ```
 
+Then `/exloom-setup` once per repository, and `/exloom` on any feature branch.
+
 **Requires** Git, Bash, and `jq` or `python3` for the full gate. → [details](plugins/exloom/)
 
 ### [exloom-qa](plugins/exloom-qa/) — QA test-case workflow
@@ -42,11 +44,11 @@ exloom is for teams shipping code. exloom-qa is for teams proving it works. They
 
 ## Versioning and releases
 
-Each plugin carries its own version in its own `plugin.json` and releases on its own schedule. `exloom` tags bare (`v5.1.0`); every other plugin prefixes with its own name (`exloom-qa--v0.1.8`) so the histories never collide. Installs resolve from the default branch, so merging to `main` is what publishes; tags and GitHub Releases are changelog, not delivery.
+Each plugin carries its own version in its own `plugin.json`, repeated in `.claude-plugin/marketplace.json` (the validator fails if they differ), and releases on its own schedule. `exloom` tags bare (`v5.1.0`); every other plugin prefixes with its own name (`exloom-qa--v0.1.8`) so the histories never collide. Installs resolve from the default branch, so merging to `main` is what publishes; tags and GitHub Releases are changelog, not delivery.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Run `bash scripts/validate-plugin.sh` before opening a PR — it validates every plugin in the marketplace.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Run `bash scripts/validate-plugin.sh` and `bash scripts/test-all.sh` before opening a PR.
 
 ## License
 

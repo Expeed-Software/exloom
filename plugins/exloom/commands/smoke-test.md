@@ -5,7 +5,7 @@ description: Walk through a real smoke test for the current change — boot the 
 
 # /smoke-test
 
-You are guiding a real smoke test. Unit tests passing is not a smoke test. Compilation succeeding is not a smoke test. The operator must boot the system, perform the user action, and observe the result. Your job is to make that concrete and to capture the evidence.
+Guide a real smoke test. Passing unit tests or a successful compile is not one. The operator boots the system, performs the user action, and observes the result; you capture the evidence.
 
 ## Step 1 — Open the checklist
 
@@ -13,24 +13,20 @@ Open `.claude/reviews/<current-branch>.md`. If it does not exist, tell the user 
 
 ## Step 2 — Establish the boot command
 
-Check `.claude/exloom.local.md` for `smoke_test_boot_command` in the frontmatter. If present, propose it. If absent, infer from the repo:
+Check `.claude/exloom.local.md` frontmatter for `smoke_test_boot_command`. If present, propose it. Otherwise infer:
 
 - Java/Gradle → `./gradlew :<main-module>:run` or `./gradlew bootRun`.
 - Angular frontend → `npm start` or `ng serve`.
 - Node service → `npm run dev` or `npm start`.
 - Docker-composed stack → `docker compose up -d` plus service command.
 
-**If there is no app to boot — a library, an SDK, a CLI, a parser.** There is still a smoke test, and `N/A — library` is not it. Skipping here removes the one step designed to catch what code review cannot, on exactly the changes where the reviewers see least.
+**No app to boot — a library, SDK, CLI, or parser — still gets a smoke test.** `N/A — library` is not one. Exercise the change through the public entry point an adopter calls, from a scratch file outside the test sources, and show the observable result:
 
-The equivalent is: **exercise the change through the public entry point an adopter actually calls, and show the observable result.** Not a unit test, not an internal method — the API a consumer imports, invoked from a scratch file outside the test sources, with the output printed.
-
-- Library / SDK → a scratch `main` or REPL snippet that imports the published artifact and calls the entry point, with the returned value or thrown exception printed in full.
-- Parser / validator → feed it the input the change is about; print the accept/reject and the message verbatim, escaping anything invisible so the evidence survives a copy-paste.
+- Library / SDK → a scratch `main` or REPL snippet that imports the published artifact and calls the entry point, printing the returned value or thrown exception in full.
+- Parser / validator → feed it the input the change is about; print the accept/reject and the message verbatim, escaping anything invisible.
 - CLI → run the binary with real arguments; paste stdout, stderr and the exit code.
 
-For a change to a refusal path, that looks like: load a document through the public entry point an adopter calls, and print the refusal with every codepoint escaped. It boots nothing and it is still evidence.
-
-Ask the user to confirm or correct the boot command. Also ask for prerequisites (DB running? dependencies installed? env vars set?). Record them.
+Ask the user to confirm or correct the boot command, and for prerequisites (DB running, dependencies installed, env vars set). Record them.
 
 ## Step 3 — Establish the user action
 
@@ -39,25 +35,34 @@ Ask the user, in order:
 1. "What is the user-facing action that exercises this change? Describe it as a sequence of clicks / API calls / CLI commands."
 2. "What should the user observe if this change is working? (specific UI element, specific API response field, specific log line, specific DB row)"
 
-Be concrete. "The widget should appear" is too vague. "The 'Widgets' list should include a row with name='foo' and status='active'" is acceptable.
+Require specifics: not "the widget should appear" but "the 'Widgets' list should include a row with name='foo' and status='active'".
 
 ## Step 4 — Capture the evidence
 
-Now the interactive part. Tell the user:
+**Agent-run, for a CLI or API change at Tier 0–2 with no UI files in the diff:** run the check yourself through the recorder, which writes the receipt the gate reads:
+
+```bash
+SMOKE="$(find ~/.claude/plugins -path '*exloom*/scripts/record-smoke.sh' | sort -V | tail -1)"
+bash "$SMOKE" -- <the command or curl call that exercises the change>
+```
+
+It records the command, exit code and commit in `<branch>.verdicts/smoke.json` and the output in `smoke.out`. Check the output shows the expected result; a non-zero exit is a failed smoke test. Commit both files, then go to Step 6.
+
+**Pasted, for a UI change or Tier 3:** the gate does not accept an agent-run receipt. Tell the user:
 
 > Run the boot command. When the system is up, perform the user action. Then paste back: (a) the log lines or API response showing the action completed, (b) the evidence of the user-visible result (UI screenshot link / log excerpt / DB row dump / API response body). If it failed, paste the failure output and we will stop the smoke test here — the change is not ready.
 
-Wait for their paste. If they say "it worked, I don't have output to paste", refuse — the evidence is the point. Guide them to grab it: browser devtools network tab, backend logs, `psql` query, `curl` response.
+Wait for the paste. If they say "it worked, I don't have output to paste", refuse and guide them to grab it: browser devtools network tab, backend logs, `psql` query, `curl` response.
 
 ## Step 5 — Fill the section
 
-Update the Smoke Test section of the checklist with:
+For a pasted result, add a `## Smoke test` section above `## Rulings` in the checklist (outside the generated evidence block) with:
 
 - The exact boot command used (including prerequisites).
-- The exact user action (as a numbered list of steps).
+- The exact user action, as a numbered list.
 - The expected observable result (one sentence).
-- The actual observed result (paste the evidence the operator provided — log excerpt, URL to a screenshot in the PR, DB row, API response).
-- Tick the "Test passed" box if the evidence shows success; leave it unticked and add a note if the operator reports failure.
+- The actual observed result — the pasted evidence.
+- Tick "Test passed" if the evidence shows success; otherwise leave it unticked and add a note.
 
 ## Step 6 — Commit
 
@@ -69,9 +74,9 @@ chore(review): smoke test recorded for <branch-name>
 
 ## Step 7 — Tell the user
 
-Tell the user the smoke-test evidence was recorded and committed (`chore(review): smoke test recorded`). Then print what is still required for the declared tier — the cross-layer contract check and adversarial review at Tier 2+, and at Tier 3 the security review, the runbook, and the two lines under "What a revert will not undo" — and suggest `/review-complete` when those are done.
+Say the evidence was recorded and committed (`chore(review): smoke test recorded`). Print what the declared tier still requires — the cross-layer contract check and adversarial review at Tier 2+, and at Tier 3 the security review, the runbook, and the two lines under "What a revert will not undo" — and suggest `/review-complete` when done.
 
 ## Refusals
 
-- Refuse to fill the section without pasted evidence. "Trust me, it worked" is the exact failure mode the plugin exists to prevent.
-- Refuse if the smoke test failed — tell the operator to fix the change first, then re-run `/smoke-test`.
+- Refuse to fill the section without pasted evidence.
+- Refuse if the smoke test failed — the operator fixes the change first, then re-runs `/smoke-test`.

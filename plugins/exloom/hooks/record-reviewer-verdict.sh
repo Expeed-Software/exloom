@@ -18,9 +18,14 @@ set -u
 # ---------- read hook input ----------
 HOOK_INPUT=""
 if [[ -p /dev/stdin || ! -t 0 ]]; then
-  HOOK_INPUT="$(cat 2>/dev/null || true)"
+  IFS= read -r -d '' HOOK_INPUT || true
 fi
 [[ -n "$HOOK_INPUT" ]] || exit 0
+_DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_DIR" == "${BASH_SOURCE[0]}" ]] && _DIR=.
+case "$_DIR" in /*|[A-Za-z]:*) ;; *) _DIR="$PWD/$_DIR" ;; esac
+# shellcheck source=/dev/null
+. "$_DIR/prefilter.sh"
+exloom_may_be_reviewer "$HOOK_INPUT" || exit 0
 
 # ---------- nested field extraction (jq -> python3 -> sed) ----------
 # Args: <dotted-path> e.g. "tool_input.subagent_type". The sed fallback is a
@@ -79,16 +84,13 @@ else
 fi
 [[ -n "$SUBAGENT" ]] || exit 0
 
-# Which reviewer is this? Suffix match, so both `l1-reviewer` and the namespaced
-# `exloom:l1-reviewer` record against the same canonical name. An agent that is
-# not one of exloom's reviewers leaves no receipt: dispatching a general-purpose
-# agent to "do an L1 review" deliberately does not satisfy the gate, because
-# nothing here can tell what such an agent was actually asked to do.
+# Exact names only: any agent whose name merely ends in `l1-reviewer` could
+# otherwise write a valid receipt.
 AGENT=""
 case "$SUBAGENT" in
-  *l1-reviewer)          AGENT="l1-reviewer" ;;
-  *adversarial-reviewer) AGENT="adversarial-reviewer" ;;
-  *security-auditor)     AGENT="security-auditor" ;;
+  exloom:l1-reviewer)          AGENT="l1-reviewer" ;;
+  exloom:adversarial-reviewer) AGENT="adversarial-reviewer" ;;
+  exloom:security-auditor)     AGENT="security-auditor" ;;
   *) exit 0 ;;
 esac
 
@@ -166,6 +168,50 @@ HEAD_SHA="$(git rev-parse HEAD 2>/dev/null)" || exit 0
 # ---------- append the receipt ----------
 VDIR=".claude/reviews/${BRANCH}.verdicts"
 mkdir -p "$VDIR" 2>/dev/null || exit 0
+
+# The receipt names HEAD at dispatch. A foreground SubagentStop fires before the
+# PostToolUse that maps its agent id to the dispatch, so it is held until then.
+DLOG="${VDIR}/dispatches.jsonl"
+HELD_DIR="${VDIR}/held"
+MODEL=""; TUID=""; DTASK=""
+_unmapped_dispatch() {   # is this agent's latest dispatch still unmapped?
+  local t
+  t="$(grep -F "\"agent\":\"${AGENT}\"" "$DLOG" | grep -F '"dispatch_head"' | tail -1 \
+    | sed -n 's/.*"tool_use_id":"\([^"]*\)","dispatch_head".*/\1/p')"
+  [[ -n "$t" ]] && ! grep -qF "\"map\":true,\"tool_use_id\":\"${t}\"" "$DLOG"
+}
+if [[ -f "$DLOG" ]]; then
+  if [[ $IS_COMPLETION -eq 1 ]]; then
+    AID="$(_field agent_id | tr -cd 'A-Za-z0-9_-')"
+    [[ -n "$AID" ]] && TUID="$(grep -F '"map":true' "$DLOG" | grep -F "\"agent_id\":\"${AID}\"" | tail -1 \
+      | sed -n 's/.*"tool_use_id":"\([^"]*\)".*/\1/p')"
+    if [[ -z "$TUID" && -n "$AID" ]] && _unmapped_dispatch; then
+      mkdir -p "$HELD_DIR" && printf '%s' "$HOOK_INPUT" > "${HELD_DIR}/${AID}.json"
+      exit 0
+    fi
+  else
+    TUID="$(_field tool_use_id | tr -cd 'A-Za-z0-9_-')"
+    AID="$(_field tool_response.agentId | tr -cd 'A-Za-z0-9_-')"
+    MODEL="$(_field tool_response.resolvedModel | tr -cd 'A-Za-z0-9._-')"
+    if [[ -n "$TUID" && -n "$AID" ]] && ! grep -qF "\"map\":true,\"tool_use_id\":\"${TUID}\"" "$DLOG"; then
+      printf '{"map":true,"tool_use_id":"%s","agent_id":"%s","model":"%s"}\n' "$TUID" "$AID" "$MODEL" >> "$DLOG"
+    fi
+    if [[ -n "$AID" && -f "${HELD_DIR}/${AID}.json" ]]; then
+      HOOK_INPUT="$(cat "${HELD_DIR}/${AID}.json")"
+      rm -f "${HELD_DIR}/${AID}.json"; rmdir "$HELD_DIR" 2>/dev/null
+      IS_COMPLETION=1
+    fi
+  fi
+  if [[ -n "$TUID" ]]; then
+    DH="$(grep -F "\"tool_use_id\":\"${TUID}\",\"dispatch_head\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"dispatch_head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+    [[ -n "$DH" ]] && HEAD_SHA="$DH"
+    DTASK="$(grep -F "\"tool_use_id\":\"${TUID}\",\"dispatch_head\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"key":"task:\([A-Za-z0-9.-]*\)".*/\1/p')"
+    [[ -n "$MODEL" ]] || MODEL="$(grep -F "\"map\":true,\"tool_use_id\":\"${TUID}\"" "$DLOG" | tail -1 \
+      | sed -n 's/.*"model":"\([^"]*\)".*/\1/p')"
+  fi
+fi
 
 SESSION="$(_field session_id)"
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
@@ -294,6 +340,48 @@ case "$RLINE" in
   NO)  ROUND_NEEDED="NO" ;;
 esac
 
+# A per-task review (MODE: TASK, or a task dispatch) is recorded in
+# <agent>.tasks.json, so it is never a branch round.
+TASK_ID="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+  | sed -n 's/^MODE:[[:space:]]*TASK[[:space:]]*\([A-Za-z0-9.-]*\).*/\1/p' | tail -1)"
+[[ -n "$TASK_ID" ]] || TASK_ID="$DTASK"
+if [[ -z "$TASK_ID" && $REPORT_SEEN -eq 0 ]]; then
+  TASK_ID="$(_field tool_input.prompt | head -1 | sed -nE 's/^(Review|Verify fixes for) task[[:space:]]*([A-Za-z0-9.-]*).*/\2/p')"
+fi
+RECEIPT="${VDIR}/${AGENT}.json"
+[[ -n "$TASK_ID" ]] && RECEIPT="${VDIR}/${AGENT}.tasks.json"
+
+# MODE: VERIFY <from>..<to> from the reviewer's last reviewed head: new findings
+# count only at blocking severity on lines the range adds or changes.
+MODE="full"; RANGE=""; FIX_LINES=""
+MFROM="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+  | sed -n 's/^MODE:[[:space:]]*VERIFY[[:space:]]*\([0-9a-fA-F]\{7,40\}\)\.\..*/\1/p' | tail -1)"
+LAST_HEAD="$(grep -F '"verdict":' "$RECEIPT" 2>/dev/null | { if [[ -n "$TASK_ID" ]]; then grep -F "\"task\":\"${TASK_ID}\""; else cat; fi; } \
+  | tail -1 | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)" \
+   && [[ "$MFROM" == "$LAST_HEAD" && "$MFROM" != "$HEAD_SHA" ]]; then
+  MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
+  FIX_LINES="$(git -c core.quotepath=false diff -U0 "$MFROM" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
+           /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i); if(n==0){print f":"s; print f":"(s+1)}}')"
+fi
+SPEC=""
+if [[ -n "$TASK_ID" && "$MODE" != "verify" ]]; then
+  MODE="task"
+  SPEC="$(printf '%s\n' "$SCAN" | tr -d '*_`#>' | sed -e 's/^[[:space:]-]*//' \
+    | sed -n 's/^SPEC:[[:space:]]*\([A-Za-z]*\).*/\1/p' | tr '[:lower:]' '[:upper:]' \
+    | grep -E '^(MATCHES|MISSING|EXTRA|MISUNDERSTOOD)$' | tail -1)"
+  [[ -n "$SPEC" ]] || SPEC="UNKNOWN"
+fi
+_in_fix() {   # _in_fix <cite> — is the cited line one the fix range added or changed?
+  local p="${1%:*}" l="${1##*:}" f
+  while IFS= read -r f; do
+    [[ -n "$f" && "${f##*:}" == "$l" ]] || continue
+    [[ "$p" == "${f%:*}" || "$p" == */"${f%:*}" || "${f%:*}" == */"$p" ]] && return 0
+  done <<< "$FIX_LINES"
+  return 1
+}
+
 # ---------- findings become data, not chat ----------
 # Parsed against the shipped output format, which is:
 #
@@ -317,7 +405,10 @@ ROUND="$(cat "${VDIR}/l1-reviewer.json" 2>/dev/null \
 [[ "$ROUND" =~ ^[0-9]+$ ]] || ROUND=1
 
 FINDINGS_FILE="${VDIR}/${AGENT}.findings.jsonl"
+LEDGER=".claude/reviews/${BRANCH}.ledger.md"
 n_found=0
+n_blocking=0
+unparsed_blocking=0
 cur_sev=""
 item_sev=""
 cur_scope="IN-SCOPE"
@@ -347,8 +438,15 @@ while IFS= read -r fline; do
         *pre-existing*) cur_scope="PRE-EXISTING"; [[ -n "$cur_sev" ]] || cur_sev="MED" ;;
       esac
       case "$head_txt" in *nothing\ to\ flag*) cur_sev="" ;; esac
+      [[ "$MODE" == "task" && "$head_txt" == *spec* ]] && cur_sev="MED"
       continue ;;
   esac
+  not_addressed=0
+  # Anything but a plain ADDRESSED (NOT, PARTIALLY, …) is still open.
+  if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*([A-Za-z]+[[:space:]]+)?ADDRESSED'; then
+    printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*ADDRESSED' && continue
+    not_addressed=1
+  fi
   cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   if [[ -z "$cite" ]]; then
     # No cite: if the line names a severity, remember it for the lines that
@@ -360,6 +458,11 @@ while IFS= read -r fline; do
       *severity:*low*|*'[low]'*)                                       item_sev="LOW" ;;
       '') item_sev="" ;;
     esac
+    if [[ "$cur_sev" == "HIGH" || "$cur_sev" == "MED" ]] \
+       && printf '%s' "$fline" | grep -qE '^[[:space:]]*[-*][[:space:]]+[^[:space:]]' \
+       && ! printf '%s' "$fline" | grep -qiE '^[[:space:]]*[-*][[:space:]]+none[[:space:].]*$'; then
+      unparsed_blocking=1
+    fi
     continue
   fi
 
@@ -383,11 +486,22 @@ while IFS= read -r fline; do
   # A non-blocking line is LOW whatever else it says.
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac
   sev="${cur_sev:-${line_sev:-$item_sev}}"
+  if [[ $not_addressed -eq 1 ]]; then
+    prev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | tail -1)"
+    sev="$(printf '%s' "$prev" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    prev_scope="$(printf '%s' "$prev" | sed -n 's/.*"scope":"\([A-Z-]*\)".*/\1/p')"
+    [[ -n "$sev" ]] || sev="MED"
+  fi
   [[ -n "$sev" ]] || continue
 
   scope="$cur_scope"
   printf '%s' "$fline" | grep -qiE 'PRE-EXISTING' && scope="PRE-EXISTING"
   printf '%s' "$fline" | grep -qiE 'IN-SCOPE'     && scope="IN-SCOPE"
+  if [[ $not_addressed -eq 1 ]]; then
+    scope="${prev_scope:-IN-SCOPE}"
+  elif [[ "$MODE" == "verify" && "$scope" == "IN-SCOPE" ]] && { [[ "$sev" == "LOW" ]] || ! _in_fix "$cite"; }; then
+    scope="OUT-OF-SCOPE"
+  fi
 
   file="${cite%%:*}"
   # Fingerprint from the text AFTER the cite is removed. Keeping the cite lets a
@@ -402,7 +516,37 @@ while IFS= read -r fline; do
     "$ROUND" "$AGENT" "$sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
     >> "$FINDINGS_FILE" 2>/dev/null || break
   n_found=$((n_found + 1))
+
+  # Minor, out-of-scope and pre-existing findings go to the ledger, never the fix loop.
+  if [[ "$sev" == "LOW" || "$scope" != "IN-SCOPE" ]]; then
+    case "$scope" in IN-SCOPE) label="minor" ;; *) label="$(printf '%s' "$scope" | tr '[:upper:]' '[:lower:]')" ;; esac
+    key="${cite} — ${label} — ${AGENT}"
+    ltext="$(printf '%s' "$fline" | sed -e "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||" -e 's/^[[:space:]*-]*//' -e 's/^[[:space:]—–:-]*//')"
+    if ! grep -F -e "] ${key}, round" "$LEDGER" 2>/dev/null | grep -qF -- "— ${ltext}"; then
+      [[ -f "$LEDGER" ]] || printf '# Review ledger — %s\n\nNon-blocking findings. The final review triages each: fix, ticket or drop.\n\n' "$BRANCH" > "$LEDGER"
+      printf -- '- [ ] %s, round %s — %s\n' "$key" "$ROUND" "$ltext" >> "$LEDGER" 2>/dev/null
+    fi
+  else
+    n_blocking=$((n_blocking + 1))
+  fi
 done <<< "$SCAN"
+
+# The author writes the verify prompt, so an earlier blocking finding it left out
+# is carried forward as not addressed, and the pass cannot approve over it.
+if [[ "$MODE" == "verify" ]]; then
+  while IFS= read -r prev; do
+    cite="$(printf '%s' "$prev" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')"
+    [[ -n "$cite" ]] || continue
+    printf '%s\n' "$SCAN" | grep -qF -- "$cite" && continue
+    printf '%s\n' "$prev" | sed -e "s/\"head\":\"[0-9a-f]*\"/\"head\":\"${HEAD_SHA}\"/" \
+      -e "s/\"round\":[0-9]*/\"round\":${ROUND}/" >> "$FINDINGS_FILE" 2>/dev/null
+    n_found=$((n_found + 1)); n_blocking=$((n_blocking + 1)); VERDICT="REJECTED"; ROUND_NEEDED="YES"
+  done < <(grep -F "\"head\":\"${MFROM}\"" "$FINDINGS_FILE" 2>/dev/null | grep -F '"scope":"IN-SCOPE"' | grep -vF '"severity":"LOW"')
+fi
+
+if [[ "$VERDICT" == "REJECTED" && $n_found -gt 0 && $n_blocking -eq 0 && $unparsed_blocking -eq 0 ]]; then
+  ROUND_NEEDED="NO"
+fi
 
 if [[ $n_found -gt 0 ]]; then
   echo "exloom: recorded ${n_found} finding(s) from ${AGENT} (round ${ROUND}) in ${VDIR}/${AGENT}.findings.jsonl" >&2
@@ -450,7 +594,7 @@ fi
 # reviewer that states no verdict has not approved anything.
 _recorded_for_head() {
   # $1: a JSON fragment to look for on a line already naming this HEAD.
-  local f="${VDIR}/${AGENT}.json"
+  local f="$RECEIPT"
   [[ -f "$f" ]] || return 1
   grep -F "\"head\":\"${HEAD_SHA}\"" "$f" 2>/dev/null | grep -qF "$1"
 }
@@ -467,7 +611,7 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
   # lets a message name the cause rather than reporting a stale approval.
   printf '{"agent":"%s","subagent_type":"%s","head":"%s","dispatch":true,"at":"%s","session":"%s"}\n' \
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
-    >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+    >> "$RECEIPT" 2>/dev/null || exit 0
   echo "exloom: recorded ${AGENT} DISPATCH at ${HEAD_SHA:0:12} — a launch, not a review. No verdict was observable at this event, and this line does NOT satisfy the gate." >&2
   echo "exloom: if no verdict line follows when the reviewer finishes, the usual cause is that the agent was given a name, which routes its report through the mailbox rather than the tool result this hook reads. Dispatch it without a name." >&2
   exit 0
@@ -488,9 +632,13 @@ if _recorded_for_head "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND_NEE
   exit 0
 fi
 
-printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s"}\n' \
-  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" \
-  >> "${VDIR}/${AGENT}.json" 2>/dev/null || exit 0
+RANGE_FIELD=""; [[ -n "$RANGE" ]] && RANGE_FIELD=",\"range\":\"${RANGE}\""
+[[ -n "$TASK_ID" ]] && RANGE_FIELD="${RANGE_FIELD},\"task\":\"${TASK_ID}\""
+[[ -n "$SPEC" ]] && RANGE_FIELD="${RANGE_FIELD},\"spec\":\"${SPEC}\""
+[[ -n "$MODEL" ]] && RANGE_FIELD="${RANGE_FIELD},\"model\":\"${MODEL}\""
+printf '{"agent":"%s","subagent_type":"%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s"%s}\n' \
+  "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$VERDICT" "$ROUND_NEEDED" "$STAMP" "$SESSION" "$MODE" "$RANGE_FIELD" \
+  >> "$RECEIPT" 2>/dev/null || exit 0
 
 # The exit condition, stated where the session will read it. APPROVED with every
 # reviewer saying NO is what "stop reviewing" looks like; nothing else is.
@@ -501,7 +649,7 @@ elif [[ "$ROUND_NEEDED" == "UNKNOWN" ]]; then
 fi
 
 
-echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${AGENT}.json) — commit it with the checklist" >&2
+echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${RECEIPT}) — commit it with the checklist" >&2
 
 # WHERE THE GATE STANDS, printed here rather than only when someone runs
 # /review-complete. A session that dispatches reviewers by hand gets the same
@@ -509,8 +657,9 @@ echo "exloom: recorded ${AGENT} verdict receipt at ${HEAD_SHA:0:12} (${VDIR}/${A
 # that until the push is refused — by which point the tier was never derived, a
 # required reviewer was never run, and the checklist still holds placeholders.
 # Saying it at every completion removes the reason to defer the command.
-_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib.sh"
-if [[ -r "$_LIB" ]]; then
+# Computing it takes seconds, so skip it when nobody can read it.
+_LIB="$_DIR/lib.sh"
+if [[ -r "$_LIB" && "$(readlink /proc/$$/fd/2 2>/dev/null)" != "/dev/null" ]]; then
   # shellcheck source=/dev/null
   # `2>&1 >/dev/null` in THIS order: stderr goes to the pipe, then stdout goes to
   # /dev/null. Reversed, both go to /dev/null and the status vanishes — easy to
