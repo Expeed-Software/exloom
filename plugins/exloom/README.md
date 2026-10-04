@@ -35,14 +35,14 @@ Updating requires a session restart, not just a reload — hooks are read at ses
 
 This matters more than the step list, because it is the difference between review and self-certification.
 
-Most of the checklist is **self-attested** — you write the findings, the smoke-test output, the dispositions. The gate checks those are present and not placeholder text. It cannot check they are true.
+The checklist is **generated from receipts**: exloom writes the evidence block — derived tier, reviewed commit, criteria matrix, reviewer verdicts, findings, smoke evidence, provenance. People write only rulings, and the base branch when exloom cannot find one.
 
 Four things are **not** the author's to write, and they decide everything else:
 
-- **Reviewer dispatch is recorded, not claimed.** When a reviewer subagent completes, a hook writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. Another hook refuses to let that file be written by hand. Fix findings afterwards and the receipt no longer covers the tip, so that reviewer runs again.
-- **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. A checklist declaring less is blocked, with no escape hatch — an escapable tier makes every other gate optional.
+- **Reviewer dispatch is recorded, not claimed.** When a reviewer subagent completes, a hook writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. Another hook refuses to let that file be written by hand. The receipt names the commit at dispatch, so a commit made while the reviewer runs is not covered by its approval.
+- **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. There is no tier field to argue with, and a branch whose base exloom cannot find is blocked until the checklist names it.
 - **The proof is an experiment.** `prove-change-is-tested.sh` runs your suite at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here.
-- **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`. A rejection does not satisfy the gate, and neither does a report with no readable verdict line.
+- **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`, and the latest one counts. A rejection is closed by a ruling on each of its findings, not by asking again; a report with no readable verdict line never passes.
 
 **Only L1 must cover the commit you ship.** Adversarial and security must have run and approved somewhere on the branch; a later fix does not invalidate them. Requiring every reviewer to approve the same moving commit is what produces branches that never converge.
 
@@ -50,13 +50,7 @@ After every reviewer completes, the gate says where it stands — the tier it de
 
 ## Turn on the gate
 
-Off by default. exloom never blocks a repo that did not ask for it.
-
-```bash
-mkdir -p .claude && touch .claude/exloom-gate.enabled
-```
-
-Commit that marker and the whole team has the gate.
+Off by default. exloom never blocks a repo that did not ask for it. Run `/exloom-setup` once: it creates the `.claude/exloom-gate.enabled` marker, pins and dry-runs the test command, checks that review files are not git-ignored, and asks about strict mode. Commit what it writes and the whole team has the gate.
 
 It applies to **feature branches only** — work committed directly to `main`, `master`, `dev` or `develop` is deliberately not gated, so start on a branch. A repo can extend or narrow that with committed glob files: `.claude/exloom-protected-branches` and `.claude/exloom-skip-branches`. Both are honoured only when committed, and every skip is logged.
 
@@ -70,7 +64,6 @@ Optional, all committed:
 | `.claude/exloom-max-rounds` | fix rounds per plan task, default 3 |
 | `.claude/exloom-proof.disabled` | turns the proof off, for a suite that cannot run from tracked files alone |
 | `.claude/exloom-test-command` | the command the proof runs — pin one that is valid at any base, not one naming this branch's test classes |
-| `scripts/record-smoke.sh` (in the plugin) | runs a CLI or API smoke check and records the receipt the gate accepts at Tier 0–2 |
 | `.claude/exloom-test-patterns` | extra globs, one per line, for files the proof should treat as tests |
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
@@ -91,6 +84,8 @@ Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for
 The proof records one of four results: `PROVED`; `NOT_PROVED`, which blocks; `NOT_APPLICABLE`, when the tests do not compile without the change, which passes at Tier 1 only; or `NO_NEW_BEHAVIOUR`, when no test changed, the diff only removes code and the suite passes at the tip, which at Tier 2–3 also needs a `- Proof: deletion only — <reason>` line from the user in the checklist.
 
 **Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
+
+Smoke evidence: for a CLI or API change at Tier 0–2, `/smoke-test` runs the check through the plugin's `scripts/record-smoke.sh`, which records the command, exit code and output as a receipt. A UI change or Tier 3 needs a result pasted under `## Smoke test`.
 
 Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env. It is honoured unconditionally, and records itself in `.claude/reviews/<branch>.bypass.json` — commit that with the change so the bypass is findable afterwards.
 
@@ -125,35 +120,37 @@ Repository rules are **additive only** — they raise a tier and add a reviewer,
 
 ## Try it in two minutes
 
-1. Install exloom and enable the gate.
+1. Install exloom and run `/exloom-setup`.
 2. `git checkout -b try/exloom-gate`, make a small code change, **commit it**.
-3. `/review-init` — bootstraps and commits the checklist.
-4. `/smoke-test` — boot the change, paste real evidence.
-5. `/review-complete` — dispatches what is missing, records the reviewed commit.
-6. `git push` is allowed.
-7. Make **another** code commit without re-reviewing, then push again — **blocked**. The review no longer covers the tip.
+3. `/exloom` — creates the checklist, runs the proof and the smoke test, dispatches the reviewers and records the reviewed commit, until it reports the branch ready.
+4. `git push` is allowed.
+5. Make **another** code commit without re-reviewing, then push again — **blocked**. The review no longer covers the tip.
 
-Step 7 is the point: the review is bound to the exact commit it reviewed, not to the existence of a checklist.
+Step 5 is the point: the review is bound to the exact commit it reviewed, not to the existence of a checklist.
 
 Two more, because they are what stops a checklist being self-written:
 
-8. Try to create `.claude/reviews/<branch>.verdicts/l1-reviewer.json` by hand — **denied**. Reading it is not.
-9. Set `Tier:` to `1` on a branch touching `auth/` or a migration — **blocked**, naming the tier the diff earns.
+6. Try to create `.claude/reviews/<branch>.verdicts/l1-reviewer.json` by hand — **denied**. Reading it is not.
+7. Touch `auth/` or a migration — the branch derives Tier 3 and the gate asks for all three reviewers.
 
 ## When the review will not converge
 
-At three rounds the gate stops and asks you to choose: fix the open criticals by name, merge as-is, or see the findings first. The recommendation comes from whether a Critical is still open, never from the round number.
+Every loop is bounded:
 
-A review pass is not a fix. Re-reviewing a commit nobody changed returns the previous pass's findings, and the gate says so rather than counting it.
+- **Rulings end a rejection.** Each finding gets `PARKED`, `DEFERRED <ticket>` or `FIXED` under `## Rulings`; at Tier 3 and in strict mode a ruling on a Critical quotes the user.
+- **Re-review checks the fix, not the branch.** From round 2 a reviewer verifies its earlier findings and the fix range only.
+- **Minor findings go to a ledger**, `<branch>.ledger.md`, and never start another round.
+- **A separate fixer** makes the smallest fix at the cited line; the main session cannot commit code while findings are unruled.
+- **Budgets are enforced at dispatch:** `.claude/exloom-max-rounds` fix rounds per plan task (default 3), and one whole-branch review plus one verify pass per reviewer. A refused dispatch is answered with rulings; if the user wants another round anyway, a committed `- Extra round — "<their words>"` allows one, at that code.
 
 ## What's inside
 
 - **9 skills** — `brainstorming`, `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, and `using-exloom` (the index).
-- **3 reviewer agents** — `l1-reviewer` at low effort per commit; `adversarial-reviewer` and `security-auditor` at medium, once, before push. The adversarial dispatch carries the cross-layer contract check.
+- **4 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `fixer`, which applies the smallest fix for findings it is given.
 - **7 commands** — `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`.
-- **2 scripts** — `prove-change-is-tested.sh` and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
-- **4 hooks** — record a receipt on real dispatch, deny writing one by hand, block the push without evidence, announce the flow at session start.
-- **2 templates** — the review checklist and the spec format.
+- **3 scripts** — `prove-change-is-tested.sh`, `record-smoke.sh`, and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
+- **6 hooks** — record a receipt on real dispatch, deny writing one by hand, enforce review budgets at dispatch, keep code commits to the fixer during the fix loop, block the push without evidence, announce the flow at session start.
+- **2 templates** — the editable part of the review checklist, and the spec format.
 
 ## Honest scope
 
