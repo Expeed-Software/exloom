@@ -27,7 +27,7 @@ Otherwise run `exloom_next_step "$B"`, do what the step says, and run it again. 
 | `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode. If exloom refuses the dispatch because a budget is spent, go to `rulings`. |
 | `rulings` | Show the user the full gate message and ask them, one question per open item, with AskUserQuestion. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
 | `proof` | Run `prove-change-is-tested.sh` (find it like the library, under `scripts/`) and commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. |
-| `push` | Tell the user the branch is ready and what the evidence block says. Do not push unless they ask. |
+| `push` | Print `exloom_branch_summary "$B"` (review time, rounds, criteria proved, rulings) and tell the user the branch is ready. Do not push unless they ask. |
 | `blocked` | Show the user `EXLOOM_VERBOSE=1 exloom_validate_checklist ".claude/reviews/$B.md" HEAD 1 check` and ask what to do. |
 
 For the full reason behind any step, run that same `EXLOOM_VERBOSE=1 exloom_validate_checklist` line; gate messages are one line unless asked for more.

@@ -124,6 +124,7 @@ This writes `.claude/reviews/<branch-name>.md`: editable fields (`**Base branch:
 
 - `**Base branch:**` → the branch confirmed in Step 2a, or leave `auto`.
 - `**Lane:**` → the answer from Step 2b.
+- `**Spec:**` and `**Plan:**` → their paths when this branch has them (`F-nnn-*.md`, the plan file), else leave `none`. The evidence block uses the spec for open criteria and the plan for task progress.
 
 ## Step 4 — Commit the skeleton
 

@@ -2,6 +2,8 @@
 
 **Base branch:** auto
 **Lane:** standard
+**Spec:** none
+**Plan:** none
 
 ## Rulings
 

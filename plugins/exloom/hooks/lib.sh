@@ -1699,7 +1699,7 @@ exloom_render_report() {   # exloom_render_report <branch>
     if [[ $drc -eq 1 ]]; then printf '**Derived tier:** unknown — no base branch; set **Base branch:** above\n'
     else printf '**Derived tier:** %s\n' "$tier"; fi
     [[ -n "$reasons" ]] && printf '%s\n' "$reasons"
-    printf 'Reviewed code commit: %s\n\n### Criteria\n\n' "$tip"
+    printf 'Reviewed code commit: %s\n**Summary:** %s\n\n### Criteria\n\n' "$tip" "$(exloom_branch_summary "$branch")"
     _exloom_matrix_table "$(grep -F '"result":"PROVED"' "${vdir}/proof.json" 2>/dev/null | tail -1 \
       | sed -n 's/.*"matrix":"\([^"]*\)".*/\1/p')" "$spec"
     printf '\n### Reviewers\n\n| Reviewer | Verdict | Commit | Mode | Model |\n|---|---|---|---|---|\n'
@@ -1745,16 +1745,51 @@ exloom_next_step() {   # exloom_next_step <branch>
   esac
 }
 
-# One line: Tier · round · proof · rulings · next step.
+# Plan tasks whose latest task review approved, out of the plan's `### Task <n>`
+# headings; the plan is named by `**Plan:**` in the checklist. Empty without one.
+exloom_task_progress() {   # exloom_task_progress <branch>
+  local cl=".claude/reviews/$1.md" plan total done
+  plan="$(sed -n 's/^\*\*Plan:\*\*[[:space:]]*//p' "$cl" 2>/dev/null | head -1 | tr -d '\r[:space:]')"
+  [[ -n "$plan" && -f "$plan" ]] || return 0
+  total="$(grep -cE '^### Task [0-9]' "$plan")"
+  done="$(grep -F '"verdict":' "$(exloom_verdict_dir "$cl").tasks.json" 2>/dev/null; \
+          grep -F '"verdict":' "$(exloom_verdict_dir "$cl")/l1-reviewer.tasks.json" 2>/dev/null)"
+  done="$(printf '%s\n' "$done" | awk -F'"task":"' 'NF>1{split($2,a,"\""); v=($0 ~ /"verdict":"APPROVED"/); last[a[1]]=v} END{n=0; for(t in last) n+=last[t]; print n}')"
+  printf '%s/%s' "$done" "$total"
+}
+
+# One line for the end of a branch: review time, rounds, criteria proved, rulings.
+exloom_branch_summary() {   # exloom_branch_summary <branch> [end-time]
+  local cl=".claude/reviews/$1.md" vdir start end secs m dur rounds proved total crit rulings spec
+  vdir="$(exloom_verdict_dir "$cl")"
+  start="$(cat "$vdir"/dispatches.jsonl "$vdir"/*.json 2>/dev/null | sed -n 's/.*"at":"\([0-9T:Z-]*\)".*/\1/p' | sort | head -1)"
+  end="${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  dur="time not recorded"
+  if [[ -n "$start" ]] && secs=$(( $(date -u -d "$end" +%s 2>/dev/null) - $(date -u -d "$start" +%s 2>/dev/null) )) 2>/dev/null && [[ $secs -ge 0 ]]; then
+    m=$(( secs / 60 ))
+    if [[ $m -lt 60 ]]; then dur="${m} min"; else dur="$(( m / 60 )) h $(( m % 60 )) min"; fi
+  fi
+  rounds="$(exloom_round_count "$cl" HEAD)"
+  proved="$(grep -F '"result":"PROVED"' "$vdir/proof.json" 2>/dev/null | tail -1 | sed -n 's/.*"matrix":"\([^"]*\)".*/\1/p' | tr ';' '\n' | grep -c '=yes$')"
+  spec="$(sed -n 's/^\*\*Spec:\*\*[[:space:]]*//p' "$cl" 2>/dev/null | head -1 | tr -d '\r[:space:]')"
+  crit="${proved}"
+  if [[ -n "$spec" && -f "$spec" ]]; then total="$(exloom_spec_criteria "$spec" | grep -c .)"; crit="${proved}/${total}"; fi
+  rulings="$(tr -d '\r' < "$cl" 2>/dev/null | awk '/^## Rulings[[:space:]]*$/{f=1; next} /^## /{f=0} f && /^- /' | grep -c .)"
+  printf '%s · %s review round%s · %s criteria proved · %s ruling%s\n' "$dur" "$rounds" "$([[ $rounds -eq 1 ]] || echo s)" \
+    "$crit" "$rulings" "$([[ $rulings -eq 1 ]] || echo s)"
+}
+
+# One line: Tier · task · round · proof · rulings · next step.
 exloom_status_line() {   # exloom_status_line <branch>
-  local branch="$1" cl=".claude/reviews/$1.md" tier proof="✗" rulings next
+  local branch="$1" cl=".claude/reviews/$1.md" tier proof="✗" rulings next tasks
   tier="$(exloom_derive_tier HEAD 2>/dev/null)"
   case $? in 1) tier="?" ;; 2) tier=0 ;; esac
   exloom_check_proof "$cl" HEAD "$(git rev-parse HEAD)" status "${tier//\?/1}" >/dev/null 2>&1 && proof="✓"
   rulings="$(exloom_rulings "$cl" HEAD | grep -c .)"
   next="$(exloom_next_step "$branch")"
-  printf 'Tier %s · round %s/%s · proof %s · %s rulings · next: %s\n' \
-    "$tier" "$(exloom_round_count "$cl" HEAD)" "$(exloom_max_rounds)" "$proof" "$rulings" "$next"
+  tasks="$(exloom_task_progress "$branch")"
+  printf 'Tier %s%s · round %s/%s · proof %s · %s rulings · next: %s\n' \
+    "$tier" "${tasks:+ · task $tasks}" "$(exloom_round_count "$cl" HEAD)" "$(exloom_max_rounds)" "$proof" "$rulings" "$next"
 }
 
 # ---------- proof-of-testedness receipt ----------

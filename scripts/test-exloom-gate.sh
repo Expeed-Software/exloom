@@ -3118,6 +3118,16 @@ ok "everything in place -> push" "$(exloom_next_step feat/plan)" "push"
 ok "the status is one line" "$(exloom_status_line feat/plan | grep -c .)" "1"
 ok "...naming tier, proof and the next step" \
    "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · round [0-9]+/3 · proof ✓ · 0 rulings · next: push$')" "1"
+mkdir -p docs/plans; printf '### Task 1 — a\n### Task 2 — b\n### Task 3 — c\n' > docs/plans/p.md
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","mode":"task","task":"1"}\n' "$NSH" > "$NSV/l1-reviewer.tasks.json"
+sed -i 's/^\*\*Lane:\*\* standard$/**Lane:** standard\n**Plan:** docs\/plans\/p.md/' .claude/reviews/feat/plan.md
+ok "with a plan, the status shows tasks reviewed and approved" \
+   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · task 1/3 · round ')" "1"
+printf '{"agent":"l1-reviewer","key":"final","kind":"review","tool_use_id":"t","dispatch_head":"%s","prompt_hash":"x","extra":false,"at":"2026-01-01T10:00:00Z"}\n' "$NSH" > "$NSV/dispatches.jsonl"
+sed -i 's/^none$/- src\/a.go:1 — PARKED: fine/' .claude/reviews/feat/plan.md
+ok "the branch summary line has duration, rounds, criteria and rulings" \
+   "$(exloom_branch_summary feat/plan "2026-01-01T10:42:00Z" | grep -cE '^42 min · [0-9]+ review rounds? · [0-9]+(/[0-9]+)? criteria proved · 1 ruling$')" "1"
+git checkout -q -- .claude/reviews/feat/plan.md
 rm -f .claude/exloom-gate.enabled
 ok "gate off -> setup" "$(exloom_next_step feat/plan)" "setup"
 
