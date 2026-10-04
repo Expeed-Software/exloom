@@ -37,6 +37,8 @@ The JVM/TypeScript/Angular idioms below are illustrations; apply each check's eq
    - Duplicate utilities — check whether a helper already exists.
    - Hardcoded values that similar code in the module externalizes to config.
 
+5. **UI against an approved mock** — only when the spec named by the checklist's `**Spec:**` has a `UI mock: … — approved` line. Open the mock and check that the implementation has its main, empty, loading and error states, with the mock's labels and fields. A missing state is Important; a different label is Minor. Do not judge visual fidelity.
+
 # Output format — strict
 
 ```

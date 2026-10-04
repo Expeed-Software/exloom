@@ -190,7 +190,7 @@ exloom_is_skip_branch() {
 # Reading the left side is what stops `git push origin other-branch`, run from a
 # reviewed branch, shipping an unreviewed one.
 exloom_push_target_branches() {
-  local cmd="$1" i t pushidx=-1 skip_next=0 deletion=0 allrefs=0
+  local cmd="$1" i t pushidx=-1 skip_next=0 deletion=0 allrefs=0 tagsonly=0
   local -a toks=() positionals=() refspecs=()
   read -r -a toks <<< "$cmd"
   for i in "${!toks[@]}"; do
@@ -210,6 +210,7 @@ exloom_push_target_branches() {
     esac
     case "$t" in
       --all|--mirror) allrefs=1; continue ;;
+      --tags) tagsonly=1; continue ;;
       --delete|-d) deletion=1; continue ;;
       --repo|-o|--push-option|--exec|--receive-pack) skip_next=1; continue ;;
       --repo=*|--push-option=*|--exec=*|--receive-pack=*) continue ;;
@@ -221,7 +222,10 @@ exloom_push_target_branches() {
   # positionals[0] is the remote; the rest are refspecs.
   if [[ ${#positionals[@]} -ge 2 ]]; then refspecs=( "${positionals[@]:1}" ); fi
   if [[ $deletion -eq 1 ]]; then echo "__DELETE__"; return 0; fi
-  [[ ${#refspecs[@]} -eq 0 ]] && return 0
+  if [[ ${#refspecs[@]} -eq 0 ]]; then
+    [[ $tagsonly -eq 1 ]] && echo "__DELETE__"
+    return 0
+  fi
   local r src skipnext=0
   for r in "${refspecs[@]}"; do
     if [[ $skipnext -eq 1 ]]; then skipnext=0; continue; fi
@@ -233,6 +237,9 @@ exloom_push_target_branches() {
     src="${src#+}"               # strip force '+'
     # A tag refspec ships a tag, not branch code.
     if [[ "$src" == refs/tags/* ]]; then echo "__DELETE__"; continue; fi
+    if [[ "$src" != refs/heads/* ]] && git show-ref --verify -q "refs/tags/${src}" 2>/dev/null        && ! git show-ref --verify -q "refs/heads/${src}" 2>/dev/null; then
+      echo "__DELETE__"; continue
+    fi
     src="${src#refs/heads/}"
     [[ -n "$src" ]] && echo "$src"
   done
@@ -279,6 +286,18 @@ exloom_recorded_base() {   # exloom_recorded_base <tip>
 # puts the whole release gap into the diff and every branch derives Tier 3.
 # `origin/HEAD` is not consulted — it names the branch a clone checks out, which
 # is a different question from where this work forked.
+# <from> with what <to> has since merged in from its base, as a tree: a diff from
+# it to <to> is the branch's own work. Falls back to <from> on a conflicted merge.
+exloom_own_base() {   # exloom_own_base <from> <to>
+  local fork t
+  fork="$(exloom_fork_point "$2" 2>/dev/null)"
+  if [[ -n "$fork" ]] && ! git merge-base --is-ancestor "$fork" "$1" 2>/dev/null      && t="$(git merge-tree --write-tree "$1" "$fork" 2>/dev/null)" && [[ -n "$t" ]]; then
+    printf '%s' "${t%%$'
+'*}"; return 0
+  fi
+  printf '%s' "$1"
+}
+
 exloom_fork_point() {   # exloom_fork_point <tip>
   local tip="$1"
 
@@ -470,8 +489,89 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
   printf '%s\n' ".claude/reviews/${1}.md" ".claude/reviews/${1}.verdicts/l1-reviewer.json" \
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
-    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
+    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-not-testable-patterns .claude/exloom-docs .claude/exloom-doc-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
     | git check-ignore --no-index --stdin 2>/dev/null
+}
+
+# Reference docs: "<doc-dir>: <glob>..." per line. A committed .claude/exloom-docs
+# replaces the defaults, which follow the Expeed docs template.
+exloom_docs_map() {   # exloom_docs_map [commit] — the map as committed at <commit>, else as committed now
+  local m=""
+  if [[ -n "${1:-}" ]]; then
+    m="$(MSYS_NO_PATHCONV=1 git show "${1}:.claude/exloom-docs" 2>/dev/null)"
+  elif [[ -f .claude/exloom-docs ]] && git ls-files --error-unmatch .claude/exloom-docs >/dev/null 2>&1; then
+    m="$(cat .claude/exloom-docs)"
+  fi
+  if [[ -n "$m" ]]; then
+    printf '%s\n' "$m" | tr -d '\r' | sed -e 's/#.*//' | grep -E '^[^[:space:]]+:[[:space:]]*[^[:space:]]'
+    return 0
+  fi
+  cat <<'MAP'
+docs/db: *migrations/* *migration/* *Migrations/* *alembic/versions/* *changelog*.xml *changelog*.yaml *changelog*.yml *.sql
+docs/api: *openapi*.yaml *openapi*.yml *openapi*.json *swagger*.yaml *swagger*.yml *swagger*.json *controllers/* *Controllers/* *controller/* *routes/* *Controller.java *Controller.kt *Controller.cs *Resource.java *.controller.ts
+docs/data-model: *models/* *Models/* *model/* *entities/* *Entities/* *entity/* *Entity.java *Entity.kt *Entity.cs *.entity.ts *schema.prisma
+MAP
+}
+
+# The reference-doc directories: a change under them alone does not need a re-review.
+exloom_reference_doc_dirs() {   # exloom_reference_doc_dirs [commit]
+  { exloom_docs_map "${1:-}" | sed 's/:.*//'; echo docs/architecture; } | sed 's:/*$::' \
+    | grep -vE '^(\.?|/.*|.*\.\..*)$' | sort -u
+}
+
+# Is every path on stdin under a reference-doc dir as mapped at <commit>?
+_exloom_only_reference_docs() {   # _exloom_only_reference_docs <commit>
+  local f d dirs ok pats p isdoc
+  dirs="$(exloom_reference_doc_dirs "$1")"
+  pats="$(MSYS_NO_PATHCONV=1 git show "${1}:.claude/exloom-doc-patterns" 2>/dev/null | tr -d '\r' \
+    | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$')"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    isdoc=0
+    case "${f,,}" in
+      *.md|*.mmd|*.txt|*.adoc|*.rst|*.doc|*.docx|*.xls|*.xlsx|*.ppt|*.pptx|*.pdf|*.drawio|*.png|*.jpg|*.jpeg|*.svg) isdoc=1 ;;
+    esac
+    if [[ $isdoc -eq 0 && -n "$pats" ]]; then
+      while IFS= read -r p; do
+        # shellcheck disable=SC2254
+        case "$f" in $p) isdoc=1; break ;; esac
+      done <<< "$pats"
+    fi
+    [[ $isdoc -eq 1 ]] || return 1
+    ok=0
+    while IFS= read -r d; do [[ -n "$d" && "$f" == "$d/"* ]] && { ok=1; break; }; done <<< "$dirs"
+    [[ $ok -eq 1 ]] || return 1
+  done
+  return 0
+}
+
+# Warns, one line per existing doc whose code changed on the branch without it.
+# Never blocks: always returns 0.
+exloom_doc_warnings() {   # exloom_doc_warnings <checklist> <tip>
+  local cl="$1" tip="$2" fork changed line dir globs g f hit
+  MSYS_NO_PATHCONV=1 git show "${tip}:${cl}" 2>/dev/null | tr -d '\r' \
+    | grep -qE '^-?[[:space:]]*Doc impact:[[:space:]]*none[[:space:]]*(—|–|-)[[:space:]]*[^[:space:]]' && return 0
+  fork="$(exloom_fork_point "$tip" 2>/dev/null)"; [[ -n "$fork" ]] || return 0
+  changed="$(git diff --name-only "$fork" "$tip" -- . ':(exclude).claude' 2>/dev/null)"
+  [[ -n "$changed" ]] || return 0
+  while IFS= read -r line; do
+    dir="${line%%:*}"; dir="${dir%/}"; globs="${line#*:}"
+    [[ -n "$(git ls-tree -r --name-only "$tip" -- "$dir/" 2>/dev/null | head -1)" ]] || continue
+    printf '%s\n' "$changed" | grep -qF -- "$dir/" && continue
+    hit=""
+    while IFS= read -r f; do
+      [[ -n "$f" && "$f" != docs/* && "$f" != "$dir/"* ]] || continue
+      set -f
+      for g in $globs; do
+        # shellcheck disable=SC2254
+        case "$f" in $g) hit="$f"; break ;; esac
+      done
+      set +f
+      [[ -n "$hit" ]] && break
+    done <<< "$changed"
+    [[ -n "$hit" ]] && echo "exloom: ${hit} changed but ${dir}/ did not. Update it (exloom:maintaining-reference-docs), or record '- Doc impact: none — <reason>' in ${cl}. A warning; it does not block."
+  done < <(exloom_docs_map)
+  return 0
 }
 
 # ---------- is the evidence pipeline alive? ----------
@@ -1046,7 +1146,7 @@ _exloom_ruled() {   # _exloom_ruled <rulings> <cite> <need_quote>
     [[ "$line" == *"$2"* ]] || continue
     pre="${line%%"$2"*}"; rest="${line#*"$2"}"
     [[ "$pre" =~ [A-Za-z0-9_./-]$ || "$rest" =~ ^[0-9] ]] && continue
-    printf '%s' "$rest" | grep -qE '^[`[:space:]]*(—|–|-|:)?[[:space:]]*(PARKED|FIXED|DEFERRED[[:space:]]+#?[A-Za-z]*[A-Za-z0-9_-]*[0-9])' || continue
+    printf '%s' "$rest" | grep -qE '^[`[:space:]]*(—|–|-|:)?[[:space:]]*(PARKED|DEFERRED[[:space:]]+#?[A-Za-z]*[A-Za-z0-9_-]*[0-9])' || continue
     if [[ "$3" == "1" ]]; then
       printf '%s' "$rest" | grep -qE '"[^"]{3,}"|“[^”]{3,}”' || continue
     fi
@@ -1060,11 +1160,11 @@ _exloom_ruled() {   # _exloom_ruled <rulings> <cite> <need_quote>
 # when the review recorded no findings at all. A verify review whose findings all
 # fall outside its fix range has nothing in scope, so nothing to rule.
 _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
-  local all findings rulings fline cite sev nq out=""
+  local all findings rulings fline cite sev reason nq out=""
   all="$(MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.findings.jsonl" 2>/dev/null \
     | grep -F "\"head\":\"${4}\"")"
   [[ -n "$all" ]] || return 2
-  findings="$(printf '%s\n' "$all" | grep -vF -e '"scope":"PRE-EXISTING"' -e '"scope":"OUT-OF-SCOPE"' -e '"severity":"LOW"')"
+  findings="$(printf '%s\n' "$all" | grep -vF -e '"scope":"PRE-EXISTING"' -e '"scope":"OUT-OF-SCOPE"' -e '"scope":"ADDRESSED"' -e '"severity":"LOW"')"
   if [[ -z "$findings" ]]; then
     # Only when the hook saw no blocking item it could not parse.
     MSYS_NO_PATHCONV=1 git show "${2}:$(exloom_verdict_dir "$1")/${3}.json" 2>/dev/null \
@@ -1076,9 +1176,10 @@ _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
   while IFS= read -r fline; do
     cite="$(printf '%s' "$fline" | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p')"
     sev="$(printf '%s' "$fline" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+    reason="$(printf '%s' "$fline" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p')"
     [[ -n "$cite" ]] || continue
     nq=0; [[ "$5" == "1" && "$sev" == "HIGH" ]] && nq=1
-    _exloom_ruled "$rulings" "$cite" "$nq" || out="${out}${cite} (${sev})"$'\n'
+    _exloom_ruled "$rulings" "$cite" "$nq" || out="${out}${cite} (${sev})${reason:+ — $reason}"$'\n'
   done <<< "$findings"
   [[ -z "$out" ]] && return 0
   printf '%s' "$out" | sort -u
@@ -1100,7 +1201,7 @@ _exloom_unruled_findings() {   # <checklist> <tip> <agent> <sha> <need_quote>
 exloom_check_verdicts() {
   local checklist="$1" tier="$2" tip="$3" reviewed="$4" action="$5" lane="${6:-standard}"
   local vdir agent file content sha ok approved_at behind seen_verdict dispatch_only
-  local last_kind last_sha rejected_shas unruled ruling_notes="" ruled=0 need_quote=0
+  local last_kind last_sha last_mode rejected_shas unruled own ruling_notes="" ruled=0 need_quote=0
   local -a missing=() stale=() unapproved=() launched=()
   vdir="$(exloom_verdict_dir "$checklist")"
   [[ "$tier" -ge 3 || "$lane" == "certified" ]] 2>/dev/null && need_quote=1
@@ -1122,7 +1223,7 @@ exloom_check_verdicts() {
     # MSYS_NO_PATHCONV: Git Bash on Windows mangles the `ref:path` argument.
     content="$(MSYS_NO_PATHCONV=1 git show "${tip}:${file}" 2>/dev/null || true)"
     if [[ -z "$content" ]]; then missing+=( "$agent" ); continue; fi
-    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""; last_kind=""; last_sha=""; rejected_shas=""
+    ok=0; rejected=0; approved_at=""; seen_verdict=0; dispatch_only=""; last_kind=""; last_sha=""; last_mode=""; rejected_shas=""
 
     # A receipt with no verdict is NOT accepted, whatever wrote it.
     #
@@ -1147,7 +1248,10 @@ exloom_check_verdicts() {
       # checklist-only or comment-only commit must not invalidate even L1.
       if [[ "$agent" == "l1-reviewer" ]]; then
         if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
-          exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+          own="$(exloom_own_base "$sha" "$reviewed")"
+          git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude' 2>/dev/null \
+            | _exloom_only_reference_docs "$sha" \
+            || { exloom_diff_is_behavioural "$own" "$reviewed" && continue; }
         fi
       fi
 
@@ -1160,7 +1264,8 @@ exloom_check_verdicts() {
           seen_verdict=1
           if [[ " $rejected_shas " == *" $sha "* ]]; then last_kind=REJECTED; last_sha="$sha"
           else last_kind=APPROVED; approved_at="$sha"; fi ;;
-        *'"verdict":"REJECTED"'*) seen_verdict=1; last_kind=REJECTED; last_sha="$sha"; rejected_shas+=" $sha" ;;
+        *'"verdict":"REJECTED"'*) seen_verdict=1; last_kind=REJECTED; last_sha="$sha"; rejected_shas+=" $sha"
+          last_mode=full; [[ "$rline" == *'"mode":"verify"'* ]] && last_mode=verify ;;
         *'"verdict":"UNKNOWN"'*)  seen_verdict=1; last_kind=UNKNOWN ;;
         *) dispatch_only="$sha" ;;
       esac
@@ -1176,9 +1281,20 @@ exloom_check_verdicts() {
         2) ruling_notes="${ruling_notes}  ${agent}: no findings were recorded for its REJECTED review, so none
     can be ruled on. Re-dispatch it.
 " ;;
-        *) ruling_notes="${ruling_notes}  ${agent}: findings with no ruling:
+        *) if [[ "$last_mode" == "verify" ]]; then
+             ruling_notes="${ruling_notes}  ${agent}: still open after a verify of the fix:
 $(printf '%s\n' "$unruled" | sed 's/^/    /')
-" ;;
+  Ask the user about each one, showing the reviewer's reason. Their options:
+    \"Fix again\" — dispatch exloom:fixer with it, then ${agent} in verify mode
+    \"Not a real problem, ignore (PARKED)\" — '- <cite> — PARKED: <why>' under '## Rulings'
+    \"Fix later, with a ticket (DEFERRED)\" — '- <cite> — DEFERRED <ticket>: <why>' under '## Rulings'
+"
+           else
+             ruling_notes="${ruling_notes}  ${agent}: findings to fix:
+$(printf '%s\n' "$unruled" | sed 's/^/    /')
+  Dispatch exloom:fixer with them, then ${agent} in verify mode.
+"
+           fi ;;
       esac
     fi
     if [[ $ok -ne 1 ]]; then
@@ -1367,11 +1483,8 @@ of the tool result exloom reads. Dispatch it again without a name."
 Reviewed the current code, but did NOT approve it:
 $(printf '  - %s\n' "${unapproved[@]}")
 UNKNOWN means the report carried no 'VERDICT: APPROVED' line; re-dispatch it.
-A REJECTED review is closed by a ruling on each of its findings, not by another
-round. Put one line per cite under '## Rulings' in ${checklist}:
-  - src/x.go:12 — PARKED: why it can wait
-  - src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it
-  - src/x.go:44 — FIXED: the smallest change, at the cited line
+A REJECTED review is fixed by exloom:fixer and verified. Findings the verify
+marks ADDRESSED close on their own; the user rules on the rest in ${checklist}.
 $( [[ $need_quote -eq 1 ]] && echo "At Tier 3 and on the Certified lane, a ruling on a Critical finding quotes the
 user's words in double quotes.")
 ${ruling_notes}"
@@ -1746,7 +1859,7 @@ exloom_next_step() {   # exloom_next_step <branch>
   out="$(EXLOOM_VERBOSE=1 exloom_validate_checklist "$cl" HEAD 1 check 2>&1 >/dev/null)" && { echo push; return 0; }
   case "$out" in
     *"review is stale"*|*"records no valid 'Reviewed code commit:'"*) echo report ;;
-    *"Review has run"*|*"Remedy choices"*|*"Re-find"*) echo rulings ;;
+    *"Review has run"*|*"Remedy choices"*|*"Re-find"*|*"still open after a verify"*|*"needs the user's ruling"*) echo rulings ;;
     *"did NOT approve"*) echo fix ;;
     *"Never dispatched"*|*"has since changed"*|*"never reached exloom"*) echo review ;;
     *"smoke test"*) echo smoke ;;
@@ -1823,9 +1936,11 @@ Run /smoke-test and paste what you saw under '## Smoke test' in ${cl}; an agent-
   fi
   line="$(MSYS_NO_PATHCONV=1 git show "${tip}:$(exloom_verdict_dir "$cl")/smoke.json" 2>/dev/null | tail -1)"
   sha="$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+  local own
   if [[ "$line" == *'"exit":0,'* && -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null \
-     && { [[ -z "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude' 2>/dev/null)" ]] \
-          || ! exloom_diff_is_behavioural "$sha" "$reviewed"; }; then
+     && own="$(exloom_own_base "$sha" "$reviewed")" \
+     && { [[ -z "$(git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude' 2>/dev/null)" ]] \
+          || ! exloom_diff_is_behavioural "$own" "$reviewed"; }; then
     return 0
   fi
   _exloom_block "$action" "No passing smoke test covers this commit.
@@ -1842,7 +1957,7 @@ otherwise paste what you saw under '## Smoke test' in ${cl}."
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4" tier="${5:-1}"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_nnb_blocked=0
+  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_nnb_blocked=0 seen_refactor_blocked=0 seen_other=""
 
   # On whenever the gate is on. A repo whose suite needs untracked local state
   # opts out with a COMMITTED .claude/exloom-proof.disabled.
@@ -1863,8 +1978,10 @@ exloom_check_proof() {
       git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
       # Same coverage rule as a reviewer receipt: it counts when no code differs
       # between the proved commit and the one being shipped.
-      if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
-        exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+      local own
+      own="$(exloom_own_base "$sha" "$reviewed")"
+      if [[ -n "$(git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+        exloom_diff_is_behavioural "$own" "$reviewed" && continue
       fi
       # The receipt records the hash of the pinned test command, and comparing it
       # here is what binds the proof to the command that was actually run.
@@ -1895,6 +2012,12 @@ exloom_check_proof() {
                | grep -qE '^-?[[:space:]]*Proof:[^—]*—[[:space:]]*[^[:space:]]'; then ok=1; break
           else seen_nnb_blocked=1; fi ;;
         *'"result":"NOT_APPLICABLE"'*) ok=1; seen_notapplicable=1 ;;
+        *'"result":"NOT_TESTABLE"'*) ok=1; seen_other="NOT_TESTABLE - every changed file is a style, asset, lockfile, manifest or config file" ;;
+        *'"result":"TESTS_ONLY"'*) ok=1; seen_other="TESTS_ONLY - only tests changed" ;;
+        *'"result":"NO_TEST_CHANGED"'*)
+          if MSYS_NO_PATHCONV=1 git show "${tip}:${checklist}" 2>/dev/null | tr -d ''                | grep -qE '^-?[[:space:]]*Proof:[[:space:]]*refactor[[:space:]]*(—|–|-)[[:space:]]*[^[:space:]]'; then
+            ok=1; seen_other="NO_TEST_CHANGED - passed as a refactor on the user's ruling"
+          else seen_refactor_blocked=1; fi ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
@@ -1907,11 +2030,19 @@ exloom_check_proof() {
     if [[ $seen_notapplicable -eq 1 ]]; then
       echo "exloom: proof recorded NOT_APPLICABLE - the tests do not compile without the change, so it could not be run. The receipt says so; it is the weakest of the three results." >&2
     fi
+    [[ -n "$seen_other" ]] && echo "exloom: proof recorded ${seen_other}." >&2
     return 0
   fi
 
   local detail
-  if [[ ${seen_nnb_blocked:-0} -eq 1 ]]; then
+  if [[ $seen_refactor_blocked -eq 1 ]]; then
+    detail="The proof recorded NO_TEST_CHANGED: no test changed, and the suite passes at
+the tip. That passes as a refactor, which needs the user's ruling. Ask them
+whether this is a refactor; if it is, record their reason under '## Rulings' in
+${checklist}:
+  - Proof: refactor — <their reason>
+If it is not, add a test that fails without the change and re-run the proof."
+  elif [[ ${seen_nnb_blocked:-0} -eq 1 ]]; then
     detail="The proof recorded NO_NEW_BEHAVIOUR: no test changed and the diff only removes
 code. At Tier ${tier} that also needs the user's ruling in ${checklist}, e.g.
   - Proof: deletion only — <their reason>
@@ -1926,10 +2057,11 @@ this repo runs. Re-run the proof against the current command:
     detail="The proof ran on this code and came back NOT_PROVED: with your source change
 removed and your tests kept, the tests still PASS. They do not notice the change.
 
-That is one of:
-  1. the assertions are too weak to detect it;
-  2. the test runner did not actually run them (cached / UP-TO-DATE / filtered);
-  3. the change genuinely has no observable behaviour — say so in the checklist."
+What clears it:
+  1. strengthen the assertions until a test fails without the change;
+  2. make the runner actually run them (not cached, UP-TO-DATE or filtered);
+  3. for purely additive code, commit a mutation command in
+     .claude/exloom-mutation-command and re-run the proof."
   else
     detail="No proof receipt covers this commit (${vdir}/proof.json).
 

@@ -361,7 +361,10 @@ LAST_HEAD="$(grep -F '"verdict":' "$RECEIPT" 2>/dev/null | { if [[ -n "$TASK_ID"
 if [[ -n "$MFROM" ]] && MFROM="$(git rev-parse --verify -q "${MFROM}^{commit}" 2>/dev/null)" \
    && [[ "$MFROM" == "$LAST_HEAD" && "$MFROM" != "$HEAD_SHA" ]]; then
   MODE="verify"; RANGE="${MFROM}..${HEAD_SHA}"
-  FIX_LINES="$(git -c core.quotepath=false diff -U0 "$MFROM" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
+  # shellcheck source=/dev/null
+  . "$_DIR/lib.sh" 2>/dev/null
+  OWN_FROM="$(exloom_own_base "$MFROM" "$HEAD_SHA" 2>/dev/null)"
+  FIX_LINES="$(git -c core.quotepath=false diff -U0 "${OWN_FROM:-$MFROM}" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
            /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i); if(n==0){print f":"s; print f":"(s+1)}}')"
 fi
@@ -442,12 +445,18 @@ while IFS= read -r fline; do
       continue ;;
   esac
   not_addressed=0
+  cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   # Anything but a plain ADDRESSED (NOT, PARTIALLY, …) is still open.
   if [[ "$MODE" == "verify" ]] && printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*([A-Za-z]+[[:space:]]+)?ADDRESSED'; then
-    printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*ADDRESSED' && continue
+    if printf '%s' "$fline" | grep -qiE ':[0-9]+[^A-Za-z]*ADDRESSED'; then
+      prev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | grep -vF '"scope":"ADDRESSED"' | tail -1)"
+      sev="$(printf '%s' "$prev" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
+      printf '{"round":%s,"agent":"%s","severity":"%s","scope":"ADDRESSED","cite":"%s","fingerprint":"","head":"%s","at":"%s"}\n' \
+        "$ROUND" "$AGENT" "${sev:-MED}" "$cite" "$HEAD_SHA" "$STAMP" >> "$FINDINGS_FILE" 2>/dev/null
+      continue
+    fi
     not_addressed=1
   fi
-  cite="$(printf '%s' "$fline" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
   if [[ -z "$cite" ]]; then
     # No cite: if the line names a severity, remember it for the lines that
     # follow. security-auditor emits `- [severity: High] [category]` and puts the
@@ -487,7 +496,7 @@ while IFS= read -r fline; do
   case "$(printf '%s' "$fline" | tr '[:upper:]' '[:lower:]')" in *non-blocking*) line_sev="LOW" ;; esac
   sev="${cur_sev:-${line_sev:-$item_sev}}"
   if [[ $not_addressed -eq 1 ]]; then
-    prev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | tail -1)"
+    prev="$(grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null | grep -vF '"scope":"ADDRESSED"' | tail -1)"
     sev="$(printf '%s' "$prev" | sed -n 's/.*"severity":"\([A-Z]*\)".*/\1/p')"
     prev_scope="$(printf '%s' "$prev" | sed -n 's/.*"scope":"\([A-Z-]*\)".*/\1/p')"
     [[ -n "$sev" ]] || sev="MED"
@@ -512,8 +521,12 @@ while IFS= read -r fline; do
           | tr -cd 'A-Za-z' | tr '[:upper:]' '[:lower:]' | cut -c1-48)"
   fp="$(printf '%s|%s|%s' "$sev" "$(basename "$file")" "$text" | tr -cd 'A-Za-z0-9|._-')"
 
-  printf '{"round":%s,"agent":"%s","severity":"%s","scope":"%s","cite":"%s","fingerprint":"%s","head":"%s","at":"%s"}\n' \
-    "$ROUND" "$AGENT" "$sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" \
+  reason="$(printf '%s' "$fline" | sed -e "s|[A-Za-z0-9_./-]*\.[A-Za-z0-9]*:[0-9]*||" -e 's/^[[:space:]*-]*//' \
+    -e 's/^[[:space:]—–:-]*//' -e 's/^\(IN-SCOPE\|PRE-EXISTING\|OUT-OF-SCOPE\|NOT ADDRESSED\)[[:space:]—–:-]*//' \
+    -e 's/^\(IN-SCOPE\|PRE-EXISTING\|OUT-OF-SCOPE\|NOT ADDRESSED\)[[:space:]—–:-]*//' \
+    | tr -d '"\\' | LC_ALL=C tr -cd ' -~' | cut -c1-300)"
+  printf '{"round":%s,"agent":"%s","severity":"%s","scope":"%s","cite":"%s","fingerprint":"%s","head":"%s","at":"%s","reason":"%s"}\n' \
+    "$ROUND" "$AGENT" "$sev" "$scope" "$cite" "$fp" "$HEAD_SHA" "$STAMP" "$reason" \
     >> "$FINDINGS_FILE" 2>/dev/null || break
   n_found=$((n_found + 1))
 

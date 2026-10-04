@@ -19,7 +19,7 @@ The process is the same; the depth scales.
 | **Medium** | New API with integrations, new UI page, add auth to a flow | 30-45 min | Full process, but 2-3 approaches is enough. Spec is 1-2 pages. |
 | **Complex** | New subsystem, cross-cutting concern, multi-service feature | 60-90 min | Full process, all steps at full depth. Spec is 2-4 pages. |
 
-Durations are guides. Beyond 90 minutes, decompose and brainstorm the first sub-project. Simple work runs all 8 steps faster; it skips none.
+Beyond 90 minutes, decompose and brainstorm the first sub-project. Simple work skips no step.
 
 ## Process
 
@@ -42,6 +42,8 @@ Present 2-3 approaches, leading with your recommendation: "I recommend Approach 
 ### Step 5: Present the Design in Sections
 
 Scale depth to complexity; pause for feedback after each major section. Sections: **Overview** (what, why, fit — one paragraph), **Components** (name every file, class, function, endpoint, table), **Data flow** (happy path and primary failure), **Error handling** (what fails, detection, recovery), **Edge cases** (null, concurrent, network, scale — with handling), **Non-goals** (what this does not do). Get the overview approved before the rest.
+
+**UI mock.** A new screen, or a significant layout or flow change, on the Standard or Certified lane: build a static mock and get it approved before the spec. See [ui-mock.md](ui-mock.md).
 
 ### Step 6: Write the Spec
 
@@ -69,7 +71,7 @@ bash "$LINT" docs/exloom/specs/F-012-slug.md
 
 ### Step 8: User Reviews, Then Transition
 
-Ask the user for a full read of the written spec: "Does the problem statement match? Are non-goals acceptable? Edge cases missing?" Never transition without explicit approval — "looks good" after thirty seconds is not approval. Once approved, invoke `exloom:planning-for-handoff`; never go straight to implementation.
+Ask the user to read the whole spec: problem, non-goals, edge cases. Never transition without explicit approval — "looks good" after thirty seconds is not approval. Once approved, invoke `exloom:planning-for-handoff`; never go straight to implementation.
 
 ## Brownfield Discipline
 
@@ -81,15 +83,15 @@ The codebase already has an opinion; find it before forming your own.
 4. **Match existing patterns; justify deviation** in the spec. The bar: the existing pattern cannot solve the problem, and the new pattern's total cost is lower. "Simpler" is not a justification; "the ORM we're integrating only supports Active Record" is.
 5. **Propose extending before building new.** If an existing feature does 60%+ of what's needed, extend it unless that produces a worse outcome for team maintenance and clarity.
 
-"The existing implementation is bad" needs a specific technical assessment, not an opinion.
+"The existing implementation is bad" needs a technical assessment, not an opinion.
 
 ## Decision Points
 
 | Situation | Decision |
 |---|---|
 | User arrives with a solution, not a problem | Ask "what problem does this solve?" Verify the solution addresses the root cause. |
-| Scope too large for one spec | Decompose into sub-projects. Brainstorm the first one fully. Reference others as future work in non-goals. |
-| User wants to skip brainstorming | "If you already know, a quick pass just confirms it. If assumptions are wrong, this catches it before code. Minutes here versus days in code." |
+| Scope too large for one spec | Decompose; brainstorm the first sub-project; list the rest as future work in non-goals. |
+| User wants to skip brainstorming | "A quick pass confirms it, or catches a wrong assumption before code." |
 | Existing feature does 80% of what's needed | Propose extending. Document the gap and the extension approach, unless extension compromises the existing feature. |
 | User disagrees with your recommendation | Accept their choice, note both perspectives in the spec. You advise; they decide. |
 | Multiple valid approaches, no clear winner | Recommend the simplest. YAGNI. |

@@ -23,6 +23,10 @@ Read `**Lane:**`. Absent, use the committed `.claude/exloom-lane`, else `standar
 
 **Certified**: anything under `## Escape hatches used` blocks the push, and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch.
 
+## Step 1c — Reference docs
+
+If the repository has architecture, data-model, DB or API docs, follow `exloom:maintaining-reference-docs`: update each one whose code this branch changed, in this branch, or record `- Doc impact: none — <reason>` under `## Rulings`. Without such docs, skip this step. The push gate only warns here; it never blocks.
+
 ## Step 2 — Check required sections for the tier
 
 Dispatch is answered by receipts, never the checklist:
@@ -47,15 +51,13 @@ If that holds, ship; no extra round to be thorough.
 
 **Minor, out-of-scope and pre-existing findings go to the ledger**, `.claude/reviews/<branch>.ledger.md`, written by the hook: no ruling, no round, no fixing during the loop. After the final review, tick each item with the user — fixed, ticket id, or dropped — and commit it with the checklist. After a compaction, resume from the ledger and receipts.
 
-**A REJECTED review is closed by rulings, not another round.** For each recorded finding, add one line under `## Rulings`:
+**After any fix, the reviewer runs in verify mode.** Findings it marks `ADDRESSED` close on their own. For each one still `NOT ADDRESSED`, ask the user with AskUserQuestion, showing the reviewer's reason from the gate message, with three options:
 
-```
-- src/x.go:12 — PARKED: why it can wait
-- src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it
-- src/x.go:44 — FIXED: the smallest change, at the cited line
-```
+- **"Fix again"** — dispatch `exloom:fixer` with it, then verify again.
+- **"Not a real problem, ignore (PARKED)"** — `- src/x.go:12 — PARKED: why` under `## Rulings`.
+- **"Fix later, with a ticket (DEFERRED)"** — `- src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it`.
 
-The gate accepts the REJECTED receipt once every in-scope finding has a ruling. At Tier 3 and on Certified, a ruling on a Critical quotes the user's words in double quotes — ask them. An UNKNOWN verdict, or a REJECTED review with no recorded findings, cannot be ruled on: re-dispatch that reviewer.
+The gate accepts the REJECTED receipt once every open in-scope finding is PARKED or DEFERRED. At Tier 3 and on Certified, a ruling on a Critical quotes the user's words in double quotes — ask them. An UNKNOWN verdict, or a REJECTED review with no recorded findings, cannot be ruled on: re-dispatch that reviewer.
 
 ### Tier 0 required
 - L1: `l1-reviewer.json` receipt, findings listed (or "no findings"), resolution for each Critical/Important.
@@ -64,14 +66,14 @@ The gate accepts the REJECTED receipt once every in-scope finding has a ruling. 
 ### Tier 1 required
 - L1, as Tier 0.
 - Smoke test: boot command, user action, expected result, actual observed result with real evidence. "Test passed" ticked.
-- **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt covering the reviewed commit with `"result":"PROVED"` (or `NOT_APPLICABLE`, or `NO_NEW_BEHAVIOUR` with a `- Proof: deletion only — <reason>` line from the user at Tier 2–3). Written only by:
+- **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt covering the reviewed commit with `"result":"PROVED"` (or `NOT_APPLICABLE`, `NOT_TESTABLE`, `TESTS_ONLY`, `NO_NEW_BEHAVIOUR` with a `- Proof: deletion only — <reason>` line from the user at Tier 2–3, or `NO_TEST_CHANGED` with a `- Proof: refactor — <reason>` line from the user). Written only by:
 
   ```bash
   PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"
   bash "$PROVE"
   ```
 
-  `PROVED_BY_MUTATION` (repo-pinned mutation command) and `NOT_APPLICABLE` (tests cannot compile without the change) also pass; the receipt's `method` field says which. `NOT_PROVED` blocks: fix the tests, do not re-run.
+  `PROVED_BY_MUTATION` (repo-pinned mutation command) and `NOT_APPLICABLE` (tests cannot compile without the change) also pass; the receipt's `method` field says which. `NOT_PROVED` blocks: strengthen the assertions, make the runner actually run them, or for purely additive code commit `.claude/exloom-mutation-command`; do not re-run unchanged. For `NO_TEST_CHANGED`, ask the user whether it is a refactor and record their reason.
 
 ### Tier 2 required (Tier 1 +)
 - Adversarial review: `adversarial-reviewer.json` receipt, findings with category and resolution, and the cross-layer contract check's grep output with each orphan resolved.
@@ -133,7 +135,7 @@ Previous findings:
 
 `<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. A new finding outside the fix range is out of scope and needs no ruling.
 
-**The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: answer with rulings. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it: one dispatch, at that code, before any other. A commit made during a review is not covered by it.
+**The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: ask the user about the open findings. A verify after a fix is never refused for budget: the last fix always gets one verify. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it: one dispatch, at that code, before any other. A commit made during a review is not covered by it.
 
 **Dispatch order:**
 

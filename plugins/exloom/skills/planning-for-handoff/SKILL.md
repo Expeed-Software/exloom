@@ -41,6 +41,8 @@ List 3-5 things this plan deliberately does NOT cover, by name: "This plan does 
 
 List every file the executor will create, modify, or delete — one line each, exact path and short reason. Search the codebase and open the files yourself; confirm line ranges: "Modify `src/services/order-service.ts:45-60` — add discount calculation to the `calculateTotal` method." For new files, state what they contain; for deletions, why removal is safe. Never a directory or "the relevant service file". At 15+ files across 4 modules, consider splitting the plan.
 
+Read the repository's existing reference docs for the area first, and list the ones this change affects, or `Docs affected: none — <reason>`. See `exloom:maintaining-reference-docs`.
+
 ### Step 5: Identify existing patterns
 
 Point to specific files and name the pattern to follow: "See `src/services/user-service.ts` for the pattern: constructor injection, repository interface, service method returns `Result<T>` not raw values." Prose alone is ambiguous — point to the file.
@@ -109,12 +111,9 @@ Common mistakes:
 
 The executor should never need to search the codebase to find where your plan applies.
 
-Not file references: "update the relevant service file", "add a test for this", "modify the configuration", "update the frontend component".
-
 File references:
 - "Modify `src/services/order-service.ts:45-60` — add discount calculation to `calculateTotal`"
 - "Create `tests/services/test_order_service.py::test_discount_calculation`"
-- "Add export button template to `frontend/src/app/orders/orders.component.html:28` after the filter bar div"
 - "Update `backend/app/core/config.py:12` — add `CSV_EXPORT_MAX_ROWS` with default `100000`"
 
 If you do not know the path, find it; "TBD" means the plan is not ready. For new files state the placement reason: "Create `backend/app/services/order_export.py` — business logic, not HTTP concerns." For modifications, give line numbers or function names.
