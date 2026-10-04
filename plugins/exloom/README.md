@@ -91,7 +91,7 @@ Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env. It is 
 
 ### Teaching the tier your repository's vocabulary
 
-The built-in tier rules match `auth`, `tenant`, `secret`, `crypto`, `migrations/`. A codebase that calls the same thing `identity`, `iam`, `rbac` or `access-control` derives a *lower* tier for a change that should be the highest one — and the tier is the one thing with no escape hatch, because it decides which gates apply.
+The built-in Tier 3 rules match `auth`, `oauth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`, `security`, `password`, `credential`, `encrypt`, `cipher`, `rbac`, `acl`, `sso`, `saml`, `oidc`, `iam` and `migrations/`, in any case and across camelCase. A codebase that calls the same thing `identity`, `access-control` or `membership` derives a *lower* tier for a change that should be the highest one — and the tier is the one thing with no escape hatch, because it decides which gates apply.
 
 Commit an `.exloom.yml` at the repo root:
 
@@ -102,7 +102,7 @@ risk:
   tier3:
     paths:
       - "**/identity/**"
-      - "**/iam/**"
+      - "**/access-control/**"
   tier2:
     paths:
       - "**/integration/**"

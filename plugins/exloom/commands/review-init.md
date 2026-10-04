@@ -41,7 +41,7 @@ Apply mechanically, then confirm with the user:
 
 - If the ONLY changed files are `*.md`, `README*`, or live under the top-level `docs/` directory → Tier 0. `.txt` files and nested `docs/` folders do not count.
 - If any file under a `migrations/`, `liquibase/`, `db/changelog/` path → Tier 3.
-- Else if any file touches auth, tenancy, secrets, crypto (search paths for `auth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`) → Tier 3.
+- Else if any file touches auth, tenancy, secrets, crypto (the derivation matches `auth`, `oauth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`, `security`, `password`, `credential`, `encrypt`, `cipher`, `rbac`, `acl`, `sso`, `saml`, `oidc`, `iam` and `migrations/`) → Tier 3.
 - Else if any file under a `deployment/`, `k8s/`, `docker/`, `helm/` path AND flag/prod-related → Tier 3.
 - Else if any frontend file changed AND any backend file changed → Tier 2.
 - Else if any controller / route / API definition file changed → Tier 2.

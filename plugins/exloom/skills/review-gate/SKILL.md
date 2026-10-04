@@ -83,7 +83,7 @@ Change the cap by committing `.claude/exloom-max-rounds` with a number.
 
 Record the tier when the plan is written. Do not downgrade. When uncertain, go one higher.
 
-**Teach the tier your repository's vocabulary.** Built-in rules match `auth`, `tenant`, `secret`, `crypto`, `migrations/`. If your code says `identity`, `iam`, `rbac` or `access-control`, commit an `.exloom.yml` naming those paths. Repository rules only raise a tier or add a reviewer; an invalid policy blocks the gate. See [repository-policy.md](repository-policy.md).
+**Teach the tier your repository's vocabulary.** Built-in Tier 3 rules match `auth`, `oauth`, `tenant`, `secret`, `crypto`, `jwt`, `apikey`, `security`, `password`, `credential`, `encrypt`, `cipher`, `rbac`, `acl`, `sso`, `saml`, `oidc`, `iam` and `migrations/`. If your code says `identity`, `membership` or `access-control`, commit an `.exloom.yml` naming those paths. Repository rules only raise a tier or add a reviewer; an invalid policy blocks the gate. See [repository-policy.md](repository-policy.md).
 
 **Security review is triggered by surface, not only by tier.** Any change touching user input, authentication/authorization, tenancy, secrets, deserialization, server-side outbound requests, cryptography, or dependencies also runs the security review.
 
