@@ -67,6 +67,7 @@ Optional, all committed:
 | `.claude/exloom-test-patterns` | extra globs, one per line, for files the proof should treat as tests |
 | `.claude/exloom-not-testable-patterns` | extra globs, one per line, for files the proof should treat as not testable |
 | `.claude/exloom-docs` | where the reference docs live, when not `docs/db/`, `docs/api/`, `docs/data-model/`, `docs/architecture/`: one `<doc-dir>: <code globs>` line per doc |
+| `.claude/exloom-doc-patterns` | extra globs, one per line, for document types in the reference-doc folders that need no re-review (e.g. `*.puml`) |
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
@@ -152,8 +153,8 @@ Every loop is bounded:
 - **Minor findings go to a ledger**, `<branch>.ledger.md`, and never start another round.
 - **A separate fixer** makes the smallest fix at the cited line; the main session cannot commit code while findings are unruled.
 - **Budgets are enforced at dispatch:** `.claude/exloom-max-rounds` fix rounds per plan task (default 3), and one whole-branch review plus one verify pass per reviewer. A verify after a code change is never refused, so the last fix always gets one. A refused dispatch is answered with rulings; if the user wants another round anyway, a committed `- Extra round — "<their words>"` allows one, at that code.
-- **Merging main costs no review.** A merge of the base branch alone keeps the L1 approval. Afterwards the verify range and the growth limit count only the branch's own changes, not main's. A conflicted merge falls back to the full diff.
-- **Reference docs are warned on, never blocked.** When code behind an existing `docs/db/`, `docs/api/` or `docs/data-model/` changes without the doc, and without a `- Doc impact: none — <reason>` line, the push shows a warning. A commit touching only those docs keeps the L1 approval.
+- **Merging main costs no review.** A merge of the base branch alone keeps the L1 approval, the proof and the agent-run smoke receipt. Afterwards the verify range and the growth limit count only the branch's own changes, not main's. A conflicted merge falls back to the full diff.
+- **Reference docs are warned on, never blocked.** When code behind an existing `docs/db/`, `docs/api/` or `docs/data-model/` changes without the doc, and without a `- Doc impact: none — <reason>` line, the push shows a warning. A commit touching only document files in the doc folders (`.md`, `.mmd`, `.txt`, `.adoc`, `.rst`, Office files, `.pdf`, `.drawio`, images, plus `.claude/exloom-doc-patterns`) keeps the L1 approval; anything else there, such as an OpenAPI or SQL file, needs review.
 - **Tags are not branches.** `git push origin v1.0.0` for an existing tag, and `git push --tags`, push no branch code and are not gated.
 
 ## What's inside

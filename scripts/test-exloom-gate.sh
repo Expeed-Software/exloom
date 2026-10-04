@@ -2989,7 +2989,7 @@ subrepo ignored
 ok "nothing ignored -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
 printf '.claude/\n' > .gitignore
 ok "an ignored .claude/ lists the receipts and every committed-only setting" \
-   "$(exloom_ignored_settings feat/plan | grep -cE 'reviews/feat/plan.md|verdicts|exloom-test-command|exloom-max-rounds|exloom-proof.disabled|exloom-lane|exloom-mutation-command|exloom-protected-branches|exloom-skip-branches|exloom-test-patterns|exloom-not-testable-patterns|exloom-docs')" "12"
+   "$(exloom_ignored_settings feat/plan | grep -cE 'reviews/feat/plan.md|verdicts|exloom-test-command|exloom-max-rounds|exloom-proof.disabled|exloom-lane|exloom-mutation-command|exloom-protected-branches|exloom-skip-branches|exloom-test-patterns|exloom-not-testable-patterns|exloom-docs|exloom-doc-patterns')" "13"
 printf '.claude/*\n!.claude/reviews/\n!.claude/exloom-*\n' > .gitignore
 ok "ignoring only local files -> nothing listed" "$(exloom_ignored_settings feat/plan | grep -c .)" "0"
 
@@ -3417,13 +3417,31 @@ printf 'a1\n' > src/a.go; mmcommit a
 mmguard o1 'Review branch feat/plan at x. Diff: git diff m...x' >/dev/null
 mmstop o1 'VERDICT: APPROVED
 ROUND NEEDED AFTER FIX: NO'
+MMV=".claude/reviews/feat/plan.verdicts"
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$(git rev-parse HEAD)" > "$MMV/proof.json"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$(git rev-parse HEAD)" > "$MMV/smoke.json"
 mmcommit receipts
 mmmain src/main.go
 ok "a merge of main alone keeps the approval: nothing to re-review, no round spent" \
    "$(exloom_check_verdicts "$MMC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+ok "...and keeps the proof" "$(exloom_check_proof "$MMC" HEAD "$(git rev-parse HEAD)" test 1 >/dev/null 2>&1; echo $?)" "0"
+ok "...and the smoke receipt" "$(exloom_check_smoke "$MMC" HEAD "$(git rev-parse HEAD)" test 1 >/dev/null 2>&1; echo $?)" "0"
 printf 'a1\na2\n' > src/a.go; mmcommit own
 ok "...but the branch's own change after it still needs review" \
    "$(exloom_check_verdicts "$MMC" 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+
+subrepo mergeconflict
+MMC=".claude/reviews/feat/plan.md"; MMV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$MMV"
+printf '# checklist\n\n## Rulings\n\n' > "$MMC"
+printf 'branch\n' > src/base.txt; mmcommit own
+printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$(git rev-parse HEAD)" > "$MMV/proof.json"
+printf '{"check":"smoke","method":"agent-run","head":"%s","cmd":"x","exit":0,"output":"smoke.out","at":"n"}\n' "$(git rev-parse HEAD)" > "$MMV/smoke.json"
+mmcommit receipts
+git checkout -q main; printf 'main\n' > src/base.txt; mmcommit main; git update-ref refs/remotes/origin/main HEAD
+git checkout -q feat/plan; git merge -q --no-edit main >/dev/null 2>&1
+printf 'branch and main\n' > src/base.txt; git add -A >/dev/null 2>&1; git commit -q --no-edit >/dev/null 2>&1
+ok "a conflicted merge makes the proof stale" "$(exloom_check_proof "$MMC" HEAD "$(git rev-parse HEAD)" test 1 >/dev/null 2>&1; echo $?)" "2"
+ok "...and the smoke receipt" "$(exloom_check_smoke "$MMC" HEAD "$(git rev-parse HEAD)" test 1 >/dev/null 2>&1; echo $?)" "2"
 
 section "reference docs: a code change without its doc warns, never blocks"
 
@@ -3494,6 +3512,47 @@ printf 'src: *.go\n' > .claude/exloom-docs; rdcommit map
 printf 'b\n' > src/a.go; rdcommit code
 ok "...and a doc mapping committed after the review cannot exempt code" \
    "$(exloom_check_verdicts .claude/reviews/feat/plan.md 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+for rdf in docs/api/openapi.yaml docs/db/seed.sql docs/architecture/run.sh; do
+  git reset -q --hard "$RDOK"; mkdir -p "$(dirname "$rdf")"; printf 'x: 1\n' > "$rdf"; rdcommit nonprose
+  ok "a non-prose file in a doc folder still needs review: $rdf" \
+     "$(exloom_check_verdicts .claude/reviews/feat/plan.md 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "2"
+done
+for rdf in docs/db/schema.mmd docs/api/Guide.DOCX docs/data-model/fields.xlsx docs/architecture/overview.pdf; do
+  git reset -q --hard "$RDOK"; mkdir -p "$(dirname "$rdf")"; printf 'doc\n' > "$rdf"; rdcommit doc
+  ok "a document in a doc folder does not: $rdf" \
+     "$(exloom_check_verdicts .claude/reviews/feat/plan.md 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?)" "0"
+done
+
+section "a team adds its own document types"
+
+subrepo refdocpatterns
+rpcommit() { git add -A >/dev/null 2>&1; git commit -qm "$1" >/dev/null 2>&1; }
+rpapprove() {
+  python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'a1','agent_type':'exloom:l1-reviewer',
+ 'last_assistant_message':'VERDICT: APPROVED\nROUND NEEDED AFTER FIX: NO'}))" \
+    | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  rpcommit receipt
+}
+rpchk() { exloom_check_verdicts .claude/reviews/feat/plan.md 1 HEAD "$(git rev-parse HEAD)" test >/dev/null 2>&1; echo $?; }
+mkdir -p docs/architecture .claude/reviews/feat; printf '# a\n' > docs/architecture/overview.md
+printf 'a\n' > src/a.go; printf '# c\n\n## Rulings\n\n' > .claude/reviews/feat/plan.md; rpcommit a
+rpapprove
+RPOK="$(git rev-parse HEAD)"
+printf '@startuml\n' > docs/architecture/flow.puml; rpcommit puml
+ok "an unlisted document type in a doc folder needs review" "$(rpchk)" "2"
+git reset -q --hard "$RPOK"
+printf '*.puml\n' > .claude/exloom-doc-patterns; rpcommit patterns
+printf '@startuml\n' > docs/architecture/flow.puml; rpcommit puml
+ok "a patterns file committed after the review exempts nothing" "$(rpchk)" "2"
+git reset -q --hard "$RPOK"
+printf '*.puml\n' > .claude/exloom-doc-patterns; rpcommit patterns
+rpapprove
+printf '@startuml\n' > docs/architecture/flow.puml; rpcommit puml
+ok "a committed patterns file in place at review adds the type" "$(rpchk)" "0"
+printf 'x: 1\n' > docs/architecture/deploy.yaml; rpcommit yaml
+ok "...and nothing else" "$(rpchk)" "2"
 
 section "the bypass leaves a trace"
 

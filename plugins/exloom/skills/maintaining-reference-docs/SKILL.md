@@ -62,7 +62,7 @@ Before the final review is dispatched, bring each affected doc up to date in the
    - Doc impact: none — <reason>
    ```
 
-5. Commit the doc changes. A commit that touches only the reference-doc directories does not make an earlier L1 approval stale, so docs updated after a review need no new round.
+5. Commit the doc changes. A commit that touches only document files (Markdown, Mermaid, Office, PDF, images, plus `.claude/exloom-doc-patterns`) in the reference-doc directories keeps an earlier L1 approval, so docs updated after a review need no new round. Anything else there, such as an OpenAPI or SQL file, needs review.
 
 The push gate warns when code for an existing doc changed without the doc and without a `Doc impact` line. It is a warning; it never blocks. Treat it as a reminder, not as a check you can satisfy with the escape line.
 

@@ -489,7 +489,7 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
   printf '%s\n' ".claude/reviews/${1}.md" ".claude/reviews/${1}.verdicts/l1-reviewer.json" \
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
-    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-not-testable-patterns .claude/exloom-docs .claude/exloom-strict .claude/exloom-reviewer-model \
+    .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-not-testable-patterns .claude/exloom-docs .claude/exloom-doc-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
     | git check-ignore --no-index --stdin 2>/dev/null
 }
 
@@ -521,10 +521,23 @@ exloom_reference_doc_dirs() {   # exloom_reference_doc_dirs [commit]
 
 # Is every path on stdin under a reference-doc dir as mapped at <commit>?
 _exloom_only_reference_docs() {   # _exloom_only_reference_docs <commit>
-  local f d dirs ok
+  local f d dirs ok pats p isdoc
   dirs="$(exloom_reference_doc_dirs "$1")"
+  pats="$(MSYS_NO_PATHCONV=1 git show "${1}:.claude/exloom-doc-patterns" 2>/dev/null | tr -d '\r' \
+    | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$')"
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    isdoc=0
+    case "${f,,}" in
+      *.md|*.mmd|*.txt|*.adoc|*.rst|*.doc|*.docx|*.xls|*.xlsx|*.ppt|*.pptx|*.pdf|*.drawio|*.png|*.jpg|*.jpeg|*.svg) isdoc=1 ;;
+    esac
+    if [[ $isdoc -eq 0 && -n "$pats" ]]; then
+      while IFS= read -r p; do
+        # shellcheck disable=SC2254
+        case "$f" in $p) isdoc=1; break ;; esac
+      done <<< "$pats"
+    fi
+    [[ $isdoc -eq 1 ]] || return 1
     ok=0
     while IFS= read -r d; do [[ -n "$d" && "$f" == "$d/"* ]] && { ok=1; break; }; done <<< "$dirs"
     [[ $ok -eq 1 ]] || return 1
@@ -1923,9 +1936,11 @@ Run /smoke-test and paste what you saw under '## Smoke test' in ${cl}; an agent-
   fi
   line="$(MSYS_NO_PATHCONV=1 git show "${tip}:$(exloom_verdict_dir "$cl")/smoke.json" 2>/dev/null | tail -1)"
   sha="$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+  local own
   if [[ "$line" == *'"exit":0,'* && -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null \
-     && { [[ -z "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude' 2>/dev/null)" ]] \
-          || ! exloom_diff_is_behavioural "$sha" "$reviewed"; }; then
+     && own="$(exloom_own_base "$sha" "$reviewed")" \
+     && { [[ -z "$(git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude' 2>/dev/null)" ]] \
+          || ! exloom_diff_is_behavioural "$own" "$reviewed"; }; then
     return 0
   fi
   _exloom_block "$action" "No passing smoke test covers this commit.
@@ -1963,8 +1978,10 @@ exloom_check_proof() {
       git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1 || continue
       # Same coverage rule as a reviewer receipt: it counts when no code differs
       # between the proved commit and the one being shipped.
-      if [[ -n "$(git diff --name-only "$sha" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
-        exloom_diff_is_behavioural "$sha" "$reviewed" && continue
+      local own
+      own="$(exloom_own_base "$sha" "$reviewed")"
+      if [[ -n "$(git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude/reviews' 2>/dev/null)" ]]; then
+        exloom_diff_is_behavioural "$own" "$reviewed" && continue
       fi
       # The receipt records the hash of the pinned test command, and comparing it
       # here is what binds the proof to the command that was actually run.
