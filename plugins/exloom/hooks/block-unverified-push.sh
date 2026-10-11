@@ -48,10 +48,15 @@ TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 IS_PUBLISH=0
 CMD_MATCH=""
 case "$TOOL" in
-  # GitHub MCP write/PR tools (any server-name prefix). The tool call IS the
-  # publish; there is no shell command to parse — go straight to the gate.
-  *push_files|*create_or_update_file|*create_pull_request|*merge_pull_request|*delete_file)
-    IS_PUBLISH=1 ;;
+  # The tool call IS the publish; there is no shell command to parse.
+  mcp__github__*|mcp__plugin_github_github__*)
+    case "${TOOL#mcp__*__}" in
+      push_files|create_or_update_file|delete_file|create_pull_request|merge_pull_request) IS_PUBLISH=1 ;;
+      *) exit 0 ;;
+    esac ;;
+  # An unreadable tool name is judged as a command, never let through.
+  Bash|"") ;;
+  *) exit 0 ;;
 esac
 
 if [[ "$IS_PUBLISH" -eq 0 ]]; then

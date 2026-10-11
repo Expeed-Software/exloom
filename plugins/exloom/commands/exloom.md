@@ -5,10 +5,10 @@ description: Run the next step of the review flow for the current branch — ini
 
 # /exloom
 
-Load the library once:
+Load the library:
 
 ```bash
-LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"; . "$LIB"
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};. "$XL_FILE"
 B="$(git rev-parse --abbrev-ref HEAD)"
 ```
 
@@ -25,12 +25,16 @@ Otherwise run `exloom_next_step "$B"`, do what the step says, and run it again. 
 | `report` | Run `exloom_render_report "$B"`, then commit it. |
 | `review` | Dispatch the reviewers `/review-complete` names: per-task review during a plan, the whole-branch review once, verify mode after a fix. |
 | `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode, always. |
-| `rulings` | Ask the user about each finding the verify left NOT ADDRESSED, one AskUserQuestion per finding, showing the reviewer's reason from the gate message, with exactly these options: "Fix again" (go to `fix` with that finding), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor and record `- Proof: refactor — <their reason>`. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
-| `proof` | Run `prove-change-is-tested.sh` (find it like the library, under `scripts/`) and commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. If it reports NO_TEST_CHANGED, go to `rulings`. |
+| `rulings` | For each finding the verify left NOT ADDRESSED, one AskUserQuestion showing the reviewer's reason, with exactly these options: "Fix again" (go to `fix` with that finding), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor and record `- Proof: refactor — <their reason>`. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
+| `proof` | Run the block below; commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. If it reports NO_TEST_CHANGED, go to `rulings`. |
 | `smoke` | Run `/smoke-test`. |
-| `push` | Print `exloom_branch_summary "$B"` (review time, rounds, criteria proved, rulings) and tell the user the branch is ready. Do not push unless they ask. |
+| `push` | Print `exloom_branch_summary "$B"` and tell the user the branch is ready. Do not push unless they ask. |
 | `blocked` | Show the user `EXLOOM_VERBOSE=1 exloom_validate_checklist ".claude/reviews/$B.md" HEAD 1 check` and ask what to do. |
 
-For the full reason behind any step, run that same `EXLOOM_VERBOSE=1 exloom_validate_checklist` line; gate messages are one line unless asked for more.
+```bash
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
+```
+
+For the full reason behind any step, run that `EXLOOM_VERBOSE=1` line.
 
 This session coordinates. It does not fix review findings itself, and it does not invent steps the table does not list.

@@ -186,7 +186,8 @@ if [[ -f "$DLOG" ]]; then
     [[ -n "$AID" ]] && TUID="$(grep -F '"map":true' "$DLOG" | grep -F "\"agent_id\":\"${AID}\"" | tail -1 \
       | sed -n 's/.*"tool_use_id":"\([^"]*\)".*/\1/p')"
     if [[ -z "$TUID" && -n "$AID" ]] && _unmapped_dispatch; then
-      mkdir -p "$HELD_DIR" && printf '%s' "$HOOK_INPUT" > "${HELD_DIR}/${AID}.json"
+      mkdir -p "$HELD_DIR" && printf '*\n' > "${HELD_DIR}/.gitignore" \
+        && printf '%s' "$HOOK_INPUT" > "${HELD_DIR}/${AID}.json"
       exit 0
     fi
   else
@@ -198,7 +199,8 @@ if [[ -f "$DLOG" ]]; then
     fi
     if [[ -n "$AID" && -f "${HELD_DIR}/${AID}.json" ]]; then
       HOOK_INPUT="$(cat "${HELD_DIR}/${AID}.json")"
-      rm -f "${HELD_DIR}/${AID}.json"; rmdir "$HELD_DIR" 2>/dev/null
+      rm -f "${HELD_DIR}/${AID}.json"
+      compgen -G "${HELD_DIR}/*.json" >/dev/null || rm -rf "$HELD_DIR"
       IS_COMPLETION=1
     fi
   fi

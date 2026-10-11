@@ -14,7 +14,8 @@ exloom is a Claude Code plugin made of Markdown skills, shell hooks, and small h
 ## Nuances worth stating plainly
 
 - **exloom runs inside Claude Code.** Claude Code is an Anthropic product with its own data handling and terms; exloom does not change or add to that — it only reads local files and runs local commands.
-- **The optional security review invokes third-party tools.** When you use `exloom:security-review` / the `security-auditor`, it runs whatever security scanners you have installed locally (e.g. `gitleaks`, `semgrep`, `pip-audit`, `osv-scanner`) and may query **public package registries** (e.g. npm, PyPI) to check whether a dependency actually exists. Those third-party tools and registries have their **own** data behavior; exloom simply invokes what is on your machine and reports the results locally. exloom adds no data flow of its own.
+- **The security review invokes third-party tools.** For a Tier 3 change, or one touching input, auth, secrets, data exposure or dependencies, the review gate dispatches the `exloom:security-auditor` reviewer agent. It runs whatever security scanners you have installed locally (e.g. `gitleaks`, `semgrep`, `npm audit`, `pip-audit`, `osv-scanner`) and checks that each new dependency exists on its public package registry (e.g. npm, PyPI). Those tools and registries have their **own** data behavior — `npm audit`, for one, sends your dependency list to the npm registry. exloom adds no data flow of its own.
+- **Pull requests only where you say.** `exloom:capturing-learnings` shows you each proposed CLAUDE.md change before making or committing it, and opens a pull request only on a repository you name, after you agree.
 
 ## Contact
 

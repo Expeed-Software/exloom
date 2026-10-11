@@ -143,8 +143,9 @@ To produce one, dispatch the reviewer for real:
 
 Then commit the receipt alongside the checklist (git add/commit are not blocked).
 
-Emergency bypass: set EXLOOM_REVIEW_SKIP=1 in your Claude Code session env
-(settings.json "env"), then retry. It records itself in
-.claude/reviews/<branch>.bypass.json — commit that with the change.
+Do not change any setting to get past this gate, and never set the bypass yourself.
+Only the user can choose the emergency bypass: tell them they can set
+EXLOOM_REVIEW_SKIP=1 under "env" in their own Claude Code settings.json. It records
+itself in .claude/reviews/<branch>.bypass.json — commit that with the change.
 EOF
 exit 2

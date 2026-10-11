@@ -12,8 +12,8 @@ Run:
 - The fork point — the nearest merge-base to HEAD:
 
   ```bash
-  LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
-  . "$LIB"; exloom_fork_point HEAD
+  XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};. "$XL_FILE"
+  exloom_fork_point HEAD
   ```
 
   The push gate uses this function; do not reimplement it. Step 2a confirms it.
@@ -58,11 +58,7 @@ You apply what the hook cannot judge: deployment paths (floor Tier 2, Tier 3 whe
 A committed `.exloom.yml` may add tier-raising globs. Take the tier from the derivation, which merges both:
 
 ```bash
-# ${CLAUDE_PLUGIN_ROOT} is set for plugin.json hooks, NOT in your shell.
-# Resolve the installed plugin instead; several versions live in the cache,
-# so take the highest.
-LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
-. "$LIB"
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};. "$XL_FILE"
 exloom_derive_tier HEAD; exloom_tier_reasons
 ```
 
@@ -113,8 +109,7 @@ Write the answer into `**Lane:**`.
 Generate it; never hand-fill a template:
 
 ```bash
-LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"
-. "$LIB"
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};. "$XL_FILE"
 exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
 ```
 

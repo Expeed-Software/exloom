@@ -2398,9 +2398,10 @@ exloom review gate: BLOCKED — cannot ${action}.
 
 ${detail}
 
-Emergency bypass: set EXLOOM_REVIEW_SKIP=1 in your Claude Code session env
-(settings.json "env"), then retry. An inline "EXLOOM_REVIEW_SKIP=1 <cmd>" will
-NOT work — the hook reads its own environment, not the command's.
+Do not change any setting to get past this gate, and never set the bypass yourself.
+Only the user can choose the emergency bypass: tell them they can set
+EXLOOM_REVIEW_SKIP=1 under "env" in their own Claude Code settings.json. An inline
+"EXLOOM_REVIEW_SKIP=1 <cmd>" will NOT work — the hook reads its own environment.
 
 It records itself in .claude/reviews/<branch>.bypass.json. Commit that with the
 change and write the reason in the checklist's "Escape hatches used" section.

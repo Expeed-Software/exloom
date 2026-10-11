@@ -13,10 +13,8 @@ heading:
 - **[Topic]:** [Concise description of the gotcha and how to avoid it]
 ```
 
-Commit it: `docs: add [topic] gotcha to CLAUDE.md`.
-
-No PR is required for a CLAUDE.md update to a repo you own. On a shared or client
-repo, open one with a one-line description.
+Show it to the user first. Commit (`docs: add [topic] gotcha to CLAUDE.md`) only
+once they approve; on a shared or client repo they may prefer a PR instead.
 
 ---
 
@@ -35,7 +33,7 @@ Add it wherever your org keeps cross-project standards — a shared conventions 
 - **Org-level process change** → your org's process doc
 - **Stack-specific default** → your stack's shared config, or a CLAUDE.md template if your team maintains them
 
-Propose the change through your team's normal review process (e.g. a PR to the shared-docs repo) so a second person signs off before it becomes a shared standard. A good proposal states: what was learned (1–2 sentences), where it was discovered (project, date, context), the exact change, and which teams or projects it helps.
+Show the user the proposed change. If they want a second person to sign off, open a PR only on the repository they name, after they agree. A good proposal states: what was learned (1–2 sentences), where it was discovered (project, date, context), the exact change, and which teams or projects it helps.
 
 ---
 
@@ -52,12 +50,12 @@ A new skill is warranted when all three of these hold (the numbers are rules of 
 
 A learning that fails these is not lost — it routes to one of the other three destinations. The bar is deliberately high because every skill is a maintenance commitment for the whole team.
 
-Propose a PR creating `plugins/exloom/skills/<new-skill-name>/SKILL.md`. The PR body should include:
+Write the proposal for the user:
 - The trigger description (what situation invokes this skill)
 - A sketch of the steps
 - Which existing skill (if any) this extends or replaces
 
-Tag the plugin maintainer for review. New skills require approval before merging.
+The user decides where it goes: their own repository, or a PR to one they name, after they agree.
 
 ---
 

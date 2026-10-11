@@ -520,14 +520,9 @@ ok "reading the state file -> allowed"   "$(deny '{"tool_name":"Bash","tool_inpu
 
 section "remediation commands in block messages must actually run"
 
-# ${CLAUDE_PLUGIN_ROOT} is interpolated into plugin.json by the harness and is
-# NOT set in the Bash environment. A remediation command built from it fails with
-# "No such file or directory", which leaves EXLOOM_REVIEW_SKIP — advertised in
-# the same message — as the only reachable option.
-#
-# Scoped to the WHOLE plugin, not to hooks/commands/scripts: skills and templates
-# carry runnable snippets too, and a guard that covers only the directories a
-# past fix happened to touch cannot catch the next one.
+# Claude Code substitutes ${CLAUDE_PLUGIN_ROOT} in plugin.json and in command,
+# agent and SKILL.md bodies only; never in hook output, other files, or the Bash
+# environment, where a command built from it fails "No such file or directory".
 #
 # The pattern lives in a variable. Written inline it sits inside a nested
 # single-quoted `$(...)`, where an escaped `\$` becomes a LITERAL BACKSLASH to
@@ -548,12 +543,9 @@ printf 'The harness sets ${CLAUDE_PLUGIN_ROOT} in plugin.json only.\n' > "$CPR_P
 ok "...and does not fire on prose that merely names it" \
    "$(grep -rlE "$CPR_RE" "$CPR_PROBE" 2>/dev/null | wc -l | tr -d ' ')" "0"
 
-# .claude-plugin/plugin.json is excluded, and only it: that manifest is the one
-# place the harness DOES interpolate the variable, so its hook commands are
-# correct exactly as written.
-ok "no shipped file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
+ok "no unsubstituted file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
-      | grep -v '\.claude-plugin/plugin\.json$' | wc -l | tr -d ' ')" "0"
+      | grep -vE '\.claude-plugin/plugin\.json$|/(commands|agents)/[^/]*\.md$|/skills/[^/]*/SKILL\.md$' | wc -l | tr -d ' ')" "0"
 ok "...while the manifest, where it IS interpolated, still uses it" \
    "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "7"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
@@ -3058,7 +3050,7 @@ ok "the default block is one line" "$(printf '%s\n' "$short" | grep -c .)" "1"
 ok "...naming the reason and /exloom" "$(printf '%s' "$short" | grep -c 'blocked — proof missing for this commit → run /exloom')" "1"
 ok "the user's verbose setting shows everything" \
    "$(EXLOOM_VERBOSE=0 CLAUDE_PLUGIN_OPTION_VERBOSE=true _exloom_block push "a
-b" 2>&1 | grep -c 'Emergency bypass')" "1"
+b" 2>&1 | grep -c 'Only the user can choose the emergency bypass')" "1"
 
 section "strict mode is a committed repo setting"
 
@@ -3730,6 +3722,152 @@ ok "receipt hook: a Task dispatch of a reviewer" \
    "$(pf exloom_may_be_reviewer '{"tool_name":"Agent","tool_input":{"subagent_type":"exloom:adversarial-reviewer"}}')" "pass"
 ok "receipt hook: any other agent exits early" \
    "$(pf exloom_may_be_reviewer '{"hook_event_name":"SubagentStop","agent_type":"Explore"}')" "exit"
+
+section "exloom runs only its own installed files, never a copy found by search"
+
+# Claude Code substitutes ${CLAUDE_PLUGIN_ROOT} into command and SKILL.md bodies.
+# Each block is run three ways: substituted, left literal (an older Claude Code),
+# and substituted to a folder without the file.
+EXLOOM_DIR="$(cd "$HOOKS_ABS/.." && pwd)"
+OWN="$REG/own"; EMPTY="$REG/empty-root"; DHOME="$REG/decoy-home"; MARKS="$REG/marks"; RUNIN="$REG/runin"
+DECOY="$DHOME/.claude/plugins/cache/zz-other/exloom/99.9.9"
+LITERAL_DIR="$RUNIN/"'${CLAUDE_PLUGIN_ROOT}'
+mkdir -p "$OWN/hooks" "$OWN/scripts" "$EMPTY" "$MARKS" "$RUNIN"
+for d in "$DECOY" "$LITERAL_DIR"; do mkdir -p "$d/hooks" "$d/scripts"; done
+for f in hooks/lib.sh scripts/prove-change-is-tested.sh scripts/record-smoke.sh scripts/lint-spec.sh; do
+  printf 'touch "%s/own"; command_not_found_handle() { return 0; }\n' "$MARKS" > "$OWN/$f"
+  printf 'touch "%s/decoy"\n' "$MARKS" > "$DECOY/$f"
+  printf 'touch "%s/decoy"\n' "$MARKS" > "$LITERAL_DIR/$f"
+done
+(cd "$RUNIN" && git init -q -b feat/x . && git config user.email t@e.com && git config user.name t \
+  && git commit -q --allow-empty -m base) >/dev/null 2>&1
+blocks() {   # blocks <file> -> each ```bash block naming CLAUDE_PLUGIN_ROOT, NUL-terminated
+  tr -d '\r' < "$1" | awk '/^[[:space:]]*```bash/{on=1;b="";next}
+    on&&/^[[:space:]]*```/{on=0; if(b~/CLAUDE_PLUGIN_ROOT/) printf "%s%c",b,0; next} on{b=b $0 "\n"}'
+}
+CPR_LIT='${CLAUDE_PLUGIN_ROOT}'
+runblk() {   # runblk <block> <root|RAW> -> "rc own decoy said"
+  local b="$1" rc
+  [[ "$2" == RAW ]] || b="${b//"$CPR_LIT"/$2}"
+  b="$(printf '%s' "$b" | sed 's/<[^>]*>/x/g')"
+  rm -f "$MARKS/own" "$MARKS/decoy"
+  (cd "$RUNIN" && HOME="$DHOME" CLAUDE_PLUGIN_ROOT="$DECOY" bash -c "$b" >"$REG/blk.out" 2>&1); rc=$?
+  [[ $rc -eq 0 ]] || rc=1
+  echo "$rc $([[ -f $MARKS/own ]] && echo own || echo -) $([[ -f $MARKS/decoy ]] && echo decoy || echo -) $(grep -q 'exloom:.*missing' "$REG/blk.out" && echo said || echo -)"
+}
+NBLK=0; BAD=""
+for f in "$EXLOOM_DIR"/commands/*.md "$EXLOOM_DIR"/agents/*.md "$EXLOOM_DIR"/skills/*/SKILL.md; do
+  while IFS= read -r -d '' blk; do
+    NBLK=$((NBLK + 1)); n="${f#"$EXLOOM_DIR"/}#$NBLK"
+    r="$(runblk "$blk" "$OWN")";   [[ "$r" == "0 own - -" ]]  || BAD+=" $n:own=[$r]"
+    r="$(runblk "$blk" RAW)";      [[ "$r" == "1 - - said" ]] || BAD+=" $n:literal=[$r]"
+    r="$(runblk "$blk" "$EMPTY")"; [[ "$r" == "1 - - said" ]] || BAD+=" $n:missing=[$r]"
+  done < <(blocks "$f")
+done
+ok "every block that runs an exloom file names it through \${CLAUDE_PLUGIN_ROOT}" "$NBLK" "10"
+ok "...uses exloom's own file while a decoy that sorts higher sits in the plugins folder, and stops with a message when the path is literal or the file is missing" "$BAD" ""
+
+REPO_ROOT="$(cd "$EXLOOM_DIR/../.." && pwd)"
+SEARCH_RE='find[[:space:]][^|]*\.claude/plugins|sort -V|find it like the library'
+printf '%s\n' "LIB=\"\$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)\"" > "$REG/search-probe.md"
+ok "the search guard matches the old lookup" "$(grep -lE "$SEARCH_RE" "$REG/search-probe.md" | wc -l | tr -d ' ')" "1"
+ok "no file in the repository searches the plugins folder for a copy" \
+   "$(grep -rlE --exclude-dir=.git "$SEARCH_RE" "$REPO_ROOT" | grep -v 'scripts/test-exloom-gate\.sh$' | tr '\n' ' ')" ""
+ok "supporting files are not substituted, so only commands, agents and SKILL.md assign \${CLAUDE_PLUGIN_ROOT}" \
+   "$(grep -rlF "'$CPR_LIT'" "$EXLOOM_DIR" | grep -vE '/(commands|agents)/[^/]*\.md$|/skills/[^/]*/SKILL\.md$' | tr '\n' ' ')" ""
+
+section "the push gate covers git, PR creation and the GitHub server's tools, nothing else"
+
+PJ="$(cd "$HOOKS_ABS/../.claude-plugin" && pwd)/plugin.json"
+PM="$(python3 -c "import json,sys
+for e in json.load(open(sys.argv[1]))['hooks']['PreToolUse']:
+    if any('block-unverified-push.sh' in h['command'] for h in e['hooks']): print(e['matcher'])" "$PJ" | tr -d '\r')"
+# Claude Code compares a matcher of letters, digits, _, -, spaces, | and , as a list of exact names.
+ok "the push matcher is a list of exact tool names, not a pattern" \
+   "$([[ "$PM" =~ ^[A-Za-z0-9_|,\ -]+$ ]] && echo exact || echo pattern)" "exact"
+fires() { local n x; IFS='|,' read -ra n <<< "$PM"; for x in "${n[@]}"; do x="${x// /}"; [[ "$x" == "$1" ]] && { echo yes; return; }; done; echo no; }
+ok "Bash is gated" "$(fires Bash)" "yes"
+for p in mcp__github__ mcp__plugin_github_github__; do
+  for t in push_files create_or_update_file delete_file create_pull_request merge_pull_request; do
+    ok "$p$t is gated" "$(fires "$p$t")" "yes"
+  done
+done
+for t in mcp__notes__delete_file mcp__drive__create_or_update_file mcp__gitlab__push_files mcp__x__create_pull_request; do
+  ok "$t is not gated" "$(fires "$t")" "no"
+done
+subrepo mcpgate
+printf 'x\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+pushrc() { printf '%s' "$1" | bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1; echo $?; }
+ok "git push is still blocked" "$(pushrc '{"tool_name":"Bash","tool_input":{"command":"git push origin feat/plan"}}')" "2"
+ok "the GitHub server's push is still blocked" "$(pushrc '{"tool_name":"mcp__github__push_files","tool_input":{}}')" "2"
+ok "the GitHub plugin's PR tool is still blocked" "$(pushrc '{"tool_name":"mcp__plugin_github_github__create_pull_request","tool_input":{}}')" "2"
+ok "another connector's delete_file passes, even when its content says git push" \
+   "$(pushrc '{"tool_name":"mcp__notes__delete_file","tool_input":{"note":"then git push origin main"}}')" "0"
+
+section "a block tells the user about the bypass; it never tells Claude to switch the gate off"
+
+subrepo blockmsg
+printf 'x\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+PUSHMSG="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git push"}}' | EXLOOM_VERBOSE=1 bash "$HOOKS_ABS/block-unverified-push.sh" 2>&1 >/dev/null)"
+VERMSG="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".claude/reviews/feat/plan.verdicts/l1-reviewer.json","content":"{}"}}' | bash "$HOOKS_ABS/protect-verdicts.sh" 2>&1 >/dev/null)"
+for m in PUSHMSG VERMSG; do
+  ok "$m: says no setting may be changed to get past it" "$(grep -c 'Do not change any setting' <<< "${!m}")" "1"
+  ok "$m: says only the user can choose the bypass" "$(grep -c 'Only the user can choose' <<< "${!m}")" "1"
+  ok "$m: does not tell Claude to set the bypass" "$(grep -ciE 'set EXLOOM_REVIEW_SKIP=1 in your|"env"\), then retry' <<< "${!m}")" "0"
+done
+ok "no command or skill tells Claude to set the bypass itself" \
+   "$(grep -rnE 'EXLOOM_REVIEW_SKIP.*settings\.json|settings\.json.*EXLOOM_REVIEW_SKIP' "$HOOKS_ABS/../commands" "$HOOKS_ABS/../skills" "$HOOKS_ABS/../agents" | grep -vc 'never set it yourself')" "0"
+
+section "the reviewer report held while it waits is never committed"
+
+subrepo heldreport
+HV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$HV"; printf '# c\n' > .claude/reviews/feat/plan.md; : > .claude/reviews/feat/plan.ledger.md
+printf 'x\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+python3 -c "import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Agent','tool_use_id':'h1',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review branch feat/plan at x. Diff: git diff m...x'}}))" \
+  | bash "$HOOKS_ABS/guard-reviewer-dispatch.sh" >/dev/null 2>&1
+python3 -c "import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop','agent_id':'hag','agent_type':'exloom:l1-reviewer',
+ 'last_assistant_message':'VERDICT: APPROVED\nROUND NEEDED AFTER FIX: NO'}))" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "the report is held while the dispatch is unmapped" "$([[ -f "$HV/held/hag.json" ]] && echo held)" "held"
+RCADD="$(tr -d '\r' < "$HOOKS_ABS/../commands/review-complete.md" | grep -m1 '^git add .claude/reviews/<branch>.md' | sed 's#<branch>#feat/plan#g')"
+ok "/review-complete has a git add line to run" "$([[ -n "$RCADD" ]] && echo yes)" "yes"
+printf 'y\n' >> .claude/reviews/feat/plan.md
+bash -c "$RCADD" >/dev/null 2>&1
+ok "/review-complete's git add stages the checklist" "$(git diff --cached --name-only | grep -c 'feat/plan.md$')" "1"
+ok "/review-complete's git add leaves it out" "$(git diff --cached --name-only | grep -c '/held/')" "0"
+git add .claude/reviews >/dev/null 2>&1
+ok "/exloom's commit of .claude/reviews leaves it out" "$(git diff --cached --name-only | grep -c '/held/')" "0"
+git reset -q
+python3 -c "import json
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent','tool_use_id':'h1',
+ 'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review branch feat/plan'},
+ 'tool_response':{'content':[{'type':'text','text':'VERDICT: APPROVED'}],'agentId':'hag'}}))" | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "once the receipt is written the held folder is gone" "$([[ -e "$HV/held" ]] && echo left || echo gone)" "gone"
+ok "...and the receipt is there" "$(grep -c '"verdict":"APPROVED"' "$HV/l1-reviewer.json")" "1"
+
+section "the session-start note appears only where exloom is set up"
+
+ss() { (cd "$1" && bash "$HOOKS_ABS/session-start.sh" </dev/null 2>/dev/null); }
+mkdir -p "$REG/nogit"
+ok "outside a git repository: nothing" "$(ss "$REG/nogit")" ""
+subrepo ssoff; rm -f .claude/exloom-gate.enabled
+ok "a repository without the gate: nothing" "$(ss "$PWD")" ""
+: > .claude/exloom-gate.enabled
+ok "a repository with the gate on: the note" "$(ss "$PWD" | grep -c 'exloom')" "1"
+
+section "capturing-learnings asks first and opens no PR to exloom"
+
+CLD="$HOOKS_ABS/../skills/capturing-learnings"
+ok "it starts only when the user asks to record a lesson" \
+   "$(sed -n 's/^description: //p' "$CLD/SKILL.md" | grep -ciE '^Use when the user asks to record')" "1"
+ok "...and never automatically" "$(sed -n 's/^description: //p' "$CLD/SKILL.md" | grep -ci 'automatic')" "0"
+ok "it shows the CLAUDE.md change and waits for approval" "$(grep -c 'approves' "$CLD/SKILL.md" | awk '{print ($1>0)?"yes":"no"}')" "yes"
+ok "it no longer edits CLAUDE.md directly" "$(grep -ci 'directly' "$CLD/SKILL.md")" "0"
+ok "nothing proposes changes to exloom's own repository" \
+   "$(grep -rlE 'plugins/exloom|PRs to the exloom|plugin maintainer' "$CLD" | wc -l | tr -d ' ')" "0"
+ok "a PR goes only to a repository the user names" "$(grep -c 'repository the user names' "$CLD/SKILL.md")" "1"
 
 cd "$WORK" || exit 1
 
