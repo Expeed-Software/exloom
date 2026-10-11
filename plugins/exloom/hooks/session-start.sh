@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # exloom — SessionStart hook (orientation). Says exloom exists, whether the gate
 # is on here, and the one command that runs the flow. Never blocks. Kept short:
-# it is injected into every session.
+# it is injected into every session of a repository with the gate on.
 
 set -u
 
-GATE="off — nothing blocks; run /exloom-setup to turn it on"
-if git rev-parse --show-toplevel >/dev/null 2>&1; then
-  ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-  [[ -f "${ROOT}/.claude/exloom-gate.enabled" ]] && \
-    GATE="ON — git push is blocked until the branch's review evidence is complete"
-fi
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[[ -f "${ROOT}/.claude/exloom-gate.enabled" ]] || exit 0
+GATE="ON — git push is blocked until the branch's review evidence is complete"
 
 read -r -d '' MSG <<EOF || true
 exloom is installed in this session. It produces the evidence a team needs to

@@ -60,14 +60,13 @@ Write for someone not in the session. The template's shape: problem, chosen appr
 
 ### Step 7: Lint the Spec
 
-Run the linter. Fix the errors.
+Fix lint errors:
 
 ```bash
-LINT="$(find ~/.claude/plugins -path '*exloom*/scripts/lint-spec.sh' | sort -V | tail -1)"
-bash "$LINT" docs/exloom/specs/F-012-slug.md
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/lint-spec.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE" docs/exloom/specs/F-012-slug.md
 ```
 
-**Judge the warnings** — they are heuristics (an implementation named in a requirement; money, permissions or deletion with no `unwanted` requirement); ignore one you disagree with.
+**Judge the warnings** — they are heuristics (a named implementation; money, permissions or deletion without `unwanted`); ignore one you disagree with.
 
 ### Step 8: User Reviews, Then Transition
 

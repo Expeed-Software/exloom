@@ -10,10 +10,8 @@ Run once per repository. Everything it writes is a committed file, because exloo
 ## Step 1 — Load the library
 
 ```bash
-LIB="$(find ~/.claude/plugins -path '*exloom*/hooks/lib.sh' | sort -V | tail -1)"; . "$LIB"
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};. "$XL_FILE"
 ```
-
-`sort -V | tail -1` takes the highest installed version; `${CLAUDE_PLUGIN_ROOT}` is not set in your shell.
 
 ## Step 2 — Turn the gate on
 

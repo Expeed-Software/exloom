@@ -88,12 +88,7 @@ free `F-` number in that directory. Each requirement takes an EARS shape and
 carries at least one criterion, so `F-018/R-2/AC-1` is citable by the plan and by
 the tests that follow.
 
-Lint it:
-
-```bash
-LINT="$(find ~/.claude/plugins -path '*exloom*/scripts/lint-spec.sh' | sort -V | tail -1)"
-bash "$LINT" docs/exloom/specs/F-018-dashboard-notifications.md
-```
+Lint it with the Step 7 command on `docs/exloom/specs/F-018-dashboard-notifications.md`.
 
 It reports one warning: the spec mentions "payments" but states no `unwanted`
 requirement. That one is real — a payment notification that fires twice, or fires

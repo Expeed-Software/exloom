@@ -125,11 +125,10 @@ Address every Blocking finding; non-blocking ones get a checklist disposition (f
 ### Step 4 — Prove the change is tested (Tier 1+)
 
 ```bash
-PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"
-bash "$PROVE"
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
 ```
 
-It runs the suite three times in a throwaway worktree: at the base commit (must pass, or the proof is void), at the base with your tests added (must fail, or your tests do not notice your change), and with change and tests together (must pass). It writes `proof.json` beside the reviewer receipts.
+It runs the suite three times in a throwaway worktree: at the base (must pass), at the base with your tests (must fail, or they do not notice your change), and with both (must pass). It writes `proof.json`.
 
 `NOT_PROVED` is answered by a test that fails without your change, never by re-running.
 
@@ -161,7 +160,7 @@ mkdir -p .claude && touch .claude/exloom-gate.enabled
 
 ## The emergency bypass
 
-`EXLOOM_REVIEW_SKIP=1`, set in the Claude Code session env (`settings.json` `env`), not inline before the command. The hooks honour it unconditionally.
+`EXLOOM_REVIEW_SKIP=1` in the user's `settings.json` `env`, not inline, is the user's choice; never set it yourself. The hooks honour it unconditionally.
 
 The hook writes `.claude/reviews/<branch>.bypass.json` (commit, branch, action, git identity, timestamp). Commit it with the change and write the reason under "Escape hatches used". Nothing verifies the reason.
 
@@ -175,7 +174,7 @@ The hook writes `.claude/reviews/<branch>.bypass.json` (commit, branch, action, 
 
 **Invoke these yourself, with the Skill tool.** Doing their steps by hand produces no receipts.
 
-The `PreToolUse` hooks refuse `git push`, `gh pr create`, and the GitHub MCP push/PR tools (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) until the checklist is complete.
+The `PreToolUse` hooks refuse `git push`, `gh pr create`, and those five GitHub MCP tools under `mcp__github__` or `mcp__plugin_github_github__` (`push_files`, `create_or_update_file`, `create_pull_request`, `merge_pull_request`, `delete_file`) until the checklist is complete.
 
 ## Further reading
 

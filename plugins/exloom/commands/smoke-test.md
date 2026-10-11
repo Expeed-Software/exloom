@@ -32,21 +32,20 @@ Ask the user to confirm or correct the boot command, and for prerequisites (DB r
 
 Ask the user, in order:
 
-1. "What is the user-facing action that exercises this change? Describe it as a sequence of clicks / API calls / CLI commands."
+1. "What is the user-facing action that exercises this change? Describe it as clicks / API calls / CLI commands."
 2. "What should the user observe if this change is working? (specific UI element, specific API response field, specific log line, specific DB row)"
 
 Require specifics: not "the widget should appear" but "the 'Widgets' list should include a row with name='foo' and status='active'".
 
 ## Step 4 — Capture the evidence
 
-**Agent-run, for a CLI or API change at Tier 0–2 with no UI files in the diff:** run the check yourself through the recorder, which writes the receipt the gate reads:
+**Agent-run, for a CLI or API change at Tier 0–2 with no UI files in the diff:** run the check through the recorder, which writes the gate's receipt:
 
 ```bash
-SMOKE="$(find ~/.claude/plugins -path '*exloom*/scripts/record-smoke.sh' | sort -V | tail -1)"
-bash "$SMOKE" -- <the command or curl call that exercises the change>
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/record-smoke.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE" -- <the command or curl call that exercises the change>
 ```
 
-It records the command, exit code and commit in `<branch>.verdicts/smoke.json` and the output in `smoke.out`. Check the output shows the expected result; a non-zero exit is a failed smoke test. Commit both files, then go to Step 6.
+It records the command, exit code and commit in `<branch>.verdicts/smoke.json` and the output in `smoke.out`. Check the output; a non-zero exit is a failed smoke test. Commit both files, then go to Step 6.
 
 **Pasted, for a UI change or Tier 3:** the gate does not accept an agent-run receipt. Tell the user:
 

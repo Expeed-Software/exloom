@@ -65,15 +65,14 @@ The gate accepts the REJECTED receipt once every open in-scope finding is PARKED
 
 ### Tier 1 required
 - L1, as Tier 0.
-- Smoke test: boot command, user action, expected result, actual observed result with real evidence. "Test passed" ticked.
+- Smoke test: boot command, user action, expected result, actual observed result with evidence. "Test passed" ticked.
 - **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt covering the reviewed commit with `"result":"PROVED"` (or `NOT_APPLICABLE`, `NOT_TESTABLE`, `TESTS_ONLY`, `NO_NEW_BEHAVIOUR` with a `- Proof: deletion only — <reason>` line from the user at Tier 2–3, or `NO_TEST_CHANGED` with a `- Proof: refactor — <reason>` line from the user). Written only by:
 
   ```bash
-  PROVE="$(find ~/.claude/plugins -path '*exloom*/scripts/prove-change-is-tested.sh' | sort -V | tail -1)"
-  bash "$PROVE"
+  XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
   ```
 
-  `PROVED_BY_MUTATION` (repo-pinned mutation command) and `NOT_APPLICABLE` (tests cannot compile without the change) also pass; the receipt's `method` field says which. `NOT_PROVED` blocks: strengthen the assertions, make the runner actually run them, or for purely additive code commit `.claude/exloom-mutation-command`; do not re-run unchanged. For `NO_TEST_CHANGED`, ask the user whether it is a refactor and record their reason.
+  `PROVED_BY_MUTATION` and `NOT_APPLICABLE` (tests cannot compile without the change) also pass. `NOT_PROVED` blocks: strengthen the assertions, make the runner run them, or for purely additive code commit `.claude/exloom-mutation-command`; do not re-run unchanged. For `NO_TEST_CHANGED`, ask the user whether it is a refactor and record their reason.
 
 ### Tier 2 required (Tier 1 +)
 - Adversarial review: `adversarial-reviewer.json` receipt, findings with category and resolution, and the cross-layer contract check's grep output with each orphan resolved.
@@ -213,4 +212,4 @@ Print:
 - All-or-nothing per the tier's required sections.
 - Do NOT accept "I'll do that later".
 - A skipped narrative step with written justification under "Escape hatches used" counts as addressed; an unjustified skip does not. **An under-declared tier and a missing reviewer receipt have no escape hatch.**
-- Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in the Claude Code session env (`settings.json` `env`), not inline. It works on every lane, verifies no justification, writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.
+- Emergency bypass: only the user may set `EXLOOM_REVIEW_SKIP=1` in their `settings.json` `env`; never set it yourself. It works on every lane, verifies no justification, writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.
