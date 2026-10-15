@@ -23,8 +23,8 @@ Detect the stack from the repository root and propose the command:
 
 | Found | Command |
 |---|---|
-| `angular.json` | `npx ng test --watch=false --browsers=ChromeHeadless` |
-| `package.json` with `vitest` | `npx vitest run` |
+| `angular.json` | `./node_modules/.bin/ng test --watch=false --browsers=ChromeHeadless` |
+| `package.json` with `vitest` | `./node_modules/.bin/vitest run` |
 | `package.json` with `jest` or `react-scripts` | `CI=true npm test` |
 | `package.json` with `@strapi/strapi` | `npm test`, only if a `test` script exists; otherwise ask the user for one |
 | one `*.sln` (or one `*.csproj`) | `dotnet test <that file>` |
