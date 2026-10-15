@@ -73,7 +73,7 @@ try:
     d=json.load(sys.stdin)
     print((d.get("tool_input") or {}).get("command",""))
 except Exception:
-    pass' 2>/dev/null || true)"
+    print("")' 2>/dev/null || true)"
   fi
   [[ -z "$CMD" ]] && CMD="$HOOK_INPUT"
   # Collapse newlines/tabs so a multi-line command still matches on one line.

@@ -39,7 +39,7 @@ exloom_json_field() {
 try:
     print(json.load(sys.stdin).get(os.environ["FIELD"],""))
 except Exception:
-    pass' 2>/dev/null || true)"
+    print("")' 2>/dev/null || true)"
   fi
   if [[ -z "$out" ]]; then
     out="$(printf '%s' "$json" | _exloom_sed_str "$field")"
@@ -111,7 +111,7 @@ try:
     v = (json.load(sys.stdin).get("tool_input") or {}).get(os.environ["KEY"], "")
     print(v if isinstance(v, str) else "")
 except Exception:
-    pass' 2>/dev/null || true)"
+    print("")' 2>/dev/null || true)"
   fi
   if [[ -z "$out" ]]; then
     out="$(printf '%s' "$json" | _exloom_sed_str "$key")"
