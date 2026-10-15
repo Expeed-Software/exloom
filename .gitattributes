@@ -1,2 +1,2 @@
-# Enforce LF line endings for all shell scripts to prevent bash\r errors in WSL/Linux/Docker
-*.sh text eol=lf
+# Enforce LF line endings for the repo test scripts to prevent bash\r errors in WSL/Linux/Docker
+scripts/*.sh text eol=lf
