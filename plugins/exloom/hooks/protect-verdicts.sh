@@ -127,25 +127,24 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO_ROOT" || exit 0
 [[ -f ".claude/exloom-gate.enabled" ]] || exit 0
 
-cat >&2 <<EOF
-exloom review gate: DENIED — cannot write a reviewer verdict receipt by hand.
-
-Target: ${TARGET}
-
-Receipts under .claude/reviews/<branch>.verdicts/ are written by exloom's
-PostToolUse hook when a reviewer subagent actually completes. They are the only
-review evidence the authoring session does not author, which is the entire reason
-the gate trusts them.
-
-To produce one, dispatch the reviewer for real:
-  exloom:l1-reviewer
-  exloom:adversarial-reviewer | exloom:security-auditor
-
-Then commit the receipt alongside the checklist (git add/commit are not blocked).
-
-Do not change any setting to get past this gate, and never set the bypass yourself.
-Only the user can choose the emergency bypass: tell them they can set
-EXLOOM_REVIEW_SKIP=1 under "env" in their own Claude Code settings.json. It records
-itself in .claude/reviews/<branch>.bypass.json — commit that with the change.
-EOF
+printf '%s\n' \
+  'exloom review gate: DENIED — cannot write a reviewer verdict receipt by hand.' \
+  '' \
+  "Target: ${TARGET}" \
+  '' \
+  'Receipts under .claude/reviews/<branch>.verdicts/ are written by the exloom' \
+  'PostToolUse hook when a reviewer subagent actually completes. They are the only' \
+  'review evidence the authoring session does not author, which is the entire reason' \
+  'the gate trusts them.' \
+  '' \
+  'To produce one, dispatch the reviewer for real:' \
+  '  exloom:l1-reviewer' \
+  '  exloom:adversarial-reviewer | exloom:security-auditor' \
+  '' \
+  'Then commit the receipt alongside the checklist (git add/commit are not blocked).' \
+  '' \
+  'Do not change any setting to get past this gate, and never set the bypass yourself.' \
+  'Only the user can choose the emergency bypass: tell them they can set' \
+  'EXLOOM_REVIEW_SKIP=1 under "env" in their own Claude Code settings.json. It records' \
+  'itself in .claude/reviews/<branch>.bypass.json — commit that with the change.' >&2
 exit 2
