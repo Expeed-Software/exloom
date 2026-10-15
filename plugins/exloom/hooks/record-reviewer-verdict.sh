@@ -46,7 +46,7 @@ try:
             break
     print(d if isinstance(d, str) else "")
 except Exception:
-    pass' 2>/dev/null || true)"
+    print("")' 2>/dev/null || true)"
   fi
   if [[ -z "$out" ]]; then
     out="$(printf '%s' "$HOOK_INPUT" | sed -n "s/.*\"$leaf\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
@@ -271,7 +271,7 @@ try:
         if k in d:
             print(flat(d[k])); break
 except Exception:
-    pass' 2>/dev/null || true)"
+    print("")' 2>/dev/null || true)"
   fi
   # Nothing further. Stripping tool_input from the raw payload cannot be done
   # safely with a brace-delimited pattern — it stops at the first `}`, so any
