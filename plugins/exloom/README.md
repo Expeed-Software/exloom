@@ -76,8 +76,8 @@ Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for
 
 | Stack | Pinned command |
 |---|---|
-| Angular | `npx ng test --watch=false --browsers=ChromeHeadless` (plain `npm test` watches and opens a browser) |
-| React (Vite / Vitest) | `npx vitest run` |
+| Angular | `./node_modules/.bin/ng test --watch=false --browsers=ChromeHeadless` (plain `npm test` watches and opens a browser) |
+| React (Vite / Vitest) | `./node_modules/.bin/vitest run` |
 | React (CRA / Jest) | `CI=true npm test` |
 | Strapi | `npm test`, once the repo defines a test script; Strapi scaffolds none |
 | .NET | `dotnet test <App>.sln` |
