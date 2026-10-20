@@ -1,6 +1,6 @@
 ---
 name: maintaining-reference-docs
-description: Use when planning a change, and in /review-complete, to keep the repository's architecture, data-model, database and API docs true to the code in the same branch. Also used by /exloom-setup when it offers to create the derivable docs for an existing codebase. Not for READMEs, specs, plans or changelogs.
+description: Use when planning a change, and at the gate, to keep the repository's architecture, data-model, database and API docs true to the code in the same branch. Also used by /exloom-setup when it offers to create the derivable docs for an existing codebase. Not for READMEs, specs, plans or changelogs.
 ---
 
 # Maintaining Reference Docs
@@ -9,7 +9,7 @@ description: Use when planning a change, and in /review-complete, to keep the re
 
 Reference docs describe the system as it is: its architecture, its data model, its database and its API. They are only useful while they are true, and they stop being true the first time a change ships without them. This skill keeps them true by making the doc change part of the code change: same branch, same diff, same review.
 
-A team needs this more than an individual does. The person who changed the schema knows what changed; the five people who read `docs/db/` next month do not, and they will trust whatever it says.
+A team needs this more than an individual. The person who changed the schema knows what changed; the five people who read `docs/db/` next month do not, and they will trust whatever it says.
 
 You write the docs. Hooks never do. A doc change shows in the diff and is reviewed like code.
 

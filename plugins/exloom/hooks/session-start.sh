@@ -16,13 +16,12 @@ and reviewer receipts.
 
 Review gate in this repo: ${GATE}
 
-On a feature branch, run /exloom: it runs the next step (checklist, proof, smoke
-test, review, fix, rulings) until the branch can be pushed. /exloom status prints
-one line. For a new feature, start with exloom:brainstorming (spec) and
-exloom:planning-for-handoff (plan); exloom:executing-handoff-plans builds it.
+On a feature branch, run /exloom: it runs the next step (checklist, spec, plan,
+build, proof, smoke test, review, fix, rulings) until the branch can be pushed.
+/exloom status prints one line. Do not run the steps yourself.
 
 A one-line fix is a one-line fix: a review finding is a defect report, not a
-design brief. Load exloom:using-exloom for which skill applies when.
+design brief.
 EOF
 
 if command -v jq >/dev/null 2>&1; then

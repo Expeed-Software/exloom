@@ -1,58 +1,97 @@
-# Worked example — one feature, end to end
+# Worked example — one change, start to push
 
 A Micronaut service. Ticket: **orders API should reject a discount larger than the line total.** Today it returns a negative amount.
 
-This is a small change — two files. It starts at step 3, not step 1. The spec-and-plan steps are shown after, for when the work is bigger.
+You are on `dev`. You run `/exloom`. Everything below is what it does, in the order `exloom_next_step` returns.
 
 ---
 
-## 3. Get on a branch
+## `branch`
+
+`dev` is protected, so `exloom:isolating-execution` creates `fix/1042-negative-discount` off it. The hooks skip protected branches, so work left on `dev` or `main` is never gated at all.
+
+## `init`
+
+`/review-init` (used by /exloom) writes `.claude/reviews/fix/1042-negative-discount.md` and asks once:
+
+> Quick fix? — **yes** means the Sprint lane.
+
+You say no: small, but it changes the API's behaviour. `**Lane:** standard`. No diff yet, so the tier is pending; the hook derives it from the real diff at push.
+
+## `commit`
+
+The checklist is committed on its own: `chore(review): initialize review report for fix/1042-negative-discount`.
+
+## `spec`
+
+Standard lane, `**Spec:** none` — so `exloom:brainstorming`. For a stated bug it is short: current behaviour, chosen approach, one rejected approach (clamp to zero — hides the bad input), one criterion:
+
+> F-1042 / R-1 / AC-1 — a discount larger than the gross returns 400 with `InvalidDiscount`, not a clamped total.
+
+The spec path goes into `**Spec:**` and is committed.
+
+## `plan`
+
+`**Plan:** none` — so `exloom:planning-for-handoff`. Two tasks, exact files, each citing AC-1:
 
 ```
-exloom:isolating-execution
+### Task 1 — OrderTotal.java: throw InvalidDiscountException when discount > gross
+### Task 2 — OrderController.java: map it to 400; OrderTotalTest covers both
 ```
 
-Creates `fix/1042-negative-discount` off `dev`. This matters more than it looks: the hooks skip protected branches, so work left on `dev` or `main` is never gated at all.
+The plan path goes into `**Plan:**` and is committed.
 
-## 4. Start the review record
+## `build`
 
-```
-/review-init
-```
-
-Reads the diff (empty so far) and the ticket, proposes a tier, writes `.claude/reviews/fix/1042-negative-discount.md`, commits it.
-
-> Tier 1 — two files, one module, no API surface change, internal only.
-
-Tier is declared **now**, before the diff exists, on purpose. The gate derives the same tier at push time from the actual diff and refuses a checklist that declares less, so declaring early is the honest version.
-
-## 5. Build it
-
-```
-exloom:executing-handoff-plans
-```
-
-Two files:
+`exloom:executing-handoff-plans`, one task at a time. Task 1:
 
 ```java
 // OrderTotal.java
 int gross = unitPrice * qty;
-return Math.max(0, gross - discount);
+if (discount > gross) throw new InvalidDiscountException(gross, discount);
+return gross - discount;
 ```
 
-```java
-// OrderTotalTest.java
-assertThat(total(10, 3, 5)).isEqualTo(25);
-assertThat(total(1, 1, 99)).isEqualTo(0);   // the bug
+Commit. The task review dispatches `l1-reviewer` on that commit; it approves. Task 2 the same way. Nothing else: no `DiscountPolicy` interface, no refactor of the caller. If the fix genuinely needs one, **stop and ask** — that is a scope decision.
+
+`/exloom status` while this runs: `Tier 1 · task 1/2 · round 0/3 · proof ✗ · 0 rulings · next: build`.
+
+When both tasks' reviews have approved, `build` is finished. An edit left uncommitted sends you to `commit-work` first.
+
+## `report`, then `review`
+
+The evidence block is regenerated and committed. Then the whole-branch review runs once — `l1-reviewer`, plus `adversarial-reviewer` at Tier 2 and `security-auditor` at Tier 3 or on a security surface. Here: Tier 1, L1 only. It comes back:
+
+> **Critical** — `OrderTotal.java:12` — the exception carries `gross` and `discount` but the controller's 400 body omits both, so the client cannot tell which line was rejected.
+>
+> VERDICT: REJECTED (1 items)
+
+## `fix`
+
+`exloom:fixer` gets that finding verbatim and makes the smallest fix: the two numbers in the response body. Commit. Then `l1-reviewer` runs again in **verify** mode over the fix range only.
+
+> ## Previous findings
+> - OrderTotal.java:12 — NOT ADDRESSED: the body names the numbers but not the line id, which is what the client keys on.
+
+Adversarial and security would not re-run here; a fix does not expire their approval.
+
+## `rulings`
+
+What is still open after a verify is yours. /exloom asks, with the reviewer's reason:
+
+- Fix again
+- Not a real problem, ignore (PARKED)
+- Fix later, with a ticket (DEFERRED)
+
+The ticket is about the amount, not the line id: DEFERRED. Written under `## Rulings`:
+
+```
+- OrderTotal.java:12 — DEFERRED ORD-1050: line id in the error body is a separate change
 ```
 
-Nothing else. No `DiscountPolicy` interface, no refactor of the caller, no second test class. If the fix genuinely needs one of those, **stop and ask** — that is a scope decision, not an implementation detail.
+Nothing is recorded that you did not say. At the round cap exloom refuses another dispatch and asks for rulings on what is left.
 
-## 6. Prove the tests notice it
-
-```
-bash scripts/prove-change-is-tested.sh
-```
+## `proof`
 
 ```
 run 1/3: base source + base tests (control)     PASS
@@ -61,79 +100,33 @@ run 3/3: your change + your tests               PASS
 PROVED — without the source change, the tests fail.
 ```
 
-If run 2 had **passed**, the test does not test the change — the usual cause is asserting on something true either way. Fix the test, not the script.
+If run 2 had **passed**, the test does not test the change — usually it asserts something true either way. The fix is a better test, not another run.
 
-Costs no model tokens. It is a shell script running your suite three times.
+## `smoke`
 
-## 7. Check for drift
-
-```
-exloom:auditing-plan-fidelity
-```
-
-With no plan, this is a short pass: does the diff contain anything the ticket did not ask for? Two files, both named in the ticket. Clean.
-
-On planned work this is the step that catches "I improved it while I was in there."
-
-## 8. Run it
-
-```
-/smoke-test
-```
-
-Not the unit test — the real thing:
+`/smoke-test` (used by /exloom) — not the unit test, the real thing:
 
 ```
 $ ./gradlew :orders:bootRun
 $ curl -s -XPOST localhost:8080/orders/quote -d '{"unitPrice":1,"qty":1,"discount":99}'
-{"total":0}
+{"error":"InvalidDiscount","gross":1,"discount":99}
 ```
 
-Pasted into the checklist verbatim. **For a library or CLI there is still a smoke test** — call the public entry point an adopter would call, from outside the test sources, and show the output. `N/A — library` is not an answer.
+For a CLI or API change `record-smoke.sh` records the receipt; a UI change needs the result pasted under `## Smoke test`. **A library still has a smoke test** — call the public entry point an adopter would call. `N/A — library` is not an answer.
 
-## 9. Review
-
-```
-/review-complete
-```
-
-Dispatches `l1-reviewer` at low effort. It comes back:
-
-> **Critical** — `OrderTotal.java:12` — `Math.max(0, …)` silently swallows a discount larger than the total. The caller cannot distinguish "discount applied" from "discount clamped", and the receipt line will show a discount that was never given.
->
-> VERDICT: REJECTED (1 items)
-
-That is a real finding. The fix is to return the clamp as a signal, not to redesign discounting:
-
-```java
-if (discount > gross) throw new InvalidDiscountException(gross, discount);
-```
-
-Re-run `/review-complete`. **L1 only** — adversarial and security do not re-run, and their approval does not expire because you fixed something.
-
-> No further findings. VERDICT: APPROVED · ROUND NEEDED AFTER FIX: NO
-
-Two rounds. Not nine.
-
-## 10. Ship
+## `push`
 
 ```
-git push -u origin fix/1042-negative-discount
+12 min · 2 review rounds · 1/1 criteria proved · 1 ruling
 ```
 
-The gate checks: checklist complete, no placeholder text, tier not under-declared, `proof.json` says PROVED, L1 approved the commit being shipped. All true — the push goes.
-
-Had this branch reached **three** review passes, the push would have blocked and you would have been asked to choose: fix the open Criticals by name and re-review, merge as-is, or see the findings first — with the recommended option first, derived from whether any Critical is still open. Note the wording of the fix option: another *review* pass on unchanged code returns the same findings, so what the cap asks for is a fix.
+The gate checks: checklist bound to the reviewed commit, tier not under the derived one, `proof.json` PROVED, L1 approved the shipped commit, a ruling per open finding. All true — `git push -u origin fix/1042-negative-discount` goes.
 
 ---
 
-## When it's bigger: steps 1 and 2
+## The same ticket on the Sprint lane
 
-For a feature rather than a bug fix, start earlier.
-
-**1. `exloom:brainstorming`** — explores what exists before proposing anything new. Searches for the current implementation by concept as well as by name, reads neighbouring code for the conventions, and writes a spec: problem, chosen approach, **rejected approaches and why**, edge cases, non-goals. The rejected list is the part people skip and the part that stops the same idea being re-proposed in three months.
-
-**2. `exloom:planning-for-handoff`** — turns the spec into a plan a different person could execute: exact file paths, one task per atomic change, a validation step per task, and every task citing the spec's criteria by ref. It does not invent criteria; the spec defines them. Then steps 3–10 are the same, except step 5 follows the plan task by task and logs every deviation, and step 7 has a plan to audit against.
+Answer **yes** to "Quick fix?" at `init`. `spec` and `plan` never appear; `build` is "make the change, commit". Reviewers are capped at L1; proof, smoke and the derived tier are unchanged. If it turns out to matter, `/harden` moves the branch to Standard.
 
 ---
 
@@ -141,8 +134,8 @@ For a feature rather than a bug fix, start earlier.
 
 | Symptom | Step | What is actually happening |
 |---|---|---|
-| Review round 4, 5, 6… | 9 | Findings are being treated as design briefs. Fix what is cited; a fix needing new architecture is a ticket, not this branch. |
-| `PROOF VOID` | 6 | The suite did not pass at the base commit. Either the throwaway worktree lacks gitignored deps, or the pinned test command names test classes that do not exist at the base — a command naming this branch's own tests voids the proof for every other branch. Pin one valid at any base. |
-| Push blocked on a branch you thought was done | 10 | Run `/review-complete`; it names the exact section that is missing. |
+| Review round 4, 5, 6… | `fix` | Findings are being treated as design briefs. Fix what is cited; a fix needing new architecture is a ticket, not this branch. |
+| `PROOF VOID` | `proof` | The suite did not pass at the base commit. Either the throwaway worktree lacks gitignored deps, or the pinned test command names test classes that do not exist at the base. Pin one valid at any base. |
+| Push blocked on a branch you thought was done | `push` | Run `/exloom`; it names the missing step. `EXLOOM_VERBOSE=1` prints the full reason. |
 | Nothing blocks at all | — | The gate is opt-in. It is on only when `.claude/exloom-gate.enabled` exists in the repo. |
-| Gate demands a reviewer that already ran | 9 | Its receipt covers an older commit. Only L1 must cover the commit you ship — re-run that one. |
+| Gate demands a reviewer that already ran | `review` | Its receipt covers an older commit. Only L1 must cover the commit you ship; /exloom re-dispatches that one. |

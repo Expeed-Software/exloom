@@ -1,6 +1,6 @@
 ---
 name: exloom
-description: Run the next step of the review flow for the current branch — init, proof, review, fix, rulings, report — until it can be pushed or a person has to decide. `/exloom status` prints one line.
+description: Use when starting or continuing any work on a feature branch. Runs the next step, from checklist to push, until a person has to decide. `/exloom status` prints one line.
 ---
 
 # /exloom
@@ -14,27 +14,31 @@ B="$(git rev-parse --abbrev-ref HEAD)"
 
 **`/exloom status`:** run `exloom_status_line "$B"`, print it, and stop.
 
-Otherwise run `exloom_next_step "$B"`, do what the step says, and run it again. Stop at `push`, at a question only the user can answer, or after the same step comes back twice with nothing changed. Print `exloom_status_line "$B"` when you stop.
+Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop at `push`, at a question only the user can answer, or when a step repeats unchanged. Then print `exloom_status_line "$B"`.
 
 | Step | Do |
 |---|---|
 | `setup` | Run `/exloom-setup`. |
-| `branch` | This is a protected branch. Run `exloom:isolating-execution` to move the work onto a feature branch. |
-| `init` | Follow `/review-init`. For the lane, ask once with AskUserQuestion: "Quick fix?" — yes means `**Lane:** sprint`. Never offer it when the derived tier is 3. |
-| `commit` | Commit `.claude/reviews/` — the checklist, `<branch>.verdicts/` and `<branch>.ledger.md` — on their own. |
-| `report` | Run `exloom_render_report "$B"`, then commit it. |
-| `review` | Dispatch the reviewers `/review-complete` names: per-task review during a plan, the whole-branch review once, verify mode after a fix. |
-| `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode, always. |
-| `rulings` | For each finding the verify left NOT ADDRESSED, one AskUserQuestion showing the reviewer's reason, with exactly these options: "Fix again" (go to `fix` with that finding), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor and record `- Proof: refactor — <their reason>`. Record their answer under `## Rulings` (or `## Remedy choices` / `## Re-finds` as the message says). Never write a ruling they did not give. |
-| `proof` | Run the block below; commit its receipt. If it reports NOT PROVED, the fix is a test that fails without the change. If it reports NO_TEST_CHANGED, go to `rulings`. |
-| `smoke` | Run `/smoke-test`. |
-| `push` | Print `exloom_branch_summary "$B"` and tell the user the branch is ready. Do not push unless they ask. |
-| `blocked` | Show the user `EXLOOM_VERBOSE=1 exloom_validate_checklist ".claude/reviews/$B.md" HEAD 1 check` and ask what to do. |
+| `branch` | Protected branch: run `exloom:isolating-execution` to move the work onto a feature branch. |
+| `init` | Follow `/review-init`; the tier is pending until code exists. Ask once, "Quick fix?" — yes means `**Lane:** sprint`, never at derived tier 3. |
+| `commit` | Commit `.claude/reviews/` on its own. |
+| `commit-work` | Commit the changes outside `.claude/reviews/` first. |
+| `spec` | Run `exloom:brainstorming`, even for a fix; put its path in `**Spec:**`. |
+| `plan` | Run `exloom:planning-for-handoff`; put its path in `**Plan:**`. |
+| `build` | With a plan, run `exloom:executing-handoff-plans`, one reviewed task at a time, until every task is approved. Without one, make the change and commit. |
+| `report` | Run `exloom_render_report "$B"`; commit it. |
+| `review` | Dispatch the reviewers `/review-complete` names: the whole-branch review once, verify mode after a fix. |
+| `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode. |
+| `rulings` | Per finding the verify left NOT ADDRESSED, one AskUserQuestion with the reviewer's reason and exactly: "Fix again" (go to `fix`), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor; record `- Proof: refactor — <their reason>`. Write the answer under the section the message names (`## Rulings` by default). Never write a ruling they did not give. |
+| `proof` | Run the block below; commit its receipt. NOT PROVED needs a test that fails without the change. NO_TEST_CHANGED goes to `rulings`. |
+| `smoke` | Follow `/smoke-test`. |
+| `push` | Print `exloom_branch_summary "$B"`; the branch is ready. Do not push unless asked. |
+| `blocked` | Show the user the verbose line below; ask what to do. |
 
 ```bash
 XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
 ```
 
-For the full reason behind any step, run that `EXLOOM_VERBOSE=1` line.
+The full reason behind any step: `EXLOOM_VERBOSE=1 exloom_validate_checklist ".claude/reviews/$B.md" HEAD 1 check`.
 
-This session coordinates. It does not fix review findings itself, and it does not invent steps the table does not list.
+This session coordinates: it neither fixes findings nor invents steps.

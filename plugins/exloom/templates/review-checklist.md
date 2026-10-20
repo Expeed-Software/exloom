@@ -8,3 +8,7 @@
 ## Rulings
 
 none
+
+## Escape hatches used
+
+- [x] None

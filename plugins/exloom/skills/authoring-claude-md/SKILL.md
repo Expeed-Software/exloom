@@ -32,7 +32,7 @@ Use when the repo has code and either no CLAUDE.md or a thin one.
 
 **Step 6: Annotate with the baselines.** Add the Baselines section:
 - Planning: use `exloom:planning-for-handoff` for non-trivial changes (3+ steps or architectural decisions)
-- Review: run `/review-complete` before opening a PR
+- Review: run `/exloom` before opening a PR
 - New code follows your org's naming standards; existing code is not refactored to match
 - Test coverage: 80% line coverage for new code (not retroactive)
 - Secrets: environment variables only, never committed to source control
