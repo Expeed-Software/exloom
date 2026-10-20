@@ -1,6 +1,6 @@
 ---
 name: review-complete
-description: Run the final gate for the current branch. Verifies every required checklist section for the declared tier is populated with real evidence, dispatches any missing reviewer agents, and marks the checklist ready to ship. Refuses to mark complete if sections are missing, naming each gap.
+description: Used by /exloom at its review and push steps; do not start it directly. Verifies every checklist section the derived tier requires holds real evidence, dispatches any missing reviewer agents, and refuses to mark complete while a gap remains, naming each one.
 ---
 
 # /review-complete
@@ -9,11 +9,9 @@ You are the terminal gate. Verify every tier-required section of `.claude/review
 
 ## Step 1 — Open and parse
 
-Open `.claude/reviews/<current-branch>.md`. If absent, refuse and tell the user to run `/review-init`.
+Open `.claude/reviews/<current-branch>.md`. If absent, refuse and tell the user to run `/exloom`.
 
-Refuse if the Tier field is missing or not `0`–`3`.
-
-Check the tier against the diff (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). If the declared tier is lower, raise it.
+Take the tier from `exloom_derive_tier HEAD` (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). It is never declared or lowered.
 
 ## Step 1b — Read the lane
 
@@ -98,7 +96,7 @@ A required section is missing if it is empty after the header or still contains:
 ## Step 4 — If sections are missing
 
 Print `Cannot mark complete. Missing or placeholder sections:` and one line per gap. Then:
-- Smoke test → run `/smoke-test`.
+- Smoke test → the smoke step of `/exloom`.
 - Proof missing, stale, or `NOT_PROVED` → run `prove-change-is-tested.sh` (above); NOT PROVED needs a better test, not another run.
 - L1 receipt missing or stale → dispatch `exloom:l1-reviewer` now.
 - Adversarial receipt missing or stale → dispatch `exloom:adversarial-reviewer` now.
@@ -211,5 +209,5 @@ Print:
 
 - All-or-nothing per the tier's required sections.
 - Do NOT accept "I'll do that later".
-- A skipped narrative step with written justification under "Escape hatches used" counts as addressed; an unjustified skip does not. **An under-declared tier and a missing reviewer receipt have no escape hatch.**
+- A skipped narrative step with written justification under "Escape hatches used" counts as addressed; an unjustified skip does not. **The derived tier and a missing reviewer receipt have no escape hatch.**
 - Emergency bypass: only the user may set `EXLOOM_REVIEW_SKIP=1` in their `settings.json` `env`; never set it yourself. It works on every lane, verifies no justification, writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.

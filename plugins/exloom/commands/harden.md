@@ -32,7 +32,7 @@ chore(review): harden <branch> from <old-lane> to <new-lane>
 
 ## Step 4 — Name what is now required, then do it
 
-Run `/review-complete`; it names every section the new lane leaves unfilled. Expect, for sprint → standard:
+Run `/exloom`; it names every section the new lane leaves unfilled. Expect, for sprint → standard:
 
 - **Adversarial review** at Tier 2+ — a real dispatch, so a real receipt.
 - **Cross-layer contract check** at Tier 2+.

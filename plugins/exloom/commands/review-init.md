@@ -1,6 +1,6 @@
 ---
 name: review-init
-description: Bootstrap .claude/reviews/<branch>.md from the checklist template. Propose a tier from git diff stats and user description. Commit the skeleton so it's visible in the PR.
+description: Used by /exloom at its init step; do not start it directly. Bootstraps .claude/reviews/<branch>.md from the checklist template, records the lane, and commits the skeleton so it's visible in the PR.
 ---
 
 # /review-init
@@ -35,9 +35,9 @@ Each printed path is git-ignored, so the gate can never pass. If any, stop and s
 !.claude/exloom-*
 ```
 
-## Step 2 — Propose a tier
+## Step 2 — Derive the tier
 
-Apply mechanically, then confirm with the user:
+The hook derives it from the diff; with no code yet it is pending and nothing here applies. Otherwise apply mechanically and show the user:
 
 - If the ONLY changed files are `*.md`, `README*`, or live under the top-level `docs/` directory → Tier 0. `.txt` files and nested `docs/` folders do not count.
 - If any file under a `migrations/`, `liquibase/`, `db/changelog/` path → Tier 3.
@@ -49,9 +49,7 @@ Apply mechanically, then confirm with the user:
 - Else if the diff touches ≥5 files → Tier 2.
 - Else → Tier 1.
 
-Show the tier, triggering rule and `git diff --stat`; ask to confirm or override; record tier and a one-sentence rationale.
-
-**The override is upward only.** The push gate blocks anything below the derived minimum; if asked to go lower, say the push will fail.
+Show the tier, triggering rule and `git diff --stat`. Nothing is recorded: the push gate re-derives it, so an override cannot lower it.
 
 You apply what the hook cannot judge: deployment paths (floor Tier 2, Tier 3 when flag- or prod-related), frontend+backend, multi-module.
 
@@ -131,11 +129,8 @@ chore(review): initialize review report for <branch-name>
 
 Print:
 
-> Review checklist initialized at `.claude/reviews/<branch>.md` (Tier <N>) — committed as `chore(review): initialize Tier <N> review checklist`.
-> Required remaining steps for Tier <N>:
-> - <list based on tier>
-> Next commands: `/smoke-test` to fill the smoke-test section, then `/review-complete` when ready to ship.
-> Tier <N> requires a real dispatch of: <reviewers for the tier>. Each completion records a receipt under `.claude/reviews/<branch>.verdicts/`; the gate reads receipts, not checkboxes. Dispatch each reviewer **without a name** - a named subagent's report never reaches the hook.
+> Review checklist initialized at `.claude/reviews/<branch>.md` (Tier <N> or pending) — committed as `chore(review): initialize review report for <branch-name>`.
+> /exloom runs what the lane and tier require next. Reviewers record a receipt under `.claude/reviews/<branch>.verdicts/` when dispatched **without a name**; the gate reads receipts, not checkboxes.
 
 ## Refusals
 

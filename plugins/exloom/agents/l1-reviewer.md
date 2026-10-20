@@ -1,6 +1,6 @@
 ---
 name: l1-reviewer
-description: Per-commit L1 code-quality reviewer. Invoke when a diff or branch needs a correctness-focused review — null safety, resource leaks, test quality, style. Produces structured Critical/Important/Minor findings with file:line cites. Use before marking any Tier-1-or-higher change complete.
+description: Per-commit L1 code-quality reviewer — null safety, resource leaks, test quality, style. Produces structured Critical/Important/Minor findings with file:line cites. Used by /exloom at its review step for every Tier-1-or-higher change; do not start it directly.
 model: opus
 effort: low
 ---

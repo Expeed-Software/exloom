@@ -2219,7 +2219,7 @@ ok "...and the report reaches the session" \
 ok "...as an instruction to ask, naming the tool" \
    "$(capmsg | grep -c 'Use AskUserQuestion' | head -1)" "1"
 ok "...with all three options" \
-   "$(capmsg | grep -cE '^  - (Fix|Merge as-is|Show me the findings)' | head -1)" "3"
+   "$(capmsg | grep -cE '^  - (Fix|Accept the open items|Show me the findings)' | head -1)" "3"
 ok "...and nothing is printed to stdout (that would be a decision)" \
    "$(exloom_check_verdicts "$RC" 1 HEAD "$(git rev-parse HEAD)" "test" 2>/dev/null | wc -c | tr -d ' ')" "0"
 
@@ -2399,7 +2399,7 @@ SOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
 ok "past the cap the status says STOP"        "$(printf '%s' "$SOUT" | grep -c 'STOP -')" "1"
 ok "...and does not ask for another reviewer" "$(printf '%s' "$SOUT" | grep -c 're-run it')" "0"
 ok "...naming the pass count and the cap"     "$(printf '%s' "$SOUT" | grep -c '4 review passes (cap 3)')" "1"
-ok "...and hands over the three options"      "$(printf '%s' "$SOUT" | grep -c 'Merge as-is')" "1"
+ok "...and hands over the three options"      "$(printf '%s' "$SOUT" | grep -c 'Accept the open items')" "1"
 
 # A REJECTED receipt at the cap is the one case where "do not dispatch" deadlocks
 # the gate against itself. A rejection has no escape hatch, the push gate says to
@@ -3103,13 +3103,40 @@ ok "a report for a Tier 3 diff is held to Tier 3 without a declared tier" \
 section "/exloom knows the next step"
 
 subrepo nextstep
-NSV=".claude/reviews/feat/plan.verdicts"
+NSV=".claude/reviews/feat/plan.verdicts"; NSC=".claude/reviews/feat/plan.md"
 ok "no checklist -> init" "$(exloom_next_step feat/plan)" "init"
-printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+ok "the summary of a branch with no checklist is quiet" \
+   "$(exloom_branch_summary feat/plan 2>&1 | grep -c 'No such file')" "0"
 exloom_render_report feat/plan >/dev/null 2>&1
 ok "an uncommitted checklist -> commit" "$(exloom_next_step feat/plan)" "commit"
+ok "provenance names the git user, not the email" "$(grep -c '^- Directed by: t$' "$NSC")" "1"
 git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
-ok "no reviewer has run -> review" "$(exloom_next_step feat/plan)" "review"
+printf 'w\n' > src/w.go
+ok "uncommitted work outside .claude/reviews -> commit-work" "$(exloom_next_step feat/plan)" "commit-work"
+rm -f src/w.go
+ok "standard lane, no spec -> spec" "$(exloom_next_step feat/plan)" "spec"
+mkdir -p docs/specs; printf '# F-001\n' > docs/specs/F-001-x.md
+sed -i 's/^\*\*Spec:\*\* none$/**Spec:** docs\/specs\/F-001-x.md/' "$NSC"
+git add -A >/dev/null 2>&1; git commit -qm spec >/dev/null 2>&1
+ok "spec but no plan -> plan" "$(exloom_next_step feat/plan)" "plan"
+printf '### Task 1 — a\n### Task 2 — b\n' > docs/plans/p.md
+sed -i 's/^\*\*Plan:\*\* none$/**Plan:** docs\/plans\/p.md/' "$NSC"
+git add -A >/dev/null 2>&1; git commit -qm plan >/dev/null 2>&1
+ok "spec and plan committed are not code -> build" "$(exloom_next_step feat/plan)" "build"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+ok "code committed, no task approved -> build" "$(exloom_next_step feat/plan)" "build"
+mkdir -p "$NSV"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","mode":"task","task":"1"}\n' "$(git rev-parse HEAD)" > "$NSV/l1-reviewer.tasks.json"
+git add -A >/dev/null 2>&1; git commit -qm t1 >/dev/null 2>&1
+ok "one of two tasks approved -> build" "$(exloom_next_step feat/plan)" "build"
+printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","mode":"task","task":"2"}\n' "$(git rev-parse HEAD)" >> "$NSV/l1-reviewer.tasks.json"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm t2 >/dev/null 2>&1
+ok "every task approved, no reviewer has run -> review" "$(exloom_next_step feat/plan)" "review"
+git checkout -q -b feat/sprint
+sed -i -e 's/^\*\*Lane:\*\* standard$/**Lane:** sprint/' -e 's/^\*\*Spec:\*\* .*$/**Spec:** none/' -e 's/^\*\*Plan:\*\* .*$/**Plan:** none/' "$NSC"
+exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm sprint >/dev/null 2>&1
+ok "the sprint lane needs no spec or plan -> review" "$(exloom_next_step feat/plan)" "review"
+git checkout -q feat/plan
 NSH="$(git rev-parse HEAD)"
 mkdir -p "$NSV"
 printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES"}\n' "$NSH" > "$NSV/l1-reviewer.json"
@@ -3127,7 +3154,7 @@ exloom_render_report feat/plan >/dev/null 2>&1; git add -A >/dev/null 2>&1; git 
 ok "everything in place -> push" "$(exloom_next_step feat/plan)" "push"
 ok "the status is one line" "$(exloom_status_line feat/plan | grep -c .)" "1"
 ok "...naming tier, proof and the next step" \
-   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · round [0-9]+/3 · proof ✓ · 0 rulings · next: push$')" "1"
+   "$(exloom_status_line feat/plan | grep -cE '^Tier 1 · task 2/2 · round [0-9]+/3 · proof ✓ · 0 rulings · next: push$')" "1"
 mkdir -p docs/plans; printf '### Task 1 — a\n### Task 2 — b\n### Task 3 — c\n' > docs/plans/p.md
 printf '{"agent":"l1-reviewer","head":"%s","verdict":"APPROVED","mode":"task","task":"1"}\n' "$NSH" > "$NSV/l1-reviewer.tasks.json"
 sed -i 's/^\*\*Lane:\*\* standard$/**Lane:** standard\n**Plan:** docs\/plans\/p.md/' .claude/reviews/feat/plan.md
@@ -3214,6 +3241,8 @@ section "after a fix the reviewer verifies; the user rules only on what is still
 
 subrepo rulingflow
 RFC=".claude/reviews/feat/plan.md"; RFV=".claude/reviews/feat/plan.verdicts"
+exloom_render_report feat/plan >/dev/null 2>&1; sed -i 's/^\*\*Lane:\*\* standard$/**Lane:** sprint/' "$RFC"
+git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
 printf 'l1\nl2\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
 RFA="$(git rev-parse HEAD)"
 rffeed() {
@@ -3631,6 +3660,7 @@ ok "...and the action, not just that something happened" \
    "$(grep -c '"action":"push:Bash"' "$BP" 2>/dev/null | head -1)" "1"
 ok "...and who did it" \
    "$(grep -c '"by":"[^"]' "$BP" 2>/dev/null | head -1)" "1"
+ok "...by git user name, not email" "$(grep -c '"by":"t"' "$BP" 2>/dev/null | head -1)" "1"
 
 # One line per bypass. Two skips on one branch is two facts, and collapsing them
 # would hide the second.

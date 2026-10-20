@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Use when closing work — when claiming done / complete / ready / shipping / about to push or open a PR — or when reviewing quality of a change before merge. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, and at Tier 3 a security review plus what a revert will not undo) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
+description: Used by /exloom when closing work (done, complete, ready, shipping, pushing, opening a PR); do not start it directly. Runs the tiered review gate (L1 code review, smoke test, proof the change is tested, adversarial review with cross-layer contract check, and at Tier 3 a security review plus what a revert will not undo) and refuses to mark complete until the tier's required evidence is in `.claude/reviews/<branch>.md`.
 ---
 
 # Review Gate
@@ -63,12 +63,12 @@ A pass is a distinct commit that L1 reviewed. At the third the gate blocks and p
 Ask the user, recommended first:
 
 - **Fix `OrderTotal.java:12`, `PromotionMapper.java:142`, then re-review** — the open Criticals, by cite
-- **Merge as-is** — the open items are acceptable
+- **Rule on each open item** — PARKED or DEFERRED, under `## Rulings`
 - **Show me the findings first**
 
 The recommendation follows open Criticals in the latest round, never the pass count. Re-reviewing an unchanged commit only repeats findings; fix first.
 
-A merge answer is recorded in the checklist and settles **rounds** only. A missing, stale or rejecting reviewer still blocks after it.
+A round-cap answer is recorded under `## Escape hatches used` and settles **rounds** only. A missing, stale or rejecting reviewer still blocks after it.
 
 Change the cap by committing `.claude/exloom-max-rounds` with a number.
 

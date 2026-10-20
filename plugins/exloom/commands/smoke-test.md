@@ -1,6 +1,6 @@
 ---
 name: smoke-test
-description: Walk through a real smoke test for the current change — boot the system, perform the user action, capture the observed result. Fills the Smoke Test section of .claude/reviews/<branch>.md with evidence, not assertions.
+description: Used by /exloom at its smoke step; do not start it directly. Boot the system, perform the user action, capture the observed result; fills the Smoke Test section of .claude/reviews/<branch>.md with evidence, not assertions.
 ---
 
 # /smoke-test
@@ -9,7 +9,7 @@ Guide a real smoke test. Passing unit tests or a successful compile is not one. 
 
 ## Step 1 — Open the checklist
 
-Open `.claude/reviews/<current-branch>.md`. If it does not exist, tell the user to run `/review-init` first and stop.
+Open `.claude/reviews/<current-branch>.md`. If it does not exist, tell the user to run `/exloom` and stop.
 
 ## Step 2 — Establish the boot command
 
@@ -75,9 +75,9 @@ chore(review): smoke test recorded for <branch-name>
 
 ## Step 7 — Tell the user
 
-Say the evidence was recorded and committed (`chore(review): smoke test recorded`). Print what the declared tier still requires — the cross-layer contract check and adversarial review at Tier 2+, and at Tier 3 the security review, the runbook, and the two lines under "What a revert will not undo" — and suggest `/review-complete` when done.
+Say the evidence was recorded and committed (`chore(review): smoke test recorded`), then hand back to `/exloom`, which runs what the tier still requires.
 
 ## Refusals
 
 - Refuse to fill the section without pasted evidence.
-- Refuse if the smoke test failed — the operator fixes the change first, then re-runs `/smoke-test`.
+- Refuse if the smoke test failed — the operator fixes the change first, then `/exloom` runs the smoke step again.
