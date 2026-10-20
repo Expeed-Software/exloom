@@ -3660,6 +3660,7 @@ ok "...and the action, not just that something happened" \
    "$(grep -c '"action":"push:Bash"' "$BP" 2>/dev/null | head -1)" "1"
 ok "...and who did it" \
    "$(grep -c '"by":"[^"]' "$BP" 2>/dev/null | head -1)" "1"
+ok "...by git user name, not email" "$(grep -c '"by":"t"' "$BP" 2>/dev/null | head -1)" "1"
 
 # One line per bypass. Two skips on one branch is two facts, and collapsing them
 # would hide the second.

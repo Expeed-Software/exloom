@@ -645,8 +645,7 @@ exloom_bypass_receipt() {
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
   sha="$(git rev-parse HEAD 2>/dev/null || true)"
-  who="$(git config user.email 2>/dev/null || true)"
-  [[ -n "$who" ]] || who="$(git config user.name 2>/dev/null || true)"
+  who="$(git config user.name 2>/dev/null || true)"
   when="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
 
   # Same sanitising rule as the verdict receipts: strip anything that could
