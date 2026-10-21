@@ -1,6 +1,6 @@
 ---
 name: adversarial-reviewer
-description: Pre-push hostile reviewer for Tier 2+ changes. Used by /exloom once, after L1 passes; do not start it directly. Assumes every previous review missed something and tries to break the system. Highest-signal review in practice: it catches integration gaps a per-file review cannot see, including producer/consumer seams where only one side changed.
+description: "Pre-push hostile reviewer for Tier 2+ changes. Used by /exloom once, after L1 passes; do not start it directly. Assumes every previous review missed something and tries to break the system. Highest-signal review in practice: it catches integration gaps a per-file review cannot see, including producer/consumer seams where only one side changed."
 model: opus
 effort: medium
 ---
