@@ -121,6 +121,34 @@ for plugin in $PLUGINS; do
     fi
   done
 
+  # 2c. Claude Code drops a component whose frontmatter is not valid YAML, without an error.
+  yaml_errors=$(python - "$PLUGIN_ROOT" <<'YAMLPY'
+import glob, os, sys
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is not installed (pip install pyyaml); frontmatter cannot be checked")
+    sys.exit()
+root = sys.argv[1]
+files = glob.glob(os.path.join(root, "skills", "*", "SKILL.md")) + glob.glob(os.path.join(root, "commands", "*.md")) + glob.glob(os.path.join(root, "agents", "*.md"))
+for f in sorted(files):
+    lines = open(f, encoding="utf-8").read().splitlines()
+    rel = os.path.relpath(f, root).replace(os.sep, "/")
+    if not lines or lines[0].strip() != "---" or "---" not in [l.strip() for l in lines[1:]]:
+        continue
+    end = [l.strip() for l in lines[1:]].index("---") + 1
+    try:
+        data = yaml.safe_load("\n".join(lines[1:end]))
+        if not isinstance(data, dict):
+            print(f"{rel}: frontmatter is not a YAML mapping")
+    except yaml.YAMLError as e:
+        print(f"{rel}: invalid YAML frontmatter: {str(e).splitlines()[0]}")
+YAMLPY
+)
+  if [ -n "$yaml_errors" ]; then
+    while IFS= read -r line; do fail "$line"; done <<< "$yaml_errors"
+  fi
+
   # 3. Plugin-specific checks
   case "$plugin" in
     exloom)
