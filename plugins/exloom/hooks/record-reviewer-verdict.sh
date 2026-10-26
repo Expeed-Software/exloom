@@ -62,9 +62,11 @@ except Exception:
 # tool_response is {"isAsync":true,"status":"async_launched",...} — the reviewer
 # has not run, so there is no verdict to read. That event records the dispatch.
 #
-# SubagentStop fires on COMPLETION and carries the report verbatim:
-#   {"agent_type":"exloom:l1-reviewer","agent_id":"...",
-#    "last_assistant_message":"...VERDICT: REJECTED (1 items)..."}
+# SubagentStop fires on COMPLETION. It names the agent and carries
+# `last_assistant_message`, which holds the report only when the reviewer
+# wrote one as text. A reviewer that hands its report over as a
+# `SubagentHandback` call produces no assistant text at all, so the report is
+# read from `agent_transcript_path` instead — see `_handback_text`.
 #
 # Both registrations are required. Listening on PostToolUse alone records every
 # dispatch and no verdict, which makes a REJECTED review indistinguishable from
@@ -115,11 +117,13 @@ esac
 _repo_is_gated() { [[ -n "$1" && -d "$1" && -f "$1/.claude/exloom-gate.enabled" ]]; }
 
 _repo_of_path() {
-  # Reduce to a DIRECTORY. A cite names a file, so testing the path itself for
-  # directory-ness would reject every real cite — which is the only case that
-  # matters here.
-  local d="$1"
-  [[ -d "$d" ]] || d="$(dirname "$d")"
+  # Walk up to the first real directory rather than dirname-ing once: a cite can
+  # arrive with JSON escape debris glued to it (`add.js/n/nROUND`), so one level
+  # up is not reliably a directory.
+  local d="$1" up i=0
+  while [[ -n "$d" && ! -d "$d" && $i -lt 12 ]]; do
+    up="${d%/*}"; [[ "$up" == "$d" ]] && return 1; d="$up"; i=$((i + 1))
+  done
   [[ -d "$d" ]] || return 1
   git -C "$d" rev-parse --show-toplevel 2>/dev/null
 }
@@ -237,11 +241,61 @@ SESSION="$(_safe "$SESSION")"
 # `tool_input.prompt` — author-written text — so a scan that degraded to it would
 # read a dispatch prompt quoting the required output format as the reviewer's own
 # verdict, turning a rejection into an approval.
+# A reviewer may deliver its report as a `SubagentHandback` tool call rather than
+# as assistant text, in which case `last_assistant_message` never holds the
+# verdict and the run has no assistant text at all. The handback's `message` is
+# then the report. Read from ASSISTANT-authored tool calls only: the agent's
+# transcript opens with the dispatch prompt, and scanning that would read the
+# required output format as the reviewer's own verdict.
+_handback_text() {
+  # The path is handed over in the host's own form; both extractors open it
+  # either way, so it is never rewritten here.
+  local tp out=""
+  tp="$(_field agent_transcript_path)"
+  [[ -n "$tp" ]] || return 0
+  if command -v jq >/dev/null 2>&1; then
+    out="$(jq -rs '[ .[] | select(.message.role == "assistant")
+              | .message.content[]?
+              | select(.type == "tool_use" and .name == "SubagentHandback")
+              | .input.message? // empty ] | last // empty' "$tp" 2>/dev/null || true)"
+    [[ -n "${out//[[:space:]]/}" ]] && { printf '%s' "$out"; return 0; }
+  fi
+  command -v python3 >/dev/null 2>&1 || return 0
+  EXLOOM_TP="$tp" python3 -c 'import json, os
+out = ""
+try:
+    fh = open(os.environ["EXLOOM_TP"], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(0)
+with fh:
+    for line in fh:
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        m = d.get("message") or {}
+        if m.get("role") != "assistant":
+            continue
+        c = m.get("content")
+        if not isinstance(c, list):
+            continue
+        for b in c:
+            if (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "SubagentHandback"):
+                msg = (b.get("input") or {}).get("message")
+                if isinstance(msg, str) and msg.strip():
+                    out = msg
+print(out)' 2>/dev/null || true
+}
+
 _response_text() {
   local out=""
-  # SubagentStop hands the finished report over directly. Preferred whenever
-  # present — it is the reviewer's actual output, not a launch acknowledgement.
+  # The reviewer's own output, in the two forms it arrives in: a handback call
+  # (authoritative when present) or assistant text. Either beats a launch
+  # acknowledgement.
   if [[ "$IS_COMPLETION" -eq 1 ]]; then
+    out="$(_handback_text)"
+    [[ -n "${out//[[:space:]]/}" ]] && { printf '%s' "$out"; return 0; }
     out="$(_field last_assistant_message)"
     [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
   fi
@@ -307,10 +361,10 @@ REPORT_SEEN=1
 # bare `VERDICT: APPROVED` or `VERDICT: REJECTED (n items)`.
 #
 # Three rules, each load-bearing: tolerate markdown decoration anywhere on the
-# line (`**VERDICT: APPROVED**` is the modal form); require the remainder to be
-# exactly APPROVED/REJECTED plus an optional parenthetical (so `APPROVED WITH
-# CHANGES` is not an approval); and take the LAST match, not the first (a report
-# quoting its own template would otherwise be scored on the template).
+# line (`**VERDICT: APPROVED**` is the modal form); read what follows the word as
+# commentary only when a separator starts it, so `APPROVED - clean` counts while
+# `APPROVED WITH CHANGES` does not; and take the LAST match, not the first (a
+# report quoting its own template would otherwise be scored on the template).
 VERDICT="UNKNOWN"
 # Decoration is stripped from the WHOLE line before matching, not just its edges.
 # `VERDICT: **APPROVED**`, `**VERDICT:** REJECTED (2 items)`, `- **VERDICT:**
@@ -320,8 +374,13 @@ VERDICT="UNKNOWN"
 VLINE="$(printf '%s\n' "$SCAN" \
   | tr -d '*_`#>' \
   | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:].]*$//' \
-  | sed -n 's/^VERDICT:[[:space:]]*\([A-Za-z]*\)[[:space:]]*\((.*)\)\{0,1\}$/\1/p' \
-  | tr '[:lower:]' '[:upper:]' | grep -E '^(APPROVED|REJECTED)$' | tail -1 || true)"
+  | sed -n 's/^VERDICT:[[:space:]]*\([A-Za-z][A-Za-z]*\)\(.*\)$/\1\t\2/p' \
+  | awk -F'\t' '{ w = toupper($1); r = $2; sub(/^[[:space:]]+/, "", r)
+      if (w != "APPROVED" && w != "REJECTED") next
+      if (r ~ /^[A-Za-z]/) next
+      if (toupper(r) ~ /APPROV|REJECT|WITH CHANGE|WITH RESERVATION|CONDITION|SUBJECT TO|PENDING|PROVIDED|UNLESS|EXCEPT/) next
+      print w }' \
+  | tail -1 || true)"
 case "$VLINE" in
   APPROVED) VERDICT="APPROVED" ;;
   REJECTED) VERDICT="REJECTED" ;;
@@ -656,7 +715,7 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
     "$AGENT" "$SUBAGENT" "$HEAD_SHA" "$STAMP" "$SESSION" \
     >> "$RECEIPT" 2>/dev/null || exit 0
   echo "exloom: recorded ${AGENT} DISPATCH at ${HEAD_SHA:0:12} — a launch, not a review. No verdict was observable at this event, and this line does NOT satisfy the gate." >&2
-  echo "exloom: if no verdict line follows when the reviewer finishes, the usual cause is that the agent was given a name, which routes its report through the mailbox rather than the tool result this hook reads. Dispatch it without a name." >&2
+  echo "exloom: the verdict line is written separately, when the reviewer finishes. If none follows, check that this repo is the one the reviewer read — a review of a worktree or of a second repo records its receipt there, not here." >&2
   exit 0
 fi
 
