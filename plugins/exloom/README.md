@@ -47,6 +47,14 @@ Four things are **not** the author's to write, and they decide everything else:
 
 Where committed `.claude/exloom-ci` says `none`, the gate requires a passing receipt from `record-full-suite.sh`, which runs the suite and records the command, its exit code and the commit. The receipt is agent-run and self-attested, exactly like a pasted smoke test: exloom records that a run happened and what it returned, not that the result is honest. A repository with CI gets the stronger guarantee from branch protection, which exloom neither sees nor claims to enforce. A receipt stays valid while only documentation (`.md`, `.mmd`, and anything in a committed `.claude/exloom-doc-patterns`) or comment-only source changes land on top.
 
+### What the reviewers can and cannot do
+
+The four reviewers — L1, adversarial, security and spec — have no file-editing tools. That is a narrower claim than read-only: they keep `Bash` because a review reads history with `git`, and `Bash` can write. What they cannot do is create a worktree; a hook refuses it by agent type and names `git diff` and `git show` instead, so reviewers stop leaving working copies behind.
+
+A reviewer is dispatched, never resumed. Messaging one is refused, because a resumed reviewer carries its own earlier verdict and the session's framing into the next pass and leaves no receipt of its own. A verify pass is a fresh dispatch in `MODE: VERIFY <from>..<to>`.
+
+The spec reviewer is advisory throughout: it reads the spec and the code but never the conversation, reports under `## Spec review`, and does not gate, count as a review round, or get repeated at the gate.
+
 ### Raising the floor is itself a Tier 3 change
 
 `.claude/exloom-min-tier` turns the gate off below the tier it names, so changing any `.claude/exloom-*` setting derives Tier 3 — nobody can add a floor and skip the gate in the same push. `/exloom-setup` asks before writing one, writes it on its own branch, and that branch reaches the main line through the normal Tier 3 review and a pull request, never a direct commit. Every skip writes `.claude/reviews/<branch>.skip.json` naming the derived tier, the floor, and who set it in which commit.

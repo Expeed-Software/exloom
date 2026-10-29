@@ -69,6 +69,19 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/guard-fix-loop.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/guard-reviewer-shell.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/guard-reviewer-message.sh"
           }
         ]
       }

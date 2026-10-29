@@ -546,8 +546,11 @@ ok "...and does not fire on prose that merely names it" \
 ok "no unsubstituted file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
       | grep -vE '\.claude-plugin/plugin\.json$|/(commands|agents)/[^/]*\.md$|/skills/[^/]*/SKILL\.md$' | wc -l | tr -d ' ')" "0"
+# Counted against the manifest's own command lines rather than a fixed number,
+# so registering a hook cannot pass by forgetting the variable.
 ok "...while the manifest, where it IS interpolated, still uses it" \
-   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "7"
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" \
+   "$(grep -cE '"command":' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
 section "record-reviewer-verdict hook (a real dispatch writes one)"
@@ -1248,6 +1251,155 @@ ok "...and 'none' is an acceptable plan"        "$(exloom_next_step "$(git rev-p
 wtset 'new feature' 'docs/change-note.md' 'none'
 ok "but a feature may not plead 'none'"         "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "plan"
 
+
+section "a reviewer is dispatched, never resumed"
+
+# Resuming a reviewer carries its earlier conclusion and the session's framing
+# into the verify pass, which is how a REJECTED finding gets talked into
+# ADDRESSED. Verify runs as a fresh dispatch so it leaves its own receipt.
+GRM="$HOOKS_ABS/guard-reviewer-message.sh"
+subrepo sendmsg
+SMV=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).verdicts"
+mkdir -p "$SMV"
+{ printf '{"agent":"l1-reviewer","key":"final","kind":"review","tool_use_id":"toolu_L1","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_L1","agent_id":"aREVIEWER1","model":"m"}\n'
+  printf '{"agent":"adversarial-reviewer","key":"final","kind":"review","tool_use_id":"toolu_ADV","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_ADV","agent_id":"aREVIEWER2","model":"m"}\n'
+  printf '{"agent":"fixer","key":"fix","kind":"fix","tool_use_id":"toolu_FIX","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_FIX","agent_id":"aFIXER","model":"m"}\n'; } > "$SMV/dispatches.jsonl"
+
+sm() {   # sm <recipient> -> hook exit code
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'SendMessage',
+ 'tool_input':{'to':sys.argv[1],'message':'please re-check'}}))" "$1" \
+   | bash "$GRM" >/dev/null 2>&1; echo $?
+}
+
+ok "a message to a dispatched L1 reviewer is refused"          "$(sm aREVIEWER1)" "2"
+ok "a message to a dispatched adversarial reviewer is refused" "$(sm aREVIEWER2)" "2"
+ok "a message to the fixer is allowed"                         "$(sm aFIXER)" "0"
+ok "a message to an agent not in the log is allowed"           "$(sm aSOMEONEELSE)" "0"
+ok "a message named for a reviewer is refused"                 "$(sm exloom:l1-reviewer)" "2"
+ok "a message named for the spec reviewer is refused"          "$(sm exloom:spec-reviewer)" "2"
+ok "a message named for the fixer is allowed"                  "$(sm exloom:fixer)" "0"
+ok "the refusal names the fresh dispatch instead" \
+   "$(python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'SendMessage',
+ 'tool_input':{'to':'aREVIEWER1','message':'re-check'}}))" | bash "$GRM" 2>&1 | grep -c 'MODE: VERIFY')" "1"
+
+# Another tool is none of its business.
+ok "a Bash call is not touched" \
+   "$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+      | bash "$GRM" >/dev/null 2>&1; echo $?)" "0"
+
+
+section "a reviewer reads a diff, it does not check one out"
+
+# Reviewers were creating a worktree each and removing it inconsistently, which
+# is how a repo collects hundreds of megabytes nobody can account for. A
+# PreToolUse payload raised inside a subagent carries agent_type, so the refusal
+# is scoped to reviewers and cannot catch the fixer, the session, or the proof
+# script's own throwaway worktree.
+GRS="$HOOKS_ABS/guard-reviewer-shell.sh"
+subrepo wtguard
+wt() {   # wt <agent_type|-> <command> -> hook exit code
+  python3 -c "
+import json,sys
+d={'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash',
+   'tool_input':{'command':sys.argv[2]}}
+if sys.argv[1] != '-':
+    d['agent_id']='aAGENT'; d['agent_type']=sys.argv[1]
+print(json.dumps(d))" "$1" "$2" | bash "$GRS" >/dev/null 2>&1; echo $?
+}
+
+ok "a reviewer may not add a worktree" \
+   "$(wt exloom:l1-reviewer 'git worktree add ../wt-review HEAD')" "2"
+ok "...nor the adversarial reviewer" \
+   "$(wt exloom:adversarial-reviewer 'git worktree add .worktrees/adv HEAD')" "2"
+ok "...nor the security auditor" \
+   "$(wt exloom:security-auditor 'git worktree add /tmp/sec HEAD')" "2"
+ok "...nor the spec reviewer" \
+   "$(wt exloom:spec-reviewer 'git worktree add /tmp/spec HEAD')" "2"
+
+ok "the fixer may"            "$(wt exloom:fixer 'git worktree add /tmp/fix HEAD')" "0"
+ok "the session itself may"   "$(wt - 'git worktree add /tmp/mine HEAD')" "0"
+ok "a reviewer may still read a diff" \
+   "$(wt exloom:l1-reviewer 'git diff abc..def -- src/')" "0"
+ok "...and read a file at a commit" \
+   "$(wt exloom:l1-reviewer 'git show abc:src/a.go')" "0"
+ok "...and remove a worktree it should not have made" \
+   "$(wt exloom:l1-reviewer 'git worktree remove /tmp/oops')" "0"
+ok "the refusal names what to use instead" \
+   "$(python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash',
+ 'agent_id':'a1','agent_type':'exloom:l1-reviewer',
+ 'tool_input':{'command':'git worktree add /tmp/x HEAD'}}))" | bash "$GRS" 2>&1 | grep -c 'git show')" "1"
+
+
+section "reviewers have no file-editing tools"
+
+# Not "read-only": they keep Bash for git, and Bash can write. The honest claim
+# is narrower — no editing TOOL — and the README must not overstate it.
+for a in l1-reviewer adversarial-reviewer security-auditor spec-reviewer; do
+  AF="$HOOKS_ABS/../agents/${a}.md"
+  TOOLS="$(sed -n '/^---$/,/^---$/p' "$AF" | sed -n 's/^tools:[[:space:]]*//p' | head -1)"
+  ok "$a declares its tools"            "$([[ -n "$TOOLS" ]] && echo yes || echo no)" "yes"
+  ok "$a cannot Write"                  "$(printf '%s' "$TOOLS" | grep -cw 'Write')" "0"
+  ok "$a cannot Edit"                   "$(printf '%s' "$TOOLS" | grep -cwE 'Edit|MultiEdit|NotebookEdit')" "0"
+  ok "$a keeps Read"                    "$(printf '%s' "$TOOLS" | grep -cw 'Read')" "1"
+  ok "$a keeps Bash for git"            "$(printf '%s' "$TOOLS" | grep -cw 'Bash')" "1"
+done
+ok "the fixer keeps its editing tools" \
+   "$(sed -n '/^---$/,/^---$/p' "$HOOKS_ABS/../agents/fixer.md" | sed -n 's/^tools:[[:space:]]*//p' | head -1 | grep -cw 'Write')" "0"
+
+
+section "the spec review is advice, and advice gates nothing"
+
+# A spec reviewer that says NOT READY must change nothing a gate can read.
+# Otherwise it is a blocking check wearing an advisory label, and the author
+# finds that out at the push.
+RRV="$HOOKS_ABS/record-reviewer-verdict.sh"
+subrepo specadvice
+SAB="$(git rev-parse --abbrev-ref HEAD)"
+SACL=".claude/reviews/${SAB}.md"
+mkdir -p "$(dirname "$SACL")"
+printf '# review\n\n**Lane:** standard\n**Spec:** docs/s.md\n**Plan:** docs/p.md\n' > "$SACL"
+mkdir -p docs; printf 'spec\n' > docs/s.md; printf 'plan\n' > docs/p.md
+git add -A >/dev/null 2>&1; git commit -qm sa >/dev/null 2>&1
+
+SABEFORE="$(exloom_next_step "$SAB")"
+SAROUNDS="$(exloom_round_count "$SACL" HEAD 2>/dev/null || echo 0)"
+
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop',
+ 'agent_type':'exloom:spec-reviewer','agent_id':'aSPEC',
+ 'last_assistant_message':'VERDICT: NOT READY (2 items)\n\n## Blocking — cannot be built from as written\n- R3 — no acceptance criterion\n'}))" \
+  | bash "$RRV" >/dev/null 2>&1
+
+ok "a NOT READY spec review writes no receipt of its own" \
+   "$(ls .claude/reviews/${SAB}.verdicts/spec-reviewer.json 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "...and writes no receipt at all" \
+   "$(ls -d .claude/reviews/${SAB}.verdicts 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "...does not move the next step" \
+   "$(exloom_next_step "$SAB")" "$SABEFORE"
+ok "...and adds no review round" \
+   "$(exloom_round_count "$SACL" HEAD 2>/dev/null || echo 0)" "$SAROUNDS"
+
+# The same event from a real reviewer still records, so the test above is not
+# passing because the hook simply ignored everything.
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop',
+ 'agent_type':'exloom:l1-reviewer','agent_id':'aL1',
+ 'last_assistant_message':'VERDICT: APPROVED\n\nROUND NEEDED AFTER FIX: NO\n'}))" \
+  | bash "$RRV" >/dev/null 2>&1
+ok "an L1 verdict at the same moment does record" \
+   "$(grep -c '"verdict":"APPROVED"' .claude/reviews/${SAB}.verdicts/l1-reviewer.json 2>/dev/null)" "1"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
@@ -1492,7 +1644,9 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
 fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
 
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
+# The fixer applies findings and the spec reviewer is advice: neither emits a
+# gate verdict, so neither is held to the verdict contract.
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -vE '^(fixer|spec-reviewer)$'); do
   blk="$(agent_block "$a")"
   ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
 
@@ -1510,8 +1664,22 @@ for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"
      "$([[ "$(fnd "$a")" -ge 1 ]] && echo yes || echo no)" "yes"
 done
 
+
+# The spec reviewer sits outside the verdict contract on purpose. Assert the
+# property that buys it: its own documented block cannot be read as a verdict,
+# whichever way the report reaches the hook.
+SRB="$(agent_block spec-reviewer)"
+ok "spec-reviewer documents an output block"      "$([[ -n "$SRB" ]] && echo yes || echo no)" "yes"
+ok "...which never says APPROVED or REJECTED"     "$(printf '%s' "$SRB" | grep -cE 'VERDICT:[[:space:]]*(APPROVED|REJECTED)')" "0"
+feed spec-reviewer "$SRB"
+ok "...and feeding it records no verdict"         "$(vrd spec-reviewer)" ""
+feed spec-reviewer "$(printf '%s\n\nVERDICT: NOT READY (2 items)\n' "$SRB")"
+ok "...nor does its real NOT READY verdict"       "$(vrd spec-reviewer)" ""
+ok "...nor any findings file at all" \
+   "$([[ -f "$CVD/spec-reviewer.findings.jsonl" ]] && echo yes || echo no)" "no"
+
 # The verdict line each agent literally documents must not be self-defeating.
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -vE '^(fixer|spec-reviewer)$'); do
   vline="$(grep -m1 '^VERDICT: APPROVED' "$AGENTS_DIR/$a.md" || true)"
   ok "$a: documented verdict line is unambiguous (no '|')" \
      "$(printf '%s' "$vline" | grep -c '|')" "0"
