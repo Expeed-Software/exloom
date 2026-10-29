@@ -53,6 +53,8 @@ The four reviewers — L1, adversarial, security and spec — have no file-editi
 
 A reviewer is dispatched, never resumed. Messaging one is refused, because a resumed reviewer carries its own earlier verdict and the session's framing into the next pass and leaves no receipt of its own. A verify pass is a fresh dispatch in `MODE: VERIFY <from>..<to>`.
 
+The block reaches the three code reviewers two ways: by name, and by agent id resolved through the branch's recorded dispatches. The spec reviewer is caught **by name only** — it is advisory, so it is deliberately absent from the review log that makes ids resolvable. A message to any agent the branch did not dispatch as a reviewer, the fixer included, is allowed.
+
 The spec reviewer is advisory throughout: it reads the spec and the code but never the conversation, reports under `## Spec review`, and does not gate, count as a review round, or get repeated at the gate.
 
 ### Raising the floor is itself a Tier 3 change

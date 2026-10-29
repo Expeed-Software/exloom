@@ -44,6 +44,19 @@ except Exception:
   printf '%s' "$out"
 }
 
+# With no JSON parser the recipient cannot be read safely — a sed-based read
+# stops at the first quote — so the decision is made on the raw payload, scoped
+# to the `to` field so that merely naming a reviewer in the message body cannot
+# trigger it.
+if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+  printf '%s' "$HOOK_INPUT" \
+    | grep -Eqi '"to"[[:space:]]*:[[:space:]]*"[^"]*(l1-reviewer|adversarial-reviewer|security-auditor|spec-reviewer)' \
+    || exit 0
+  echo "exloom: a reviewer is dispatched, never resumed. Dispatch a fresh reviewer in MODE: VERIFY <from>..<to>." >&2
+  echo "exloom: (no JSON parser on PATH, so this was decided on the raw payload)" >&2
+  exit 2
+fi
+
 [[ "$(_field tool_name)" == "SendMessage" ]] || exit 0
 TO="$(_field tool_input.to)"
 [[ -n "$TO" ]] || exit 0

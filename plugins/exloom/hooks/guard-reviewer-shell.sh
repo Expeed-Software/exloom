@@ -41,14 +41,30 @@ try:
 except Exception:
     print("")' 2>/dev/null || true)"
   fi
-  # No JSON parser is a real case on a bare Windows shell. Falling through to an
-  # empty agent would let the guard off, so the field is read with sed instead.
-  if [[ -z "$out" ]]; then
-    out="$(printf '%s' "$HOOK_INPUT" \
-      | sed -n "s/.*\"${path##*.}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
-  fi
   printf '%s' "$out"
 }
+
+# No JSON parser is a real case on a bare Windows shell, and a sed-based one is
+# not a parser: it stops at the first quote, so an escaped quote in the command
+# truncates what the guard sees and the rest of the line escapes inspection.
+# With no parser the decision is made on the raw payload, which cannot be
+# truncated, and errs towards refusing.
+_raw_names_reviewer() {
+  printf '%s' "$HOOK_INPUT" \
+    | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"exloom:(l1-reviewer|adversarial-reviewer|security-auditor|spec-reviewer)"'
+}
+_raw_adds_worktree() {
+  printf '%s' "$HOOK_INPUT" | grep -Eq '(^|[^A-Za-z-])worktree([^A-Za-z-]|$)' \
+    && printf '%s' "$HOOK_INPUT" | grep -Eq '(^|[^A-Za-z-])add([^A-Za-z-]|$)'
+}
+
+if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+  _raw_names_reviewer || exit 0
+  _raw_adds_worktree  || exit 0
+  echo "exloom: a reviewer may not create a worktree. Read the change with git diff and git show instead." >&2
+  echo "exloom: (no JSON parser on PATH, so this was decided on the raw payload and errs towards refusing)" >&2
+  exit 2
+fi
 
 AGENT="$(_field agent_type)"
 case "$AGENT" in

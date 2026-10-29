@@ -1352,6 +1352,27 @@ print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'B
  'agent_id':'a1','agent_type':'exloom:l1-reviewer',
  'tool_input':{'command':'git worktree add /tmp/x HEAD'}}))" | bash "$GRS" 2>&1 | grep -c 'git show')" "1"
 
+# A sed-based JSON read is not a parser: it stops at the first quote, so an
+# escaped quote truncates the command and the rest escapes inspection. With no
+# parser the decision is made on the raw payload instead, which errs towards
+# refusing.
+RAWF="$(sed -n '/^_raw_names_reviewer() {/,/^}/p' "$HOOKS_ABS/guard-reviewer-shell.sh"; \
+        sed -n '/^_raw_adds_worktree() {/,/^}/p' "$HOOKS_ABS/guard-reviewer-shell.sh")"
+raw() {   # raw <payload-json> -> refuse|allow
+  bash -c 'set -u; HOOK_INPUT="$1"; '"$RAWF"'
+    _raw_names_reviewer && _raw_adds_worktree && echo refuse || echo allow' _ "$1"
+}
+ESCAPED='{"hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"exloom:l1-reviewer","tool_input":{"command":"git -C \"a\\\"b\" worktree add /tmp/wt"}}'
+ok "an escaped quote cannot hide a worktree add" "$(raw "$ESCAPED")" "refuse"
+ok "a reviewer reading a diff is still allowed" \
+   "$(raw '{"agent_type":"exloom:l1-reviewer","tool_input":{"command":"git diff a..b"}}')" "allow"
+ok "a worktree add by the session is allowed" \
+   "$(raw '{"tool_input":{"command":"git worktree add /tmp/x"}}')" "allow"
+ok "the fixer is allowed" \
+   "$(raw '{"agent_type":"exloom:fixer","tool_input":{"command":"git worktree add /tmp/x"}}')" "allow"
+ok "a reviewer removing a worktree is allowed" \
+   "$(raw '{"agent_type":"exloom:security-auditor","tool_input":{"command":"git worktree remove /tmp/x"}}')" "allow"
+
 
 section "reviewers have no file-editing tools"
 
