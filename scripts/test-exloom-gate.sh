@@ -1435,6 +1435,67 @@ print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop',
 ok "an L1 verdict at the same moment does record" \
    "$(grep -c '"verdict":"APPROVED"' .claude/reviews/${SAB}.verdicts/l1-reviewer.json 2>/dev/null)" "1"
 
+
+section "a tool's scratch folder is not your uncommitted work"
+
+# An untracked .playwright-mcp/ or .gradle/ stopped the branch with "commit your
+# work first" on something nobody wants committed. Untracked only: once a path
+# is tracked it is the repo's business, whatever it is named.
+subrepo scratchdirs
+SDCL=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+mkdir -p "$(dirname "$SDCL")"; printf '# review\n\n**Lane:** sprint\n' > "$SDCL"
+git add -A >/dev/null 2>&1; git commit -qm cl >/dev/null 2>&1
+for d in .playwright-mcp .superpowers node_modules .pytest_cache __pycache__ .ruff_cache .venv \
+         dist build .gradle bin obj .dart_tool .angular target coverage; do
+  mkdir -p "$d"; printf 'junk\n' > "$d/f"
+done
+ok "scratch alone does not make the tree dirty" "$(exloom_work_is_dirty && echo dirty || echo clean)" "clean"
+ok "...and every one of them is named as skipped" \
+   "$(exloom_scratch_skipped | grep -c .)" "16"
+ok "...with the branch moving past commit-work" \
+   "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^commit-work$')" "0"
+
+printf 'real\n' > src/real.go
+ok "real work still makes it dirty"             "$(exloom_work_is_dirty && echo dirty || echo clean)" "dirty"
+ok "...and routes to commit-work"               "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "commit-work"
+rm -f src/real.go
+
+# Tracked is tracked. A repo that commits its dist/ has decided dist/ matters.
+git add -f dist/f >/dev/null 2>&1; git commit -qm dist >/dev/null 2>&1
+printf 'changed\n' > dist/f
+ok "a TRACKED scratch path still counts as work" "$(exloom_work_is_dirty && echo dirty || echo clean)" "dirty"
+ok "...and is not reported as skipped"           "$(exloom_scratch_skipped | grep -c '^dist/$')" "0"
+
+
+section "line endings survive a fix, and a CRLF install is reported"
+
+# A fixer that rewrites a whole file can flip its line endings, turning a
+# one-line fix into a whole-file diff that hides the fix from the reviewer.
+FXR="$HOOKS_ABS/../agents/fixer.md"
+ok "the fixer is told to preserve line endings" \
+   "$(grep -ci 'line ending' "$FXR")" "$(grep -ci 'line ending' "$FXR")"
+ok "...and is told so at all" \
+   "$([[ "$(grep -ci 'line ending' "$FXR")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...naming CRLF explicitly" \
+   "$([[ "$(grep -c 'CRLF' "$FXR")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+# exloom cannot fix a checkout it does not own, so setup reports it instead.
+CRLFD="$(sed -n '/^exloom_hooks_are_crlf() {/,/^}/p' "$LIB_ABS")"
+crlfck() { bash -c 'set -u; '"$CRLFD"'
+  exloom_hooks_are_crlf "$1" && echo crlf || echo lf' _ "$1"; }
+CL="$REG/eol-lf"; CC="$REG/eol-crlf"
+rm -rf "$CL" "$CC"; mkdir -p "$CL/hooks" "$CC/hooks"
+printf '#!/usr/bin/env bash\nset -u\n' > "$CL/hooks/lib.sh"
+printf '#!/usr/bin/env bash\r\nset -u\r\n' > "$CC/hooks/lib.sh"
+ok "an LF install is reported as LF"     "$(crlfck "$CL")" "lf"
+ok "a CRLF install is reported as CRLF"  "$(crlfck "$CC")" "crlf"
+ok "a missing install is not a CRLF one" "$(crlfck "$REG/absent")" "lf"
+
+# The remedy must name both halves: the setting, and the reinstall.
+SETUP="$HOOKS_ABS/../commands/exloom-setup.md"
+ok "setup names core.autocrlf input" "$(grep -c 'core.autocrlf input' "$SETUP")" "1"
+ok "...and says to reinstall"        "$([[ "$(grep -ci 'reinstall' "$SETUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

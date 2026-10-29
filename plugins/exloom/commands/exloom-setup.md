@@ -77,6 +77,20 @@ Ask with AskUserQuestion, in plain words: "Set a minimum tier? Below it, exloom 
 
 On yes, take the value, cap it at 2, and write `.claude/exloom-min-tier` **on its own branch**. Do not commit it to the main line: changing any `.claude/exloom-*` setting derives Tier 3, so the floor reaches main through the normal Tier 3 review and a pull request, like any other change to the protection. Say so when you write it.
 
+## Step 5d — Line endings on the installed hooks
+
+```bash
+exloom_hooks_are_crlf && echo CRLF || echo LF
+```
+
+On CRLF, say this and stop for the user's answer — exloom cannot fix a checkout it does not own, and the plugin ships no `.gitattributes` rule for its own files:
+
+> exloom's installed hook scripts have Windows line endings. Git Bash tolerates them; `bash` under WSL, Docker or CI stops at the first `\r`, so the hooks fail with `$'\r': command not found` and the gate reports errors instead of evidence.
+>
+> Fix it once, globally: `git config --global core.autocrlf input`, then reinstall the plugin with `claude plugin install` so the files are checked out again.
+
+On LF, say nothing.
+
 ## Step 6 — Show the effective configuration
 
 ```bash

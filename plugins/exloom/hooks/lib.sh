@@ -801,6 +801,43 @@ exloom_min_tier_provenance() {   # prints "<sha>\t<author>"
   git log -1 --format='%H	%an' -- "$f" 2>/dev/null
 }
 
+# A Windows checkout with core.autocrlf=true hands bash CRLF scripts, and bash
+# on WSL or in a container stops at the `\r`. exloom cannot fix a checkout it
+# does not own, so setup reports it and names the remedy.
+# Counted in bytes rather than matched as a pattern: Git Bash's grep and awk
+# both read in text mode, so a CR pattern finds nothing there even when the file
+# plainly has CRs, and the check would pass on the one platform it is for.
+exloom_hooks_are_crlf() {   # exloom_hooks_are_crlf [plugin-root]
+  local root="${1:-}" f a b
+  # With no argument, the installed copy is the one this library was read from.
+  [[ -n "$root" ]] || root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+  f="${root}/hooks/lib.sh"
+  [[ -f "$f" ]] || return 1
+  a="$(head -5 "$f" 2>/dev/null | wc -c)"
+  b="$(head -5 "$f" 2>/dev/null | tr -d '\r' | wc -c)"
+  [[ "$a" -ne "$b" ]]
+}
+
+# Folders a tool makes and nobody commits. Skipped only while UNTRACKED: once a
+# path is tracked the repository has decided it matters, whatever it is named.
+_EXLOOM_SCRATCH='\.playwright-mcp|\.superpowers|node_modules|\.pytest_cache|__pycache__|\.ruff_cache|\.venv|dist|build|\.gradle|bin|obj|\.dart_tool|\.angular|target|coverage'
+
+# Untracked scratch paths in the way, one per line, so /exloom can name what it
+# passed over rather than quietly ignoring it.
+exloom_scratch_skipped() {
+  git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | sed -n 's/^?? //p' \
+    | grep -E "^(${_EXLOOM_SCRATCH})/$"
+}
+
+# Is there uncommitted work that is actually work?
+exloom_work_is_dirty() {
+  local left
+  left="$(git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | grep -vE "^\?\? (${_EXLOOM_SCRATCH})/$")"
+  [[ -n "$left" ]]
+}
+
 exloom_repo_lane() {
   local f=".claude/exloom-lane" v=""
   if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
@@ -1938,7 +1975,7 @@ exloom_next_step() {   # exloom_next_step <branch>
   exloom_is_protected_branch "$branch" && { echo branch; return 0; }
   [[ -f "$cl" ]] || { echo init; return 0; }
   [[ -n "$(git status --porcelain -- .claude/reviews 2>/dev/null)" ]] && { echo commit; return 0; }
-  [[ -n "$(git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null)" ]] && { echo commit-work; return 0; }
+  exloom_work_is_dirty && { echo commit-work; return 0; }
   lane="$(tr -d '\r' < "$cl" | exloom_declared_lane)"
   [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
   exloom_is_strict && lane="certified"
