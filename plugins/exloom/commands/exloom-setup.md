@@ -63,6 +63,20 @@ If the repository has migrations, an API or ORM models but none of the matching 
 
 Ask once with AskUserQuestion: "Strict mode — every branch on the Certified lane (no escape hatches, signed review commits)?" Recommend **No** unless the repository is regulated. On yes, create `.claude/exloom-strict`.
 
+## Step 5b — Who owns the full suite
+
+Ask once with AskUserQuestion: "Does this repository run CI on pull requests?" Propose a value from `.github/workflows/*.yml` or `azure-pipelines.yml` and let the user correct it. Write `github`, `azure` or `none` to `.claude/exloom-ci`.
+
+On `github` or `azure`, say plainly that the full suite now leaves the gate and that **branch protection must require the CI check before merge** — exloom cannot see branch protection and does not enforce it. On `none`, say that the gate will require a `record-full-suite.sh` receipt before every push.
+
+## Step 5c — A minimum tier (ask, never assume)
+
+Only when the user raises it. Do not offer it unprompted.
+
+Ask with AskUserQuestion, in plain words: "Set a minimum tier? Below it, exloom asks for no review and no proof — a branch at that tier can be pushed with nothing checked. Tier 3 can never be skipped. Every skip is recorded with your name and the commit that set the floor."
+
+On yes, take the value, cap it at 2, and write `.claude/exloom-min-tier` **on its own branch**. Do not commit it to the main line: changing any `.claude/exloom-*` setting derives Tier 3, so the floor reaches main through the normal Tier 3 review and a pull request, like any other change to the protection. Say so when you write it.
+
 ## Step 6 — Show the effective configuration
 
 ```bash

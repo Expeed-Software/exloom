@@ -1035,14 +1035,68 @@ ok "none demands a recorded full suite"   "$(exloom_full_suite_required none; ec
 ok "github does not"                      "$(exloom_full_suite_required github; echo $?)" "1"
 ok "an absent setting does not"           "$(exloom_full_suite_required ''; echo $?)" "1"
 
-CLB="$(printf '## Full suite\n\n<paste output / screenshot link>\n')"
-ok "an unfilled Full suite section is not a result" \
-   "$(printf '%s\n' "$CLB" | exloom_full_suite_recorded; echo $?)" "1"
-CLG="$(printf '## Full suite\n\n`./gradlew test` — 412 tests, 0 failures at 4f2a1c9\n')"
-ok "a recorded result counts" \
-   "$(printf '%s\n' "$CLG" | exloom_full_suite_recorded; echo $?)" "0"
-ok "a missing section is not a result" \
-   "$(printf '## Smoke test\n\nfine\n' | exloom_full_suite_recorded; echo $?)" "1"
+# The receipt is written by record-full-suite.sh and committed; prose under
+# `## Full suite` is a summary for a reader, not what the gate reads.
+RFS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/record-full-suite.sh"
+subrepo fullsuite
+CLF=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+VD=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).verdicts"
+mkdir -p "$(dirname "$CLF")"; printf '# checklist\n' > "$CLF"
+bash "$RFS" -- true >/dev/null 2>&1
+ok "a passing run is recorded with exit 0" \
+   "$(grep -c '"check":"full-suite".*"exit":0,' "$VD/full-suite.json" 2>/dev/null)" "1"
+bash "$RFS" -- false >/dev/null 2>&1
+ok "a failing run records its exit code" \
+   "$(tail -1 "$VD/full-suite.json" | grep -c '"exit":1,')" "1"
+ok "output is captured beside the receipt" \
+   "$([[ -f "$VD/full-suite.out" ]] && echo yes || echo no)" "yes"
+
+# Only a committed receipt counts, and only a passing one.
+git add -A >/dev/null 2>&1; git commit -qm fs1 >/dev/null 2>&1
+ok "a failing receipt does not cover the tip" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
+# The receipt names HEAD as it was when the suite ran, and committing it makes
+# a further commit — so what must not stale it is the receipt's own commit.
+printf 'notes\n' > NOTES.md; git add -A >/dev/null 2>&1; git commit -qm notes >/dev/null 2>&1
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs2 >/dev/null 2>&1
+ok "a passing receipt at the tip covers it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+
+# A comment-only edit on top must not force the suite again. The existing rule
+# is narrower than it sounds: a new file is behavioural whatever its extension,
+# a .md edit is behavioural because markdown has no comment syntax, and `#` is
+# not treated as a comment at all because of shebangs and #define.
+printf 'class A {\n  int x = 1;\n}\n' > src/A.java
+git add -A >/dev/null 2>&1; git commit -qm java >/dev/null 2>&1
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs3 >/dev/null 2>&1
+printf 'class A {\n  // a new comment\n  int x = 1;\n}\n' > src/A.java
+git add -A >/dev/null 2>&1; git commit -qm comment >/dev/null 2>&1
+ok "a non-behavioural commit since does not stale it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+
+# Documentation is dropped from the diff for THIS check only. A README edit
+# cannot change what the suite does, and on a repo with no CI the suite is
+# expensive enough that re-running it for a typo is how the gate gets bypassed.
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs4 >/dev/null 2>&1
+printf '# readme\nnew line\n' > README.md
+git add -A >/dev/null 2>&1; git commit -qm readme >/dev/null 2>&1
+ok "a README-only commit does not force a re-run" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+mkdir -p docs; printf 'flow\n' > docs/diagram.mmd
+git add -A >/dev/null 2>&1; git commit -qm mmd >/dev/null 2>&1
+ok "an .mmd diagram does not either" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+printf 'package m\nfunc Y() int { return 2 }\n' > src/y.go
+git add -A >/dev/null 2>&1; git commit -qm code2 >/dev/null 2>&1
+ok "a code commit among the docs still does" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
+printf 'package m\nfunc X() int { return 1 }\n' > src/real.go
+git add -A >/dev/null 2>&1; git commit -qm code >/dev/null 2>&1
+ok "a behavioural commit since does stale it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
 
 section "settings a .gitignore would silently drop"
 
@@ -1055,6 +1109,144 @@ IGN="$(exloom_ignored_settings "$(git rev-parse --abbrev-ref HEAD)")"
 for s in exloom-ci exloom-fast-command exloom-test-select; do
   ok "an ignored .claude/$s is reported" "$(printf '%s\n' "$IGN" | grep -c "^\.claude/$s$")" "1"
 done
+
+
+section "changing the gate's own settings is a Tier 3 change"
+
+# Every setting decides what the gate asks for. A change to one is a change to
+# the protection itself, so it earns the tier that has no escape hatch.
+subrepo settingstier
+ok "a change to .claude/exloom-ci is Tier 3"       "$(sp .claude/exloom-ci)" "3"
+ok "a change to .claude/exloom-min-tier is Tier 3" "$(sp .claude/exloom-min-tier)" "3"
+ok "a change to .claude/exloom-lane is Tier 3"     "$(sp .claude/exloom-lane)" "3"
+ok "an ordinary source file is not"                "$(sp src/ordinary.go)" "1"
+
+section "exloom-min-tier: a floor, and the one tier it can never skip"
+
+subrepo mintier
+printf '2\n' > .claude/exloom-min-tier
+ok "an uncommitted floor is not read"  "$(exloom_min_tier)" "0"
+git add .claude/exloom-min-tier >/dev/null 2>&1; git commit -qm mt >/dev/null 2>&1
+ok "a committed floor is read"         "$(exloom_min_tier)" "2"
+printf '3\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mt3 >/dev/null 2>&1
+ok "a floor above 2 is capped at 2"    "$(exloom_min_tier)" "2"
+printf '9\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mt9 >/dev/null 2>&1
+ok "so Tier 3 is never skippable"      "$(exloom_min_tier)" "2"
+printf 'abc\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mtx >/dev/null 2>&1
+ok "a non-numeric floor is no floor"   "$(exloom_min_tier)" "0"
+
+# Certified and strict buy rigour deliberately; a floor would sell it back.
+printf '2\n' > .claude/exloom-min-tier
+printf 'certified\n' > .claude/exloom-lane
+git add -A >/dev/null 2>&1; git commit -qm cert >/dev/null 2>&1
+ok "Certified ignores the floor"       "$(exloom_min_tier)" "0"
+git rm -q .claude/exloom-lane >/dev/null 2>&1
+: > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "strict mode ignores the floor"     "$(exloom_min_tier)" "0"
+
+
+section "exloom-min-tier: what a floor skips, and what it records"
+
+PJ='{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}'
+pushrc() { printf '%s' "$PJ" | bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1; echo $?; }
+
+# A Tier 1 branch under a floor of 2 needs no review and no proof.
+subrepo mintierpush
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+SETSHA="$(git rev-parse HEAD)"
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+printf 'a\n' > src/ordinary.txt; git add -A >/dev/null 2>&1; git commit -qm work >/dev/null 2>&1
+ok "a push below the floor is allowed"       "$(pushrc)" "0"
+SK=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).skip.json"
+ok "...and a skip receipt is written"        "$([[ -f "$SK" ]] && echo yes || echo no)" "yes"
+ok "...naming the derived tier"              "$(grep -c '"tier":1' "$SK" 2>/dev/null)" "1"
+ok "...naming the floor"                     "$(grep -c '"min_tier":2' "$SK" 2>/dev/null)" "1"
+ok "...naming the commit that set it"        "$(grep -c "\"set_in\":\"${SETSHA}\"" "$SK" 2>/dev/null)" "1"
+ok "...and who set it"                       "$(grep -c '"set_by":"t"' "$SK" 2>/dev/null)" "1"
+
+# Tier 3 is above the cap, so no floor can reach it.
+subrepo mintierhigh
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+mkdir -p db/migrations; printf 'create table t();\n' > db/migrations/V2.sql
+git add -A >/dev/null 2>&1; git commit -qm mig >/dev/null 2>&1
+ok "a Tier 3 push is still gated"            "$(pushrc)" "2"
+
+# Certified and strict buy rigour; a floor cannot sell it back.
+subrepo mintierstrict
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier; : > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+printf 'a\n' > src/ordinary.txt; git add -A >/dev/null 2>&1; git commit -qm work >/dev/null 2>&1
+ok "strict mode ignores the floor and gates" "$(pushrc)" "2"
+
+
+section "smoke waiver: a skip that names who skipped it"
+
+# The gate cannot prompt, so the waiver is a committed line. It is accepted only
+# where the lane allows a skip at all, and only when it says who and at which
+# commit — an anonymous waiver is indistinguishable from a forgotten step.
+subrepo smokewaiver
+WOK="- Smoke test waived: no UI on this change — Mahesh O A at 4f2a1c9"
+ok "a waiver naming who and where is read" \
+   "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "0"
+ok "a bare waiver is not"  "$(printf -- '- Smoke test waived\n' | exloom_smoke_waived; echo $?)" "1"
+ok "a reason with no identity is not" \
+   "$(printf -- '- Smoke test waived: no UI\n' | exloom_smoke_waived; echo $?)" "1"
+ok "an unrelated line is not" "$(printf -- '- Smoke test: ran it\n' | exloom_smoke_waived; echo $?)" "1"
+
+# Certified and strict bought the smoke test; a waiver would be selling it back.
+printf 'certified\n' > .claude/exloom-lane
+git add -A >/dev/null 2>&1; git commit -qm cert >/dev/null 2>&1
+ok "Certified refuses a waiver" "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "1"
+git rm -q .claude/exloom-lane >/dev/null 2>&1; : > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "strict mode refuses a waiver"  "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "1"
+
+
+section "work type: a bug fix is not a feature, and must not be marched through one"
+
+# exloom_next_step routed every non-sprint branch to spec then plan. A bug fix
+# has no spec to write — the behaviour was already agreed — and marching it
+# through one is what made people run the steps by hand and stop using the gate.
+subrepo worktype
+WTCL=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+mkdir -p "$(dirname "$WTCL")"
+wtset() {   # wtset <work-type-line> [spec] [plan]
+  { printf '# review\n\n**Lane:** standard\n'
+    [[ -n "${1:-}" ]] && printf '**Work type:** %s\n' "$1"
+    [[ -n "${2:-}" ]] && printf '**Spec:** %s\n' "$2"
+    [[ -n "${3:-}" ]] && printf '**Plan:** %s\n' "$3"; } > "$WTCL"
+  git add -A >/dev/null 2>&1; git commit -qm wt >/dev/null 2>&1
+}
+
+wtset '' '' ''
+ok "a feature with no spec still asks for one"  "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+wtset 'new feature' '' ''
+ok "...and so does an explicit new feature"     "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+
+wtset 'bug fix' '' ''
+ok "a bug fix is never sent to spec"            "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^spec$')" "0"
+ok "a bug fix is never sent to plan"            "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^plan$')" "0"
+
+# A change note stands in for the spec; a single task needs no plan beside it.
+printf 'now: x\nnext: y\n1. it does y\n' > docs/change-note.md
+wtset 'change to existing code' '' ''
+ok "a change still needs its note"              "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+wtset 'change to existing code' 'docs/change-note.md' 'none'
+ok "the note counts as the spec"                "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^spec$')" "0"
+ok "...and 'none' is an acceptable plan"        "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^plan$')" "0"
+wtset 'new feature' 'docs/change-note.md' 'none'
+ok "but a feature may not plead 'none'"         "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "plan"
 
 section "re-find disposition: next-line keyword, and legacy checklists"
 

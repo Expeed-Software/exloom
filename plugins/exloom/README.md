@@ -43,6 +43,14 @@ Four things are **not** the author's to write, and they decide everything else:
 - **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. There is no tier field to argue with, and a branch whose base exloom cannot find is blocked until the checklist names it.
 - **The proof is an experiment.** `prove-change-is-tested.sh` runs your tests at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here. It runs only the tests your diff touches, which is why it takes seconds; Certified and strict mode keep the whole suite.
 
+### What the full-suite evidence is, and is not
+
+Where committed `.claude/exloom-ci` says `none`, the gate requires a passing receipt from `record-full-suite.sh`, which runs the suite and records the command, its exit code and the commit. The receipt is agent-run and self-attested, exactly like a pasted smoke test: exloom records that a run happened and what it returned, not that the result is honest. A repository with CI gets the stronger guarantee from branch protection, which exloom neither sees nor claims to enforce. A receipt stays valid while only documentation (`.md`, `.mmd`, and anything in a committed `.claude/exloom-doc-patterns`) or comment-only source changes land on top.
+
+### Raising the floor is itself a Tier 3 change
+
+`.claude/exloom-min-tier` turns the gate off below the tier it names, so changing any `.claude/exloom-*` setting derives Tier 3 — nobody can add a floor and skip the gate in the same push. `/exloom-setup` asks before writing one, writes it on its own branch, and that branch reaches the main line through the normal Tier 3 review and a pull request, never a direct commit. Every skip writes `.claude/reviews/<branch>.skip.json` naming the derived tier, the floor, and who set it in which commit.
+
 ### Three ways a proof can fail to conclude
 
 | | Which run | What it means | Exit |
@@ -81,7 +89,8 @@ Optional, all committed:
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
-| `.claude/exloom-ci` | `github`, `azure` or `none`. With CI, the full suite leaves the gate and branch protection carries it; with `none`, the gate runs the suite once at push |
+| `.claude/exloom-ci` | `github`, `azure` or `none`. With CI, the full suite leaves the gate and branch protection carries it; with `none`, the gate requires a recorded `record-full-suite.sh` receipt before the push |
+| `.claude/exloom-min-tier` | the tier below which the gate does not apply, capped at 2 so Tier 3 is never skippable. Ignored entirely under Certified and in strict mode |
 | `.claude/exloom-fast-command` | the compile or type-check the fast check runs after each task; advisory, never blocking |
 | `.claude/exloom-test-select` | one line with a `{tests}` placeholder, for a runner whose selection syntax exloom does not know |
 

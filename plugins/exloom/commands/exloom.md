@@ -20,7 +20,7 @@ Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop a
 |---|---|
 | `setup` | Run `/exloom-setup`. |
 | `branch` | Protected branch: run `exloom:isolating-execution` to move the work onto a feature branch. |
-| `init` | Follow `/review-init`; the tier is pending until code exists. Ask once, "Quick fix?" — yes means `**Lane:** sprint`, never at derived tier 3. |
+| `init` | Follow `/review-init`; the tier is pending until code exists. Ask once, "Quick fix?" — yes means `**Lane:** sprint`, never at derived tier 3. Then ask once what kind of work this is: **a new feature**, **a bug fix**, or **a change to existing code**. Record the answer in the checklist as `**Work type:** new feature` / `bug fix` / `change to existing code`, spelled exactly so — `exloom_next_step` reads it. A new feature takes the full flow. A bug fix runs `exloom:fixing-bugs` and is never sent to the spec or plan step. A change to existing code runs `exloom:brainstorming` in its change-note mode: the note goes in `**Spec:**`, and a single task records `**Plan:** none`. |
 | `commit` | Commit `.claude/reviews/` on its own. |
 | `commit-work` | Commit the changes outside `.claude/reviews/` first. |
 | `spec` | Run `exloom:brainstorming`, even for a fix; put its path in `**Spec:**`. |
@@ -31,8 +31,8 @@ Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop a
 | `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode. |
 | `rulings` | Per finding the verify left NOT ADDRESSED, one AskUserQuestion with the reviewer's reason and exactly: "Fix again" (go to `fix`), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor; record `- Proof: refactor — <their reason>`. Write the answer under the section the message names (`## Rulings` by default). Never write a ruling they did not give. |
 | `proof` | Run the block below; commit its receipt. NOT PROVED needs a test that fails without the change. NO_TEST_CHANGED goes to `rulings`. |
-| `smoke` | Follow `/smoke-test`. |
-| `push` | When committed `.claude/exloom-ci` says `none`, run the pinned test command once and record the result under `## Full suite` in the checklist; with any other value the suite belongs to CI and branch protection, and a CI run reference is not evidence here. Then print `exloom_branch_summary "$B"`; the branch is ready. Do not push unless asked. |
+| `smoke` | Follow `/smoke-test`. If the user cannot run it, ask once: "No smoke result — proceed anyway?" On yes, write `- Smoke test waived: <their reason> — <git user.name> at <short sha>` under `## Escape hatches used` and carry on. Never ask under Certified or in strict mode; there the smoke test is what the lane was chosen for. |
+| `push` | When committed `.claude/exloom-ci` says `none`, run `${CLAUDE_PLUGIN_ROOT}/scripts/record-full-suite.sh` once and commit `full-suite.json` with the checklist; with any other value the suite belongs to CI and branch protection, and a CI run reference is not evidence here. Then print `exloom_branch_summary "$B"`; the branch is ready. Do not push unless asked. |
 | `blocked` | Show the user the verbose line below; ask what to do. |
 
 ```bash
