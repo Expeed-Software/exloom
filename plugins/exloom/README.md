@@ -41,7 +41,17 @@ Four things are **not** the author's to write, and they decide everything else:
 
 - **Reviewer dispatch is recorded, not claimed.** When a reviewer subagent completes, a hook writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. Another hook refuses to let that file be written by hand. The receipt names the commit at dispatch, so a commit made while the reviewer runs is not covered by its approval.
 - **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. There is no tier field to argue with, and a branch whose base exloom cannot find is blocked until the checklist names it.
-- **The proof is an experiment.** `prove-change-is-tested.sh` runs your suite at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here.
+- **The proof is an experiment.** `prove-change-is-tested.sh` runs your tests at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here. It runs only the tests your diff touches, which is why it takes seconds; Certified and strict mode keep the whole suite.
+
+### Three ways a proof can fail to conclude
+
+| | Which run | What it means | Exit |
+|---|---|---|---|
+| `PROOF VOID` | 1 | The suite does not pass at the base commit. Nothing can be concluded about your tests, because the base or the environment is already broken. | 1 |
+| `PROOF_ERROR` | 2 | Your tests ran at base and failed, but the report says they neither asserted nor failed to compile — the run itself broke, on a fixture, a config or the harness. Whether your tests notice your change is unknown. | 2 |
+| `NOT_APPLICABLE` | 2 | Your tests could not compile without the change, because they name code it introduces. That shows they depend on the change, not that they would notice it being wrong. Recorded as the weakest of the three methods. | 0 |
+
+`PROOF_ERROR` is reached only from a machine-readable report — JUnit XML `errors` against `failures`, a TRX `Counters` row, Jest's `testExecError`, a `flutter --machine` error event. Where no such report exists, exloom has no opinion and falls back to the text check it has always used, which can reach `NOT_APPLICABLE` but never `PROOF_ERROR`. The receipt records which path was taken as `classification`.
 - **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`, and the latest one counts. A rejection is closed by a fix the verify marks ADDRESSED, or by the user's ruling on what stays open; a report with no readable verdict line never passes.
 
 **Only L1 must cover the commit you ship.** Adversarial and security must have run and approved somewhere on the branch; a later fix does not invalidate them. Requiring every reviewer to approve the same moving commit is what produces branches that never converge.
@@ -71,6 +81,9 @@ Optional, all committed:
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
+| `.claude/exloom-ci` | `github`, `azure` or `none`. With CI, the full suite leaves the gate and branch protection carries it; with `none`, the gate runs the suite once at push |
+| `.claude/exloom-fast-command` | the compile or type-check the fast check runs after each task; advisory, never blocking |
+| `.claude/exloom-test-select` | one line with a `{tests}` placeholder, for a runner whose selection syntax exloom does not know |
 
 Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for some stacks the guess hangs or tests nothing:
 

@@ -133,6 +133,186 @@ is_test() {
   return 1
 }
 
+# Only a machine-readable report may route a run-2 failure to PROOF_ERROR. Text
+# matching stays where it is, as the fallback: an assertion message that happens
+# to contain the wrong word must never make a branch unpushable.
+_classify_run2() {   # _classify_run2 <report> <exit-code> -> proved|error|unknown
+  local rep="${1:-}" rc="${2:-1}"
+  [[ "$rc" -ne 0 ]] 2>/dev/null || { echo unknown; return 0; }
+  [[ -n "$rep" && -f "$rep" ]] || { echo unknown; return 0; }
+  command -v python3 >/dev/null 2>&1 || { echo unknown; return 0; }
+  EXLOOM_REP="$rep" python3 -c '
+import json, os, re, sys
+
+def out(v):
+    print(v)
+    raise SystemExit(0)
+
+try:
+    raw = open(os.environ["EXLOOM_REP"], encoding="utf-8", errors="replace").read()
+except OSError:
+    out("unknown")
+
+# JUnit XML: Gradle, Maven, pytest --junitxml. errors and failures are separate
+# attributes precisely because the outcomes differ.
+if "<testsuite" in raw:
+    f = sum(int(x) for x in re.findall(r"<testsuite[^>]*\sfailures=\"(\d+)\"", raw))
+    e = sum(int(x) for x in re.findall(r"<testsuite[^>]*\serrors=\"(\d+)\"", raw))
+    if f > 0:
+        out("proved")
+    if e > 0:
+        out("error")
+    out("unknown")
+
+# TRX: dotnet test --logger trx.
+if "<Counters" in raw:
+    def attr(name):
+        m = re.search(r"<Counters[^>]*\s%s=\"(\d+)\"" % name, raw)
+        return int(m.group(1)) if m else 0
+    if attr("failed") > 0:
+        out("proved")
+    if attr("error") > 0 or attr("aborted") > 0:
+        out("error")
+    out("unknown")
+
+# Jest and Vitest --json: a suite that throws before any test runs reports
+# testExecError with zero failed tests.
+try:
+    d = json.loads(raw)
+except Exception:
+    d = None
+if isinstance(d, dict) and "numFailedTests" in d:
+    if int(d.get("numFailedTests") or 0) > 0:
+        out("proved")
+    results = d.get("testResults") or []
+    crashed = any(isinstance(r, dict) and r.get("testExecError") for r in results)
+    if crashed or int(d.get("numFailedTestSuites") or 0) > 0:
+        out("error")
+    out("unknown")
+
+# flutter test --machine: one JSON event per line.
+saw_failure = saw_error = False
+for line in raw.splitlines():
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if not isinstance(ev, dict):
+        continue
+    if ev.get("type") == "testDone" and ev.get("result") in ("failure", "error"):
+        saw_failure = True
+    if ev.get("type") == "error":
+        saw_error = True
+if saw_failure:
+    out("proved")
+if saw_error:
+    out("error")
+out("unknown")
+' 2>/dev/null || echo unknown
+}
+
+# The tests the diff touches, named on the side of the range that holds them: a
+# rename is the same test under two names, and a deletion proves nothing about
+# the change, so it is selected nowhere.
+_selected_tests() {   # _selected_tests <base|head>
+  local side="${1:-head}" status old new
+  git diff --find-renames --name-status "$BASE" HEAD 2>/dev/null \
+  | while IFS=$'\t' read -r status old new; do
+      case "$status" in
+        R*) [[ "$side" == base ]] && { is_test "$old" && printf '%s\n' "$old"; } \
+                                  || { is_test "${new:-}" && printf '%s\n' "${new:-}"; } ;;
+        C*) [[ "$side" == head ]] && { is_test "${new:-}" && printf '%s\n' "${new:-}"; } ;;
+        A*) [[ "$side" == head ]] && { is_test "$old" && printf '%s\n' "$old"; } ;;
+        M*) is_test "$old" && printf '%s\n' "$old" ;;
+        D*) ;;
+      esac
+    done | sort -u
+}
+
+# Which runner this repo uses, for selection only. A stack with no adapter runs
+# the whole suite exactly as before.
+_adapter() {
+  if   [[ -f gradlew || -f build.gradle || -f build.gradle.kts ]]; then echo gradle
+  elif [[ -f package.json ]] && grep -q '"vitest"' package.json 2>/dev/null; then echo vitest
+  elif [[ -f package.json ]]; then echo jest
+  elif [[ -f pytest.ini || -f pyproject.toml || -f setup.cfg || -f tox.ini ]]; then echo pytest
+  elif [[ -f pubspec.yaml ]]; then echo flutter
+  elif compgen -G "*.sln" >/dev/null 2>&1 || compgen -G "*.csproj" >/dev/null 2>&1; then echo dotnet
+  else echo none
+  fi
+}
+
+# The FQN a JUnit selector needs, from the file's own package declaration.
+_fqn() {
+  local f="$1" pkg cls
+  cls="$(basename "$f")"; cls="${cls%.*}"
+  pkg="$(sed -n 's/^[[:space:]]*package[[:space:]]\{1,\}\([A-Za-z0-9_.]*\).*/\1/p' "$f" 2>/dev/null | head -1)"
+  [[ -n "$pkg" ]] && printf '%s.%s\n' "$pkg" "$cls" || printf '%s\n' "$cls"
+}
+
+# The command for a narrowed run, or empty when this stack cannot be narrowed.
+# `--continue` on Gradle because --tests fails any module the pattern misses.
+_narrow_cmd() {   # _narrow_cmd <adapter> <paths…>
+  local a="$1"; shift
+  [[ $# -gt 0 ]] || { printf ''; return 0; }
+  local p sel=""
+  case "$a" in
+    gradle)
+      for p in "$@"; do sel="$sel --tests '$(_fqn "$p")'"; done
+      printf './gradlew test --continue%s' "$sel" ;;
+    pytest)
+      for p in "$@"; do sel="$sel '$p'"; done
+      printf 'pytest -q --junitxml=.exloom-junit.xml%s' "$sel" ;;
+    jest)
+      for p in "$@"; do sel="$sel '$p'"; done
+      printf 'npx jest --json --outputFile=.exloom-jest.json --runTestsByPath%s' "$sel" ;;
+    vitest)
+      for p in "$@"; do sel="$sel '$p'"; done
+      printf 'npx vitest run --reporter=json --outputFile=.exloom-jest.json%s' "$sel" ;;
+    flutter)
+      for p in "$@"; do sel="$sel '$p'"; done
+      printf 'flutter test --machine%s' "$sel" ;;
+    dotnet)
+      for p in "$@"; do sel="$sel${sel:+|}FullyQualifiedName~$(basename "${p%.*}")"; done
+      printf 'dotnet test --logger "trx;LogFileName=exloom.trx" --filter "%s"' "$sel" ;;
+    *) printf '' ;;
+  esac
+}
+
+# Everything the runner wrote that a machine can read, in one file. A committed
+# .claude/exloom-test-report wins, because the repo knows where its runner puts
+# reports better than any guess here.
+_report_blob() {   # _report_blob <adapter> <stdout-file>
+  local a="$1" out="$2" blob="$WT/.exloom-report" declared=""
+  : > "$blob" 2>/dev/null || { printf ''; return 0; }
+  declared="$(head -1 .claude/exloom-test-report 2>/dev/null | tr -d '\r')"
+  if [[ -n "$declared" ]] && git ls-files --error-unmatch .claude/exloom-test-report >/dev/null 2>&1; then
+    cat "$WT/$declared" >> "$blob" 2>/dev/null
+  fi
+  case "$a" in
+    gradle)  find "$WT" -path '*/test-results/*' -name '*.xml' -exec cat {} + >> "$blob" 2>/dev/null ;;
+    pytest)  cat "$WT/.exloom-junit.xml" >> "$blob" 2>/dev/null ;;
+    jest|vitest) cat "$WT/.exloom-jest.json" >> "$blob" 2>/dev/null ;;
+    dotnet)  find "$WT" -name 'exloom.trx' -exec cat {} + >> "$blob" 2>/dev/null ;;
+    flutter) cat "$out" >> "$blob" 2>/dev/null ;;
+  esac
+  [[ -s "$blob" ]] && printf '%s' "$blob" || printf ''
+}
+
+# Certified says a narrow proof is not enough, and strict mode puts every branch
+# on Certified. Both are honoured only when committed.
+_wide_lane() {
+  local v=""
+  if [[ -f .claude/exloom-strict ]] && git ls-files --error-unmatch .claude/exloom-strict >/dev/null 2>&1; then return 0; fi
+  if [[ -f .claude/exloom-lane ]] && git ls-files --error-unmatch .claude/exloom-lane >/dev/null 2>&1; then
+    v="$(head -1 .claude/exloom-lane 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+  fi
+  [[ "$v" == certified ]]
+}
+
 # Styles, assets, lockfiles, dependency manifests and config: nothing a test can notice.
 not_testable() {
   case "${1##*/}" in
@@ -249,6 +429,35 @@ git worktree add --detach -q "$WT" "$BASE" >/dev/null 2>&1 || { echo "worktree f
 echo "base:    ${BASE:0:12}"
 echo "command: $TESTCMD"
 
+ADAPTER="$(_adapter)"
+SELECTION=""; SELECTION_SOURCE="fallback"; CLASSIFICATION="fallback"; RUN1_STATE="pass"
+CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+if ! _wide_lane; then
+  _sel_head="$(_selected_tests head)"; _sel_base="$(_selected_tests base)"
+  _tmpl=""
+  if [[ -f .claude/exloom-test-select ]] && git ls-files --error-unmatch .claude/exloom-test-select >/dev/null 2>&1; then
+    _tmpl="$(head -1 .claude/exloom-test-select 2>/dev/null | tr -d '')"
+  fi
+  if [[ -n "$_tmpl" && "$_tmpl" == *"{tests}"* && -n "$_sel_head" ]]; then
+    CMD_HEAD="${_tmpl//\{tests\}/$(printf '%s' "$_sel_head" | tr '
+' ' ')}"
+    [[ -n "$_sel_base" ]] && CMD_BASE="${_tmpl//\{tests\}/$(printf '%s' "$_sel_base" | tr '
+' ' ')}"
+    SELECTION_SOURCE="exloom-test-select"
+  elif [[ -n "$_sel_head" ]]; then
+    _nh="$(_narrow_cmd "$ADAPTER" $_sel_head)"
+    if [[ -n "$_nh" ]]; then
+      CMD_HEAD="$_nh"
+      [[ -n "$_sel_base" ]] && CMD_BASE="$(_narrow_cmd "$ADAPTER" $_sel_base)" || CMD_BASE=""
+      SELECTION_SOURCE="diff"
+    fi
+  fi
+  SELECTION="$(printf '%s' "$_sel_head" | tr '
+' ' ' | sed 's/ *$//')"
+  [[ "$SELECTION_SOURCE" != fallback && -z "$CMD_BASE" ]] && RUN1_STATE="n/a"
+  [[ "$SELECTION_SOURCE" != fallback ]] && echo "selection: ${SELECTION:-none} (${SELECTION_SOURCE})"
+fi
+
 # ---------- write the receipt ----------
 # Into the SAME protected directory as reviewer receipts, for the same reason:
 # protect-verdicts.sh denies writing there by hand, so this file is evidence that
@@ -346,12 +555,16 @@ _receipt() {
   mkdir -p "$vdir" 2>/dev/null || return 0
   local cmdhash="none"
   [[ -f ".claude/exloom-test-command" ]] && cmdhash="$(git hash-object .claude/exloom-test-command 2>/dev/null || echo none)"
-  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","matrix":"%s","at":"%s"}\n' \
+  printf '{"check":"change-is-tested","result":"%s","method":"%s","base":"%s","head":"%s","cmd":"%s","cmd_hash":"%s","criteria":"%s","matrix":"%s","selection":"%s","selection_source":"%s","run1":"%s","classification":"%s","at":"%s"}\n' \
     "$result" "$method" "$BASE" "$head" \
     "$(printf '%s' "$TESTCMD" | tr -cd 'A-Za-z0-9 ._:/@=+-' | cut -c1-200)" \
     "$cmdhash" \
     "${CRITERIA_RAN:-}" \
     "${MATRIX:-}" \
+    "$(printf '%s' "${SELECTION:-}" | tr -cd 'A-Za-z0-9 ._/-' | cut -c1-300)" \
+    "${SELECTION_SOURCE:-fallback}" \
+    "${RUN1_STATE:-pass}" \
+    "${CLASSIFICATION:-fallback}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
@@ -370,7 +583,7 @@ _receipt() {
 if [[ -z "$TST" ]]; then
   git -C "$WT" checkout -q "$(git rev-parse HEAD)" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
   echo "no test changed: running the full suite at the tip…"
-  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.tip-out" 2>&1
+  ( cd "$WT" && eval "$CMD_HEAD" ) >"$WT/.tip-out" 2>&1
   tip_rc=$?
   if [[ $tip_rc -eq 0 && $NNB -eq 1 ]]; then
     _receipt NO_NEW_BEHAVIOUR full-suite
@@ -389,9 +602,15 @@ if [[ -z "$TST" ]]; then
   exit 1
 fi
 
-echo "run 1/3: base source + base tests (control — must pass)…"
-( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
-base_rc=$?
+if [[ "$RUN1_STATE" == "n/a" ]]; then
+  echo "run 1/3: skipped — every selected test is new at base, so there is nothing to control against."
+  base_rc=0
+  : > "$WT/.base-out"
+else
+  echo "run 1/3: base source + base tests (control — must pass)…"
+  ( cd "$WT" && eval "$CMD_BASE" ) >"$WT/.base-out" 2>&1
+  base_rc=$?
+fi
 if [[ $base_rc -ne 0 ]]; then
   echo
   echo "PROOF VOID — the suite does not pass at the base commit (exit $base_rc)."
@@ -433,7 +652,7 @@ done <<< "$TST"
 [[ $copied -gt 0 ]] || { echo "could not stage test files into the worktree" >&2; exit 2; }
 
 echo "run 2/3: base source + your $copied test file(s) (must fail)…"
-( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
+( cd "$WT" && eval "$CMD_HEAD" ) >"$WT/.exloom-out" 2>&1
 rc=$?
 
 # A criterion ref in a test name is a claim, and a test that passes against the
@@ -464,7 +683,7 @@ if [[ $rc -ne 0 ]]; then
     cp "$sf" "$WT/$sf" 2>/dev/null
   done <<< "$SRC"
   echo "run 3/3: your change + your tests (must pass)…"
-  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.now-out" 2>&1
+  ( cd "$WT" && eval "$CMD_HEAD" ) >"$WT/.now-out" 2>&1
   now_rc=$?
   if [[ $now_rc -ne 0 ]]; then
     _receipt NOT_PROVED
@@ -488,7 +707,34 @@ fi
 # because `f` does not exist at base. Signatures cover the "symbol missing at
 # base" form per language. Do NOT add `no such file or directory`: that is a
 # normal assertion failure when a test checks for an output artifact.
-if [[ $rc -ne 0 ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|NameError|AttributeError: module|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|undefined: [A-Za-z_]|cannot find function|cannot find value|cannot find type|error CS[0-9]+|error\[E0[0-9]+\]|command not found' "$WT/.exloom-out" 2>/dev/null; then
+RUN2_VERDICT="unknown"
+if [[ $rc -ne 0 ]]; then
+  _blob="$(_report_blob "$ADAPTER" "$WT/.exloom-out")"
+  RUN2_VERDICT="$(_classify_run2 "$_blob" "$rc")"
+  [[ "$RUN2_VERDICT" != unknown ]] && CLASSIFICATION="adapter"
+fi
+if [[ "$RUN2_VERDICT" == error ]]; then
+  _receipt PROOF_ERROR run2-error
+  echo
+  echo "PROOF_ERROR — your tests ran at the base commit and failed, but the"
+  echo "report says they neither asserted nor failed to compile: the run itself"
+  echo "broke. Whether your tests notice your change is unknown."
+  echo
+  echo "This is NOT the same as PROOF VOID, which is run 1 — the suite already"
+  echo "failing at the base commit, before your tests were added."
+  echo
+  echo "To fix, in order of likelihood:"
+  echo "  1. A fixture, config or plugin your tests load is missing at the base"
+  echo "     commit. Commit it, or make the test provide it."
+  echo "  2. The runner crashed. The last 25 lines below name what it could not do."
+  echo "  3. If the change is purely additive, pin .claude/exloom-mutation-command;"
+  echo "     mutation asks the same question without needing the code to be absent."
+  echo
+  echo "command: $CMD_HEAD"
+  echo "--- last 25 lines ---"; tail -25 "$WT/.exloom-out" 2>/dev/null
+  exit 2
+fi
+if [[ $rc -ne 0 && "$RUN2_VERDICT" != proved ]] && grep -qiE 'cannot find symbol|error: package .* does not exist|compilation failed|compileJava FAILED|ModuleNotFoundError|ImportError|NameError|AttributeError: module|cannot find module|unresolved reference|error TS[0-9]+|undefined reference|undefined: [A-Za-z_]|cannot find function|cannot find value|cannot find type|error CS[0-9]+|error\[E0[0-9]+\]|command not found' "$WT/.exloom-out" 2>/dev/null; then
   # A purely additive change cannot satisfy the three-run proof: its tests do not
   # compile at base. Mutation asks the same question without needing the code to
   # be absent. The contract is the EXIT CODE — the repo owns the tool and the

@@ -25,14 +25,14 @@ Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop a
 | `commit-work` | Commit the changes outside `.claude/reviews/` first. |
 | `spec` | Run `exloom:brainstorming`, even for a fix; put its path in `**Spec:**`. |
 | `plan` | Run `exloom:planning-for-handoff`; put its path in `**Plan:**`. |
-| `build` | With a plan, run `exloom:executing-handoff-plans`, one reviewed task at a time, until every task is approved. Without one, make the change and commit. |
+| `build` | With a plan, run `exloom:executing-handoff-plans`, one reviewed task at a time, until every task is approved. Without one, make the change and commit. After each task run `${CLAUDE_PLUGIN_ROOT}/scripts/fast-check.sh`; it is advisory, so report a warning and carry on. |
 | `report` | Run `exloom_render_report "$B"`; commit it. |
 | `review` | Dispatch the reviewers `/review-complete` names: the whole-branch review once, verify mode after a fix. |
 | `fix` | Dispatch `exloom:fixer` with the findings verbatim (prompt in `/review-complete`), then the reviewer in verify mode. |
 | `rulings` | Per finding the verify left NOT ADDRESSED, one AskUserQuestion with the reviewer's reason and exactly: "Fix again" (go to `fix`), "Not a real problem, ignore (PARKED)" (`PARKED: <why>`), "Fix later, with a ticket (DEFERRED)" (`DEFERRED <ticket>: <why>`). For a proof ruling, ask whether the change is a refactor; record `- Proof: refactor — <their reason>`. Write the answer under the section the message names (`## Rulings` by default). Never write a ruling they did not give. |
 | `proof` | Run the block below; commit its receipt. NOT PROVED needs a test that fails without the change. NO_TEST_CHANGED goes to `rulings`. |
 | `smoke` | Follow `/smoke-test`. |
-| `push` | Print `exloom_branch_summary "$B"`; the branch is ready. Do not push unless asked. |
+| `push` | When committed `.claude/exloom-ci` says `none`, run the pinned test command once and record the result under `## Full suite` in the checklist; with any other value the suite belongs to CI and branch protection, and a CI run reference is not evidence here. Then print `exloom_branch_summary "$B"`; the branch is ready. Do not push unless asked. |
 | `blocked` | Show the user the verbose line below; ask what to do. |
 
 ```bash

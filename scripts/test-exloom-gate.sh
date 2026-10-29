@@ -900,6 +900,121 @@ ok "genuine behavioural test -> PROVED" "$(prvrun "$PB")" "0"
 ok "--cmd false -> PROOF VOID" \
    "$(bash "$PRV" --base "$PB" --cmd false >/dev/null 2>&1; echo $?)" "2"
 
+
+section "proof: run-2 classification comes from a structured report, never from text"
+
+# A run-2 failure is scored today by one cross-language regex: match means the
+# tests could not build (NOT_APPLICABLE), no match means they asserted (PROVED).
+# A broken fixture, a bad config or a crashed harness therefore scores PROVED.
+# PROOF_ERROR closes that, but only on a machine-readable signal — a text match
+# must never reach it, or a repo whose assertion message happens to contain the
+# wrong word becomes unpushable.
+CLS="$(sed -n '/^_classify_run2() {/,/^}/p' "$PRVS")"
+cls() {   # cls <report-file> <exit-code> -> proved|error|unknown
+  bash -c 'set -u; '"$CLS"'
+    _classify_run2 "$1" "$2"' _ "$1" "${2:-1}"
+}
+RP="$REG/reports"; rm -rf "$RP"; mkdir -p "$RP"
+
+# JUnit XML — Gradle, Maven, pytest --junitxml. `errors` and `failures` are
+# separate attributes precisely because the two outcomes are different.
+printf '<testsuite tests="3" failures="1" errors="0"><testcase name="a"/></testsuite>\n' > "$RP/j-fail.xml"
+ok "junit: a plain assertion failure is PROVED" "$(cls "$RP/j-fail.xml")" "proved"
+printf '<testsuite tests="3" failures="0" errors="1"><testcase name="a"/></testsuite>\n' > "$RP/j-err.xml"
+ok "junit: an error with no failure is an ERROR" "$(cls "$RP/j-err.xml")" "error"
+printf '<testsuite tests="3" failures="2" errors="1"><testcase name="a"/></testsuite>\n' > "$RP/j-both.xml"
+ok "junit: a failure alongside an error is still PROVED" "$(cls "$RP/j-both.xml")" "proved"
+printf '<testsuite tests="0" failures="0" errors="0"></testsuite>\n' > "$RP/j-none.xml"
+ok "junit: nothing ran -> no opinion" "$(cls "$RP/j-none.xml")" "unknown"
+
+# Jest and Vitest, --json. A suite that throws before any test runs reports
+# testExecError and zero failed tests.
+printf '{"numFailedTests":1,"numFailedTestSuites":1,"testResults":[{"status":"failed"}]}\n' > "$RP/jest-fail.json"
+ok "jest: a plain assertion failure is PROVED" "$(cls "$RP/jest-fail.json")" "proved"
+printf '{"numFailedTests":0,"numFailedTestSuites":1,"testResults":[{"status":"failed","testExecError":{"message":"boom"}}]}\n' > "$RP/jest-crash.json"
+ok "jest: a suite that crashed before asserting is an ERROR" "$(cls "$RP/jest-crash.json")" "error"
+
+# .NET, --logger trx. Counters carries failed and error separately.
+printf '<TestRun><ResultSummary><Counters total="3" failed="1" error="0" aborted="0"/></ResultSummary></TestRun>\n' > "$RP/t-fail.trx"
+ok "trx: a plain assertion failure is PROVED" "$(cls "$RP/t-fail.trx")" "proved"
+printf '<TestRun><ResultSummary><Counters total="3" failed="0" error="1" aborted="0"/></ResultSummary></TestRun>\n' > "$RP/t-err.trx"
+ok "trx: an error with no failure is an ERROR" "$(cls "$RP/t-err.trx")" "error"
+
+# Flutter, --machine. One JSON event per line.
+printf '{"type":"testDone","result":"failure"}\n' > "$RP/f-fail.jsonl"
+ok "flutter: a plain assertion failure is PROVED" "$(cls "$RP/f-fail.jsonl")" "proved"
+printf '{"type":"error","error":"boom"}\n' > "$RP/f-err.jsonl"
+ok "flutter: a harness error is an ERROR" "$(cls "$RP/f-err.jsonl")" "error"
+
+# No opinion is the default, and the only route to the existing text check.
+ok "a missing report has no opinion" "$(cls "$RP/absent.xml")" "unknown"
+printf 'not a report at all\n' > "$RP/garbage.txt"
+ok "an unparseable report has no opinion" "$(cls "$RP/garbage.txt")" "unknown"
+printf '<testsuite tests="3" failures="1" errors="0"/>\n' > "$RP/j-ok.xml"
+ok "a report from a PASSING run has no opinion" "$(cls "$RP/j-ok.xml" 0)" "unknown"
+
+section "proof: the tests a run executes are the ones the diff touches"
+
+SELF="$(sed -n '/^is_test() {/,/^}/p' "$PRVS"; sed -n '/^_selected_tests() {/,/^}/p' "$PRVS")"
+sel() {   # sel <side> -> the selected paths for base or head
+  bash -c 'set -u; '"$SELF"'
+    _selected_tests "$1"' _ "$1"
+}
+subrepo seltest
+mkdir -p tests
+printf 'x\n' > src/keep.sh
+printf 'echo old\n' > tests/old.sh
+printf 'echo gone\n' > tests/gone.sh
+printf 'echo moved\n' > tests/moved.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1; SB="$(git rev-parse HEAD)"
+printf 'echo old2\n' > tests/old.sh
+printf 'echo brand new\n' > tests/fresh.sh
+git rm -q tests/gone.sh >/dev/null 2>&1
+git mv tests/moved.sh tests/renamed.sh >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+export BASE="$SB"
+ok "a modified test is selected at head"   "$(sel head | grep -c '^tests/old.sh$')"     "1"
+ok "a new test is selected at head"        "$(sel head | grep -c '^tests/fresh.sh$')"   "1"
+ok "a new test is NOT selected at base"    "$(sel base | grep -c '^tests/fresh.sh$')"   "0"
+ok "a deleted test is selected nowhere"    "$(sel head | grep -c '^tests/gone.sh$')$(sel base | grep -c '^tests/gone.sh$')" "00"
+ok "a rename selects the new path at head" "$(sel head | grep -c '^tests/renamed.sh$')" "1"
+ok "a rename selects the old path at base" "$(sel base | grep -c '^tests/moved.sh$')"   "1"
+ok "a source file is never selected"       "$(sel head | grep -c 'keep.sh')"            "0"
+unset BASE
+
+
+section "fast-check: advisory, and advisory means it cannot stop anything"
+
+FC="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/fast-check.sh"
+subrepo fastcheck
+FCB="$(git rev-parse --abbrev-ref HEAD)"; FCL=".claude/reviews/${FCB}.md"
+mkdir -p "$(dirname "$FCL")"
+printf '# checklist\n' > "$FCL"
+ok "a failing fast check still exits 0" \
+   "$(bash "$FC" --cmd false >/dev/null 2>&1; echo $?)" "0"
+ok "a passing fast check exits 0" \
+   "$(bash "$FC" --cmd true >/dev/null 2>&1; echo $?)" "0"
+printf '# checklist\n' > "$FCL"; bash "$FC" --cmd false >/dev/null 2>&1
+ok "a failing fast check is recorded in the checklist" \
+   "$(grep -c 'Fast check:.*warn' "$FCL" 2>/dev/null)" "1"
+printf '# checklist\n' > "$FCL"; bash "$FC" --cmd true >/dev/null 2>&1
+ok "a passing fast check is recorded too" \
+   "$(grep -c 'Fast check:.*pass' "$FCL" 2>/dev/null)" "1"
+ok "fast-check writes no verdict receipt" \
+   "$(ls -d .claude/reviews/*.verdicts 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "no fast command is reported, not fatal" \
+   "$(bash "$FC" 2>&1 | grep -c 'no fast command')" "1"
+
+# An uncommitted setting is not a setting: each developer would check something
+# different, and the branch could not say what was checked.
+printf 'false\n' > .claude/exloom-fast-command
+ok "an uncommitted fast command is ignored" \
+   "$(bash "$FC" 2>&1 | grep -c 'fast-check: false')" "0"
+git add .claude/exloom-fast-command >/dev/null 2>&1
+git commit -qm fc >/dev/null 2>&1
+ok "a committed fast command is used" \
+   "$(bash "$FC" 2>&1 | grep -c 'fast-check: false')" "1"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
