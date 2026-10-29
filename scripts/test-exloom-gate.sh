@@ -1283,6 +1283,9 @@ ok "a message to an agent not in the log is allowed"           "$(sm aSOMEONEELS
 ok "a message named for a reviewer is refused"                 "$(sm exloom:l1-reviewer)" "2"
 ok "a message named for the spec reviewer is refused"          "$(sm exloom:spec-reviewer)" "2"
 ok "a message named for the fixer is allowed"                  "$(sm exloom:fixer)" "0"
+ok "a recipient named in mixed case is still refused"  "$(sm Exloom:L1-Reviewer)" "2"
+ok "...and in upper case"                              "$(sm EXLOOM:SPEC-REVIEWER)" "2"
+ok "...with a plugin prefix"                           "$(sm plugin:exloom:adversarial-reviewer)" "2"
 ok "the refusal names the fresh dispatch instead" \
    "$(python3 -c "
 import json
@@ -1331,6 +1334,17 @@ ok "...and read a file at a commit" \
    "$(wt exloom:l1-reviewer 'git show abc:src/a.go')" "0"
 ok "...and remove a worktree it should not have made" \
    "$(wt exloom:l1-reviewer 'git worktree remove /tmp/oops')" "0"
+
+# git takes options before the subcommand, and an option that takes a value
+# breaks a pattern that assumes every option is a bare flag.
+ok "a reviewer may not add a worktree via -C" \
+   "$(wt exloom:l1-reviewer 'git -C /tmp/elsewhere worktree add /tmp/wt HEAD')" "2"
+ok "...nor via --git-dir" \
+   "$(wt exloom:l1-reviewer 'git --git-dir=/tmp/x/.git worktree add /tmp/wt HEAD')" "2"
+ok "...nor with -c config before it" \
+   "$(wt exloom:l1-reviewer 'git -c core.quotepath=false worktree add /tmp/wt HEAD')" "2"
+ok "...nor with the paths reordered" \
+   "$(wt exloom:l1-reviewer 'git worktree --quiet add /tmp/wt HEAD')" "2"
 ok "the refusal names what to use instead" \
    "$(python3 -c "
 import json

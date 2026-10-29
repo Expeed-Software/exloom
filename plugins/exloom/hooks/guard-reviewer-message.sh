@@ -56,9 +56,11 @@ cd "$ROOT" 2>/dev/null || exit 0
 REVIEWERS='l1-reviewer|adversarial-reviewer|security-auditor|spec-reviewer'
 
 # Named outright — `exloom:l1-reviewer`, or a name the operator chose that
-# carries the agent's own name.
+# carries the agent's own name. Matched without regard to case or prefix: the
+# recipient string comes from whoever typed it, not from the dispatch log.
 HIT=""
-printf '%s' "$TO" | grep -Eq "(^|[^a-z-])(${REVIEWERS})([^a-z-]|$)" && HIT="$TO"
+TO_N="$(printf '%s' "$TO" | tr '[:upper:]' '[:lower:]' | sed -e 's/^plugin://' -e 's/^exloom://')"
+printf '%s' "$TO_N" | grep -Eq "(^|[^a-z-])(${REVIEWERS})([^a-z-]|$)" && HIT="$TO"
 
 # Otherwise an opaque agent id: resolve it through the dispatch log, which maps
 # agent_id to the tool call that launched it, and that call to the agent name.
@@ -72,7 +74,7 @@ if [[ -z "$HIT" ]]; then
     if [[ -n "$TUID" ]]; then
       AGENT="$(grep -F "\"tool_use_id\":\"${TUID}\"" "$DLOG" 2>/dev/null | grep -F '"dispatch_head"' | tail -1 \
         | sed -n 's/.*"agent":"\([^"]*\)".*/\1/p')"
-      printf '%s' "$AGENT" | grep -Eq "^(${REVIEWERS})$" && HIT="$AGENT"
+      printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]' | grep -Eq "^(${REVIEWERS})$" && HIT="$AGENT"
     fi
   fi
 fi

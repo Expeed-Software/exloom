@@ -41,6 +41,12 @@ try:
 except Exception:
     print("")' 2>/dev/null || true)"
   fi
+  # No JSON parser is a real case on a bare Windows shell. Falling through to an
+  # empty agent would let the guard off, so the field is read with sed instead.
+  if [[ -z "$out" ]]; then
+    out="$(printf '%s' "$HOOK_INPUT" \
+      | sed -n "s/.*\"${path##*.}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1)"
+  fi
   printf '%s' "$out"
 }
 
@@ -51,9 +57,13 @@ case "$AGENT" in
 esac
 
 CMD="$(_field tool_input.command)"
-# `worktree remove` and `worktree list` are how a reviewer tidies up or orients
-# itself; only creating one is refused.
-printf '%s' "$CMD" | grep -Eq '(^|[^A-Za-z-])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+worktree[[:space:]]+add([^A-Za-z-]|$)' || exit 0
+# Matched on the two words appearing, not on a token sequence. `git` takes
+# options before its subcommand and options take values, so any exact sequence
+# is one `git -C <path> worktree add` away from being bypassed. `worktree
+# remove` and `worktree list` carry no `add`, so tidying up still works, and the
+# cost of a false refusal is a reviewer being told to use `git diff`.
+printf '%s' "$CMD" | grep -Eq '(^|[^A-Za-z-])worktree([^A-Za-z-]|$)' || exit 0
+printf '%s' "$CMD" | grep -Eq '(^|[^A-Za-z-])add([^A-Za-z-]|$)' || exit 0
 
 git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
