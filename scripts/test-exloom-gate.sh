@@ -1015,6 +1015,47 @@ git commit -qm fc >/dev/null 2>&1
 ok "a committed fast command is used" \
    "$(bash "$FC" 2>&1 | grep -c 'fast-check: false')" "1"
 
+
+section "exloom-ci: the full suite is owned by CI, or by the gate, never by nobody"
+
+# Honoured only when committed, like every other setting: an uncommitted one
+# would mean the gate asked a different question of each developer.
+subrepo cisettings
+printf 'none\n' > .claude/exloom-ci
+ok "an uncommitted exloom-ci is not read" "$(exloom_repo_ci)" ""
+git add .claude/exloom-ci >/dev/null 2>&1; git commit -qm ci >/dev/null 2>&1
+ok "a committed exloom-ci is read"        "$(exloom_repo_ci)" "none"
+printf 'github\n' > .claude/exloom-ci; git add -A >/dev/null 2>&1; git commit -qm ci2 >/dev/null 2>&1
+ok "github is read"                       "$(exloom_repo_ci)" "github"
+printf 'nonsense\n' > .claude/exloom-ci; git add -A >/dev/null 2>&1; git commit -qm ci3 >/dev/null 2>&1
+ok "an unknown value is not honoured"     "$(exloom_repo_ci)" ""
+
+# With no CI, the suite has to run somewhere, and the only place left is here.
+ok "none demands a recorded full suite"   "$(exloom_full_suite_required none; echo $?)" "0"
+ok "github does not"                      "$(exloom_full_suite_required github; echo $?)" "1"
+ok "an absent setting does not"           "$(exloom_full_suite_required ''; echo $?)" "1"
+
+CLB="$(printf '## Full suite\n\n<paste output / screenshot link>\n')"
+ok "an unfilled Full suite section is not a result" \
+   "$(printf '%s\n' "$CLB" | exloom_full_suite_recorded; echo $?)" "1"
+CLG="$(printf '## Full suite\n\n`./gradlew test` — 412 tests, 0 failures at 4f2a1c9\n')"
+ok "a recorded result counts" \
+   "$(printf '%s\n' "$CLG" | exloom_full_suite_recorded; echo $?)" "0"
+ok "a missing section is not a result" \
+   "$(printf '## Smoke test\n\nfine\n' | exloom_full_suite_recorded; echo $?)" "1"
+
+section "settings a .gitignore would silently drop"
+
+# Every setting is honoured only when committed, so one that .gitignore keeps
+# out is a setting the author thinks is on and the gate never sees.
+subrepo ignoredsettings
+printf '.claude/exloom-*\n' > .gitignore
+git add .gitignore >/dev/null 2>&1; git commit -qm gi >/dev/null 2>&1
+IGN="$(exloom_ignored_settings "$(git rev-parse --abbrev-ref HEAD)")"
+for s in exloom-ci exloom-fast-command exloom-test-select; do
+  ok "an ignored .claude/$s is reported" "$(printf '%s\n' "$IGN" | grep -c "^\.claude/$s$")" "1"
+done
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

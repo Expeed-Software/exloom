@@ -490,6 +490,7 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
     .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-not-testable-patterns .claude/exloom-docs .claude/exloom-doc-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
+    .claude/exloom-ci .claude/exloom-fast-command .claude/exloom-test-select \
     | git check-ignore --no-index --stdin 2>/dev/null
 }
 
@@ -709,6 +710,32 @@ exloom_reviewer_model() {   # exloom_reviewer_model <agent>
 # Strict mode: a committed .claude/exloom-strict puts every branch on the Certified lane.
 exloom_is_strict() {
   [[ -f .claude/exloom-strict ]] && git ls-files --error-unmatch .claude/exloom-strict >/dev/null 2>&1
+}
+
+# Who owns the full suite. With CI it is branch protection, which exloom cannot
+# see and does not claim to; with `none` there is nowhere else, so the gate asks
+# for a recorded run before the push.
+exloom_repo_ci() {
+  local f=".claude/exloom-ci" v=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    v="$(head -1 "$f" 2>/dev/null | tr -cd 'a-z')"
+  fi
+  case "$v" in github|azure|none) printf '%s' "$v" ;; *) printf '' ;; esac
+}
+
+exloom_full_suite_required() {   # exloom_full_suite_required <ci-value>
+  [[ "${1:-}" == none ]]
+}
+
+# A real result under `## Full suite`: anything that is not blank, not a comment
+# and not the template's own angle-bracket placeholder.
+exloom_full_suite_recorded() {   # reads the checklist on stdin
+  local body
+  body="$(awk '/^## Full suite/{f=1; next} /^## /{f=0} f' \
+    | awk '/<!--/{inc=1} !inc{print} /-->/{inc=0}' \
+    | grep -vE '^[[:space:]]*$' \
+    | grep -vE '^[[:space:]]*<[^>]*>[[:space:]]*$')"
+  [[ -n "$body" ]]
 }
 
 exloom_repo_lane() {
@@ -2365,6 +2392,16 @@ Configure git commit signing (GPG or SSH) and run /exloom, which commits with -S
         return 2
       fi
     fi
+  fi
+
+  # No CI means the suite runs here or nowhere. A CI run reference is not
+  # accepted in its place: CI runs after the push this gate is deciding on.
+  if [[ $is_report -eq 0 ]] && exloom_full_suite_required "$(exloom_repo_ci)" \
+     && ! printf '%s\n' "$content" | exloom_full_suite_recorded; then
+    _exloom_block "$action" "$checklist records no full-suite run, and committed .claude/exloom-ci says 'none'.
+With no CI there is nowhere else for the suite to run. Run the pinned test command once and record what it printed under '## Full suite'.
+A link to a CI run is not evidence here — CI runs after this push."
+    return 2
   fi
 
   # Surface recorded escape hatches so a skipped step is visible, not silent.
