@@ -1553,6 +1553,36 @@ git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
 ok "a genuinely broken base is still PROOF VOID" \
    "$(bash "$PRVF" --base "$FBV" >/dev/null 2>&1; echo $?)" "2"
 
+# All-new tests skip run 1, so a wrong narrowed command first shows itself at
+# run 3 — and shows as the author's own change being broken. That blocked the
+# push on a repo the adapters simply guessed wrong about.
+fbrepo fb-allnew
+# The pinned command must be valid at ANY base, so it globs rather than naming
+# this branch's own test file.
+printf 'for f in tests/*.sh; do bash "$f" || exit 1; done
+' > .claude/exloom-test-command
+printf './no-such-runner {tests}
+' > .claude/exloom-test-select
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBN="$(git rev-parse HEAD)"
+printf 'calc(){ echo 4; }
+newfn(){ echo 7; }
+' > src/l.sh
+printf '. ./src/l.sh
+[ "$(newfn)" = "7" ]
+' > tests/brand-new.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRVF" --base "$FBN" >/dev/null 2>&1; FB3RC=$?
+FB3J=".claude/reviews/main.verdicts/proof.json"
+ok "all-new tests + a broken narrowed command do not block" \
+   "$([[ "$FB3RC" -eq 0 ]] && echo "not blocked" || echo "blocked($FB3RC)")" "not blocked"
+ok "...and the receipt says it fell back" \
+   "$(sed -n 's/.*"selection_source":"\([a-z-]*\)".*/\1/p' "$FB3J" | tail -1)" "fallback"
+# run 1 ran the pinned command here, because the selection was empty at base and
+# only the head side was narrowed. It passing is the honest record of that.
+ok "...with run 1 recorded as it actually ran" \
+   "$(sed -n 's/.*"run1":"\([a-z\/]*\)".*/\1/p' "$FB3J" | tail -1)" "pass"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

@@ -436,7 +436,8 @@ if ! _wide_lane; then
   _sel_head="$(_selected_tests head)"; _sel_base="$(_selected_tests base)"
   _tmpl=""
   if [[ -f .claude/exloom-test-select ]] && git ls-files --error-unmatch .claude/exloom-test-select >/dev/null 2>&1; then
-    _tmpl="$(head -1 .claude/exloom-test-select 2>/dev/null | tr -d '')"
+    _tmpl="$(head -1 .claude/exloom-test-select 2>/dev/null | tr -d '
+')"
   fi
   if [[ -n "$_tmpl" && "$_tmpl" == *"{tests}"* && -n "$_sel_head" ]]; then
     CMD_HEAD="${_tmpl//\{tests\}/$(printf '%s' "$_sel_head" | tr '
@@ -655,14 +656,25 @@ if [[ $base_rc -ne 0 ]]; then
 fi
 
 # ---------- RUN 2: base source + NEW tests. MUST FAIL, and for the right reason.
-copied=0
-while IFS= read -r t; do
-  [[ -z "$t" ]] && continue
-  # A test the branch deleted must not run against the change it was replaced for.
-  [[ -f "$t" ]] || { rm -f "$WT/$t"; copied=$((copied+1)); continue; }
-  mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
-  cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
-done <<< "$TST"
+_stage_tests() {
+  copied=0
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    # A test the branch deleted must not run against the change it was replaced for.
+    [[ -f "$t" ]] || { rm -f "$WT/$t"; copied=$((copied+1)); continue; }
+    mkdir -p "$WT/$(dirname "$t")" 2>/dev/null
+    cp "$t" "$WT/$t" 2>/dev/null && copied=$((copied+1))
+  done <<< "$TST"
+}
+_stage_sources() {
+  while IFS= read -r sf; do
+    [[ -n "$sf" ]] || continue
+    [[ -f "$sf" ]] || { rm -f "$WT/$sf"; continue; }
+    mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
+    cp "$sf" "$WT/$sf" 2>/dev/null
+  done <<< "$SRC"
+}
+_stage_tests
 [[ $copied -gt 0 ]] || { echo "could not stage test files into the worktree" >&2; exit 2; }
 
 echo "run 2/3: base source + your $copied test file(s) (must fail)…"
@@ -676,7 +688,20 @@ rc=$?
 CRITERIA_BASE_OK="$(_criteria_from_reports "$WT")"
 
 # 126/127 are "not executable" / "command not found" — a broken command, never a
-# test noticing anything.
+# test noticing anything. Under a narrowed selection that is most likely the
+# adapter, not the repository, so the suite is retried wide before concluding.
+if [[ ( $rc -eq 126 || $rc -eq 127 ) && "$SELECTION_SOURCE" != "fallback" ]]; then
+  echo "run 2/3: the narrowed command could not run (exit $rc); retrying on the pinned suite…"
+  git -C "$WT" checkout -q -- . 2>/dev/null
+  _stage_tests
+  ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
+  rc=$?
+  CRITERIA_BASE_OK="$(_criteria_from_reports "$WT")"
+  SELECTION_SOURCE="fallback"; SELECTION=""
+  CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+  echo "selection: none (fallback — the narrowed command did not run in this repo)"
+fi
+
 if [[ $rc -eq 126 || $rc -eq 127 ]]; then
   _receipt NOT_PROVED
   echo; echo "NOT PROVED — the test command could not run (exit $rc)."
@@ -690,15 +715,33 @@ fi
 # passes runs 1 and 2 while testing nothing — and, on its own merit, tests that
 # do not pass on the change they were written for.
 if [[ $rc -ne 0 ]]; then
-  while IFS= read -r sf; do
-    [[ -n "$sf" ]] || continue
-    [[ -f "$sf" ]] || { rm -f "$WT/$sf"; continue; }
-    mkdir -p "$WT/$(dirname "$sf")" 2>/dev/null
-    cp "$sf" "$WT/$sf" 2>/dev/null
-  done <<< "$SRC"
+  _stage_sources
   echo "run 3/3: your change + your tests (must pass)…"
   ( cd "$WT" && eval "$CMD_HEAD" ) >"$WT/.now-out" 2>&1
   now_rc=$?
+  # Where every selected test is new, run 1 was skipped, so run 3 is the first
+  # place a wrong narrowed command shows itself — and it shows as the author's
+  # change being broken. Retry runs 2 and 3 wide before saying that.
+  if [[ $now_rc -ne 0 && "$SELECTION_SOURCE" != "fallback" ]]; then
+    echo "run 3/3: the narrowed command did not pass here; retrying runs 2 and 3 on the pinned suite…"
+    git -C "$WT" checkout -q -- . 2>/dev/null
+    _stage_tests
+    ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.exloom-out" 2>&1
+    rc=$?
+    CRITERIA_BASE_OK="$(_criteria_from_reports "$WT")"
+    if [[ $rc -ne 0 ]]; then
+      _stage_sources
+      ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.now-out" 2>&1
+      now_rc=$?
+    else
+      now_rc=0          # the tests pass without the change: a real NOT_PROVED
+    fi
+    if [[ $now_rc -eq 0 ]]; then
+      SELECTION_SOURCE="fallback"; SELECTION=""
+      CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+      echo "selection: none (fallback — the narrowed command did not run in this repo)"
+    fi
+  fi
   if [[ $now_rc -ne 0 ]]; then
     _receipt NOT_PROVED
     echo
