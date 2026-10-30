@@ -435,6 +435,12 @@ exloom_derive_tier() {
     _exloom_tier_reason "$files" '(^|/)(migrations?|liquibase|flyway|changesets?)(/|$)|db/changelog' 'data migration'
     printf '3'; return 0
   fi
+  # A setting decides what the gate asks for, so changing one changes the
+  # protection itself. That earns the tier with no escape hatch.
+  if printf '%s\n' "$files" | grep -Eq '(^|/)\.claude/exloom-'; then
+    _exloom_tier_reason "$files" '(^|/)\.claude/exloom-' 'changes the gate'"'"'s own settings'
+    printf '3'; return 0
+  fi
   # Matched on the path split at camelCase and lowercased, so OAuth2Config,
   # PasswordEncoder and SECRETS.py count. token, session and login are left out:
   # too common in code that is not a security surface.
@@ -490,6 +496,7 @@ exloom_ignored_settings() {   # exloom_ignored_settings <branch>
     .claude/exloom-test-command .claude/exloom-max-rounds .claude/exloom-proof.disabled \
     .claude/exloom-lane .claude/exloom-mutation-command .claude/exloom-protected-branches \
     .claude/exloom-skip-branches .claude/exloom-test-patterns .claude/exloom-not-testable-patterns .claude/exloom-docs .claude/exloom-doc-patterns .claude/exloom-strict .claude/exloom-reviewer-model \
+    .claude/exloom-ci .claude/exloom-fast-command .claude/exloom-test-select \
     | git check-ignore --no-index --stdin 2>/dev/null
 }
 
@@ -709,6 +716,126 @@ exloom_reviewer_model() {   # exloom_reviewer_model <agent>
 # Strict mode: a committed .claude/exloom-strict puts every branch on the Certified lane.
 exloom_is_strict() {
   [[ -f .claude/exloom-strict ]] && git ls-files --error-unmatch .claude/exloom-strict >/dev/null 2>&1
+}
+
+# Who owns the full suite. With CI it is branch protection, which exloom cannot
+# see and does not claim to; with `none` there is nowhere else, so the gate asks
+# for a recorded run before the push.
+exloom_repo_ci() {
+  local f=".claude/exloom-ci" v=""
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    v="$(head -1 "$f" 2>/dev/null | tr -cd 'a-z')"
+  fi
+  case "$v" in github|azure|none) printf '%s' "$v" ;; *) printf '' ;; esac
+}
+
+exloom_full_suite_required() {   # exloom_full_suite_required <ci-value>
+  [[ "${1:-}" == none ]]
+}
+
+# A passing full-suite receipt, written by record-full-suite.sh and committed.
+# A run at an earlier commit still covers the tip when nothing behavioural has
+# changed since, so a docs or comment commit does not force the suite again.
+# Documentation cannot change what the suite does. Dropped HERE ONLY: the same
+# file edited under a review is still a reason to look again, so
+# exloom_diff_is_behavioural and review staleness are left alone.
+_exloom_drop_docs() {   # paths on stdin, non-document paths out
+  local f p isdoc pats
+  pats="$(MSYS_NO_PATHCONV=1 git show "HEAD:.claude/exloom-doc-patterns" 2>/dev/null | tr -d '\r' \
+    | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$')"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    isdoc=0
+    case "${f,,}" in *.md|*.mmd) isdoc=1 ;; esac
+    if [[ $isdoc -eq 0 && -n "$pats" ]]; then
+      while IFS= read -r p; do
+        # shellcheck disable=SC2254
+        case "$f" in $p) isdoc=1; break ;; esac
+      done <<< "$pats"
+    fi
+    [[ $isdoc -eq 1 ]] || printf '%s\n' "$f"
+  done
+}
+
+exloom_full_suite_ok() {   # exloom_full_suite_ok <checklist> <tip> <reviewed-sha>
+  local cl="$1" tip="$2" reviewed="$3" line sha own changed
+  line="$(MSYS_NO_PATHCONV=1 git show "${tip}:$(exloom_verdict_dir "$cl")/full-suite.json" 2>/dev/null | tail -1)"
+  sha="$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
+  [[ "$line" == *'"exit":0,'* && -n "$sha" ]] || return 1
+  git cat-file -e "${sha}^{commit}" 2>/dev/null || return 1
+  own="$(exloom_own_base "$sha" "$reviewed")" || return 1
+  changed="$(git diff --name-only "$own" "$reviewed" -- . ':(exclude).claude' 2>/dev/null | _exloom_drop_docs)"
+  [[ -z "$changed" ]] || ! exloom_diff_is_behavioural "$own" "$reviewed"
+}
+
+# The tier below which the gate does not apply. Capped at 2: Tier 3 is a
+# migration or a security surface, and neither is ever skippable. Certified and
+# strict ignore it outright — they are bought rigour, and a floor would sell it
+# back.
+exloom_min_tier() {
+  local f=".claude/exloom-min-tier" v=""
+  exloom_is_strict && { printf '0'; return 0; }
+  [[ "$(exloom_repo_lane)" == certified ]] && { printf '0'; return 0; }
+  if [[ -f "$f" ]] && git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    v="$(head -1 "$f" 2>/dev/null | tr -cd '0-9')"
+  fi
+  case "$v" in
+    ''|*[!0-9]*) printf '0' ;;
+    *) [[ "$v" -gt 2 ]] && printf '2' || printf '%s' "$v" ;;
+  esac
+}
+
+# A committed waiver for the smoke test. The gate cannot prompt, so /exloom asks
+# and writes the line; what reaches here must still name a person and a commit,
+# because an anonymous waiver reads exactly like a forgotten step.
+exloom_smoke_waived() {   # reads the checklist on stdin
+  exloom_is_strict && return 1
+  [[ "$(exloom_repo_lane)" == certified ]] && return 1
+  grep -qE '^[[:space:]]*-[[:space:]]*Smoke test waived:[[:space:]]*[^—-]+—[[:space:]]*.+[[:space:]]+at[[:space:]]+[0-9a-f]{7,40}[[:space:]]*$'
+}
+
+# Who set the floor, and in which commit. A skip is only auditable if the branch
+# carries the answer; the setting file alone says what, never who.
+exloom_min_tier_provenance() {   # prints "<sha>\t<author>"
+  local f=".claude/exloom-min-tier"
+  git log -1 --format='%H	%an' -- "$f" 2>/dev/null
+}
+
+# A Windows checkout with core.autocrlf=true hands bash CRLF scripts, and bash
+# on WSL or in a container stops at the `\r`. exloom cannot fix a checkout it
+# does not own, so setup reports it and names the remedy.
+# Counted in bytes rather than matched as a pattern: Git Bash's grep and awk
+# both read in text mode, so a CR pattern finds nothing there even when the file
+# plainly has CRs, and the check would pass on the one platform it is for.
+exloom_hooks_are_crlf() {   # exloom_hooks_are_crlf [plugin-root]
+  local root="${1:-}" f a b
+  # With no argument, the installed copy is the one this library was read from.
+  [[ -n "$root" ]] || root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+  f="${root}/hooks/lib.sh"
+  [[ -f "$f" ]] || return 1
+  a="$(head -5 "$f" 2>/dev/null | wc -c)"
+  b="$(head -5 "$f" 2>/dev/null | tr -d '\r' | wc -c)"
+  [[ "$a" -ne "$b" ]]
+}
+
+# Folders a tool makes and nobody commits. Skipped only while UNTRACKED: once a
+# path is tracked the repository has decided it matters, whatever it is named.
+_EXLOOM_SCRATCH='\.playwright-mcp|\.superpowers|node_modules|\.pytest_cache|__pycache__|\.ruff_cache|\.venv|dist|build|\.gradle|bin|obj|\.dart_tool|\.angular|target|coverage'
+
+# Untracked scratch paths in the way, one per line, so /exloom can name what it
+# passed over rather than quietly ignoring it.
+exloom_scratch_skipped() {
+  git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | sed -n 's/^?? //p' \
+    | grep -E "^(${_EXLOOM_SCRATCH})/$"
+}
+
+# Is there uncommitted work that is actually work?
+exloom_work_is_dirty() {
+  local left
+  left="$(git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null \
+    | grep -vE "^\?\? (${_EXLOOM_SCRATCH})/$")"
+  [[ -n "$left" ]]
 }
 
 exloom_repo_lane() {
@@ -1848,15 +1975,24 @@ exloom_next_step() {   # exloom_next_step <branch>
   exloom_is_protected_branch "$branch" && { echo branch; return 0; }
   [[ -f "$cl" ]] || { echo init; return 0; }
   [[ -n "$(git status --porcelain -- .claude/reviews 2>/dev/null)" ]] && { echo commit; return 0; }
-  [[ -n "$(git status --porcelain -- . ':(exclude).claude/reviews' 2>/dev/null)" ]] && { echo commit-work; return 0; }
+  exloom_work_is_dirty && { echo commit-work; return 0; }
   lane="$(tr -d '\r' < "$cl" | exloom_declared_lane)"
   [[ -n "$lane" ]] || lane="$(exloom_repo_lane)"
   exloom_is_strict && lane="certified"
   spec="$(sed -n 's/^\*\*Spec:\*\*[[:space:]]*//p' "$cl" | head -1 | tr -d '\r[:space:]')"
   plan="$(sed -n 's/^\*\*Plan:\*\*[[:space:]]*//p' "$cl" | head -1 | tr -d '\r[:space:]')"
-  if [[ "$lane" != "sprint" ]]; then
+  # A bug fix has no spec to write: the behaviour was already agreed, and the
+  # only artefact that proves anything is the failing test. A change to existing
+  # code states itself in a change note standing where the spec would, and may
+  # record `Plan: none` in place of a plan.
+  local wtype
+  wtype="$(sed -n 's/^\*\*Work type:\*\*[[:space:]]*//p' "$cl" | head -1 | tr -d '\r' \
+    | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]*$//')"
+  if [[ "$lane" != "sprint" && "$wtype" != "bug fix" ]]; then
     [[ -n "$spec" && "$spec" != "none" && -f "$spec" ]] || { echo spec; return 0; }
-    [[ -n "$plan" && "$plan" != "none" && -f "$plan" ]] || { echo plan; return 0; }
+    if [[ "$wtype" != "change to existing code" || "$plan" != "none" ]]; then
+      [[ -n "$plan" && "$plan" != "none" && -f "$plan" ]] || { echo plan; return 0; }
+    fi
   fi
   progress="$(exloom_task_progress "$branch")"
   [[ -n "$progress" && "${progress%/*}" != "${progress#*/}" ]] && { echo build; return 0; }
@@ -1936,6 +2072,11 @@ exloom_check_smoke() {   # exloom_check_smoke <checklist> <tip> <reviewed-sha> <
   [[ -n "$fork" ]] && git diff --name-only "$fork" "$reviewed" -- . ':(exclude).claude' 2>/dev/null \
     | grep -Eq '\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte)$|\.component\.ts$|(^|/)(templates|views|pages|components)/' && ui=1
   [[ -n "$pasted" ]] && return 0
+  if printf '%s\n' "$content" | exloom_smoke_waived; then
+    echo "exloom: smoke test waived on this branch (audit):" >&2
+    printf '%s\n' "$content" | grep -E '^[[:space:]]*-[[:space:]]*Smoke test waived:' | sed 's/^[[:space:]]*/  /' >&2
+    return 0
+  fi
   if [[ $ui -eq 1 || "$tier" -ge 3 ]]; then
     _exloom_block "$action" "This change needs a pasted smoke test result: it $( [[ $ui -eq 1 ]] && echo 'changes UI' || echo 'is Tier 3' ).
 Run /exloom; its smoke step asks you to paste what you saw under '## Smoke test' in ${cl}. An agent-run receipt does not cover it."
@@ -2365,6 +2506,18 @@ Configure git commit signing (GPG or SSH) and run /exloom, which commits with -S
         return 2
       fi
     fi
+  fi
+
+  # No CI means the suite runs here or nowhere. A CI run reference is not
+  # accepted in its place: CI runs after the push this gate is deciding on.
+  if [[ $is_report -eq 0 ]] && exloom_full_suite_required "$(exloom_repo_ci)" \
+     && ! exloom_full_suite_ok "$checklist" "$tip" "${reviewed_sha:-$tip}"; then
+    _exloom_block "$action" "No passing full-suite receipt covers this commit, and committed .claude/exloom-ci says 'none'.
+With no CI there is nowhere else for the suite to run. Run it once with:
+  bash \${CLAUDE_PLUGIN_ROOT}/scripts/record-full-suite.sh
+then commit .claude/reviews/<branch>.verdicts/full-suite.json with the checklist.
+A link to a CI run is not evidence here — CI runs after this push."
+    return 2
   fi
 
   # Surface recorded escape hatches so a skipped step is visible, not silent.

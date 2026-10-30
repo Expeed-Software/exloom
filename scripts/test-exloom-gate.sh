@@ -546,8 +546,11 @@ ok "...and does not fire on prose that merely names it" \
 ok "no unsubstituted file tells a session to run \${CLAUDE_PLUGIN_ROOT}" \
    "$(grep -rlE "$CPR_RE" "$PLUGIN_ROOT_DIR" 2>/dev/null \
       | grep -vE '\.claude-plugin/plugin\.json$|/(commands|agents)/[^/]*\.md$|/skills/[^/]*/SKILL\.md$' | wc -l | tr -d ' ')" "0"
+# Counted against the manifest's own command lines rather than a fixed number,
+# so registering a hook cannot pass by forgetting the variable.
 ok "...while the manifest, where it IS interpolated, still uses it" \
-   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" "7"
+   "$(grep -cE '\$\{CLAUDE_PLUGIN_ROOT\}' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)" \
+   "$(grep -cE '"command":' "$PLUGIN_ROOT_DIR/.claude-plugin/plugin.json" | head -1)"
 ok "prove-change-is-tested.sh exists where the message points"   "$([[ -f "$HOOKS_ABS/../scripts/prove-change-is-tested.sh" ]] && echo yes || echo no)" "yes"
 
 section "record-reviewer-verdict hook (a real dispatch writes one)"
@@ -900,6 +903,737 @@ ok "genuine behavioural test -> PROVED" "$(prvrun "$PB")" "0"
 ok "--cmd false -> PROOF VOID" \
    "$(bash "$PRV" --base "$PB" --cmd false >/dev/null 2>&1; echo $?)" "2"
 
+
+section "proof: run-2 classification comes from a structured report, never from text"
+
+# A run-2 failure is scored today by one cross-language regex: match means the
+# tests could not build (NOT_APPLICABLE), no match means they asserted (PROVED).
+# A broken fixture, a bad config or a crashed harness therefore scores PROVED.
+# PROOF_ERROR closes that, but only on a machine-readable signal — a text match
+# must never reach it, or a repo whose assertion message happens to contain the
+# wrong word becomes unpushable.
+CLS="$(sed -n '/^_classify_run2() {/,/^}/p' "$PRVS")"
+cls() {   # cls <report-file> <exit-code> -> proved|error|unknown
+  bash -c 'set -u; '"$CLS"'
+    _classify_run2 "$1" "$2"' _ "$1" "${2:-1}"
+}
+RP="$REG/reports"; rm -rf "$RP"; mkdir -p "$RP"
+
+# JUnit XML — Gradle, Maven, pytest --junitxml. `errors` and `failures` are
+# separate attributes precisely because the two outcomes are different.
+printf '<testsuite tests="3" failures="1" errors="0"><testcase name="a"/></testsuite>\n' > "$RP/j-fail.xml"
+ok "junit: a plain assertion failure is PROVED" "$(cls "$RP/j-fail.xml")" "proved"
+printf '<testsuite tests="3" failures="0" errors="1"><testcase name="a"/></testsuite>\n' > "$RP/j-err.xml"
+ok "junit: an error with no failure is an ERROR" "$(cls "$RP/j-err.xml")" "error"
+printf '<testsuite tests="3" failures="2" errors="1"><testcase name="a"/></testsuite>\n' > "$RP/j-both.xml"
+ok "junit: a failure alongside an error is still PROVED" "$(cls "$RP/j-both.xml")" "proved"
+printf '<testsuite tests="0" failures="0" errors="0"></testsuite>\n' > "$RP/j-none.xml"
+ok "junit: nothing ran -> no opinion" "$(cls "$RP/j-none.xml")" "unknown"
+
+# Jest and Vitest, --json. A suite that throws before any test runs reports
+# testExecError and zero failed tests.
+printf '{"numFailedTests":1,"numFailedTestSuites":1,"testResults":[{"status":"failed"}]}\n' > "$RP/jest-fail.json"
+ok "jest: a plain assertion failure is PROVED" "$(cls "$RP/jest-fail.json")" "proved"
+printf '{"numFailedTests":0,"numFailedTestSuites":1,"testResults":[{"status":"failed","testExecError":{"message":"boom"}}]}\n' > "$RP/jest-crash.json"
+ok "jest: a suite that crashed before asserting is an ERROR" "$(cls "$RP/jest-crash.json")" "error"
+
+# .NET, --logger trx. Counters carries failed and error separately.
+printf '<TestRun><ResultSummary><Counters total="3" failed="1" error="0" aborted="0"/></ResultSummary></TestRun>\n' > "$RP/t-fail.trx"
+ok "trx: a plain assertion failure is PROVED" "$(cls "$RP/t-fail.trx")" "proved"
+printf '<TestRun><ResultSummary><Counters total="3" failed="0" error="1" aborted="0"/></ResultSummary></TestRun>\n' > "$RP/t-err.trx"
+ok "trx: an error with no failure is an ERROR" "$(cls "$RP/t-err.trx")" "error"
+
+# Flutter, --machine. One JSON event per line.
+printf '{"type":"testDone","result":"failure"}\n' > "$RP/f-fail.jsonl"
+ok "flutter: a plain assertion failure is PROVED" "$(cls "$RP/f-fail.jsonl")" "proved"
+printf '{"type":"error","error":"boom"}\n' > "$RP/f-err.jsonl"
+ok "flutter: a harness error is an ERROR" "$(cls "$RP/f-err.jsonl")" "error"
+
+# No opinion is the default, and the only route to the existing text check.
+ok "a missing report has no opinion" "$(cls "$RP/absent.xml")" "unknown"
+printf 'not a report at all\n' > "$RP/garbage.txt"
+ok "an unparseable report has no opinion" "$(cls "$RP/garbage.txt")" "unknown"
+printf '<testsuite tests="3" failures="1" errors="0"/>\n' > "$RP/j-ok.xml"
+ok "a report from a PASSING run has no opinion" "$(cls "$RP/j-ok.xml" 0)" "unknown"
+
+section "proof: the tests a run executes are the ones the diff touches"
+
+SELF="$(sed -n '/^is_test() {/,/^}/p' "$PRVS"; sed -n '/^_selected_tests() {/,/^}/p' "$PRVS")"
+sel() {   # sel <side> -> the selected paths for base or head
+  bash -c 'set -u; '"$SELF"'
+    _selected_tests "$1"' _ "$1"
+}
+subrepo seltest
+mkdir -p tests
+printf 'x\n' > src/keep.sh
+printf 'echo old\n' > tests/old.sh
+printf 'echo gone\n' > tests/gone.sh
+printf 'echo moved\n' > tests/moved.sh
+git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1; SB="$(git rev-parse HEAD)"
+printf 'echo old2\n' > tests/old.sh
+printf 'echo brand new\n' > tests/fresh.sh
+git rm -q tests/gone.sh >/dev/null 2>&1
+git mv tests/moved.sh tests/renamed.sh >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+export BASE="$SB"
+ok "a modified test is selected at head"   "$(sel head | grep -c '^tests/old.sh$')"     "1"
+ok "a new test is selected at head"        "$(sel head | grep -c '^tests/fresh.sh$')"   "1"
+ok "a new test is NOT selected at base"    "$(sel base | grep -c '^tests/fresh.sh$')"   "0"
+ok "a deleted test is selected nowhere"    "$(sel head | grep -c '^tests/gone.sh$')$(sel base | grep -c '^tests/gone.sh$')" "00"
+ok "a rename selects the new path at head" "$(sel head | grep -c '^tests/renamed.sh$')" "1"
+ok "a rename selects the old path at base" "$(sel base | grep -c '^tests/moved.sh$')"   "1"
+ok "a source file is never selected"       "$(sel head | grep -c 'keep.sh')"            "0"
+unset BASE
+
+
+section "fast-check: advisory, and advisory means it cannot stop anything"
+
+FC="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/fast-check.sh"
+subrepo fastcheck
+FCB="$(git rev-parse --abbrev-ref HEAD)"; FCL=".claude/reviews/${FCB}.md"
+mkdir -p "$(dirname "$FCL")"
+printf '# checklist\n' > "$FCL"
+ok "a failing fast check still exits 0" \
+   "$(bash "$FC" --cmd false >/dev/null 2>&1; echo $?)" "0"
+ok "a passing fast check exits 0" \
+   "$(bash "$FC" --cmd true >/dev/null 2>&1; echo $?)" "0"
+printf '# checklist\n' > "$FCL"; bash "$FC" --cmd false >/dev/null 2>&1
+ok "a failing fast check is recorded in the checklist" \
+   "$(grep -c 'Fast check:.*warn' "$FCL" 2>/dev/null)" "1"
+printf '# checklist\n' > "$FCL"; bash "$FC" --cmd true >/dev/null 2>&1
+ok "a passing fast check is recorded too" \
+   "$(grep -c 'Fast check:.*pass' "$FCL" 2>/dev/null)" "1"
+ok "fast-check writes no verdict receipt" \
+   "$(ls -d .claude/reviews/*.verdicts 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "no fast command is reported, not fatal" \
+   "$(bash "$FC" 2>&1 | grep -c 'no fast command')" "1"
+
+# An uncommitted setting is not a setting: each developer would check something
+# different, and the branch could not say what was checked.
+printf 'false\n' > .claude/exloom-fast-command
+ok "an uncommitted fast command is ignored" \
+   "$(bash "$FC" 2>&1 | grep -c 'fast-check: false')" "0"
+git add .claude/exloom-fast-command >/dev/null 2>&1
+git commit -qm fc >/dev/null 2>&1
+ok "a committed fast command is used" \
+   "$(bash "$FC" 2>&1 | grep -c 'fast-check: false')" "1"
+
+
+section "exloom-ci: the full suite is owned by CI, or by the gate, never by nobody"
+
+# Honoured only when committed, like every other setting: an uncommitted one
+# would mean the gate asked a different question of each developer.
+subrepo cisettings
+printf 'none\n' > .claude/exloom-ci
+ok "an uncommitted exloom-ci is not read" "$(exloom_repo_ci)" ""
+git add .claude/exloom-ci >/dev/null 2>&1; git commit -qm ci >/dev/null 2>&1
+ok "a committed exloom-ci is read"        "$(exloom_repo_ci)" "none"
+printf 'github\n' > .claude/exloom-ci; git add -A >/dev/null 2>&1; git commit -qm ci2 >/dev/null 2>&1
+ok "github is read"                       "$(exloom_repo_ci)" "github"
+printf 'nonsense\n' > .claude/exloom-ci; git add -A >/dev/null 2>&1; git commit -qm ci3 >/dev/null 2>&1
+ok "an unknown value is not honoured"     "$(exloom_repo_ci)" ""
+
+# With no CI, the suite has to run somewhere, and the only place left is here.
+ok "none demands a recorded full suite"   "$(exloom_full_suite_required none; echo $?)" "0"
+ok "github does not"                      "$(exloom_full_suite_required github; echo $?)" "1"
+ok "an absent setting does not"           "$(exloom_full_suite_required ''; echo $?)" "1"
+
+# The receipt is written by record-full-suite.sh and committed; prose under
+# `## Full suite` is a summary for a reader, not what the gate reads.
+RFS="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/record-full-suite.sh"
+subrepo fullsuite
+CLF=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+VD=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).verdicts"
+mkdir -p "$(dirname "$CLF")"; printf '# checklist\n' > "$CLF"
+bash "$RFS" -- true >/dev/null 2>&1
+ok "a passing run is recorded with exit 0" \
+   "$(grep -c '"check":"full-suite".*"exit":0,' "$VD/full-suite.json" 2>/dev/null)" "1"
+bash "$RFS" -- false >/dev/null 2>&1
+ok "a failing run records its exit code" \
+   "$(tail -1 "$VD/full-suite.json" | grep -c '"exit":1,')" "1"
+ok "output is captured beside the receipt" \
+   "$([[ -f "$VD/full-suite.out" ]] && echo yes || echo no)" "yes"
+
+# Only a committed receipt counts, and only a passing one.
+git add -A >/dev/null 2>&1; git commit -qm fs1 >/dev/null 2>&1
+ok "a failing receipt does not cover the tip" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
+# The receipt names HEAD as it was when the suite ran, and committing it makes
+# a further commit — so what must not stale it is the receipt's own commit.
+printf 'notes\n' > NOTES.md; git add -A >/dev/null 2>&1; git commit -qm notes >/dev/null 2>&1
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs2 >/dev/null 2>&1
+ok "a passing receipt at the tip covers it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+
+# A comment-only edit on top must not force the suite again. The existing rule
+# is narrower than it sounds: a new file is behavioural whatever its extension,
+# a .md edit is behavioural because markdown has no comment syntax, and `#` is
+# not treated as a comment at all because of shebangs and #define.
+printf 'class A {\n  int x = 1;\n}\n' > src/A.java
+git add -A >/dev/null 2>&1; git commit -qm java >/dev/null 2>&1
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs3 >/dev/null 2>&1
+printf 'class A {\n  // a new comment\n  int x = 1;\n}\n' > src/A.java
+git add -A >/dev/null 2>&1; git commit -qm comment >/dev/null 2>&1
+ok "a non-behavioural commit since does not stale it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+
+# Documentation is dropped from the diff for THIS check only. A README edit
+# cannot change what the suite does, and on a repo with no CI the suite is
+# expensive enough that re-running it for a typo is how the gate gets bypassed.
+: > "$VD/full-suite.json"; bash "$RFS" -- true >/dev/null 2>&1
+git add -A >/dev/null 2>&1; git commit -qm fs4 >/dev/null 2>&1
+printf '# readme\nnew line\n' > README.md
+git add -A >/dev/null 2>&1; git commit -qm readme >/dev/null 2>&1
+ok "a README-only commit does not force a re-run" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+mkdir -p docs; printf 'flow\n' > docs/diagram.mmd
+git add -A >/dev/null 2>&1; git commit -qm mmd >/dev/null 2>&1
+ok "an .mmd diagram does not either" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "0"
+printf 'package m\nfunc Y() int { return 2 }\n' > src/y.go
+git add -A >/dev/null 2>&1; git commit -qm code2 >/dev/null 2>&1
+ok "a code commit among the docs still does" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
+printf 'package m\nfunc X() int { return 1 }\n' > src/real.go
+git add -A >/dev/null 2>&1; git commit -qm code >/dev/null 2>&1
+ok "a behavioural commit since does stale it" \
+   "$(exloom_full_suite_ok "$CLF" HEAD HEAD; echo $?)" "1"
+
+section "settings a .gitignore would silently drop"
+
+# Every setting is honoured only when committed, so one that .gitignore keeps
+# out is a setting the author thinks is on and the gate never sees.
+subrepo ignoredsettings
+printf '.claude/exloom-*\n' > .gitignore
+git add .gitignore >/dev/null 2>&1; git commit -qm gi >/dev/null 2>&1
+IGN="$(exloom_ignored_settings "$(git rev-parse --abbrev-ref HEAD)")"
+for s in exloom-ci exloom-fast-command exloom-test-select; do
+  ok "an ignored .claude/$s is reported" "$(printf '%s\n' "$IGN" | grep -c "^\.claude/$s$")" "1"
+done
+
+
+section "changing the gate's own settings is a Tier 3 change"
+
+# Every setting decides what the gate asks for. A change to one is a change to
+# the protection itself, so it earns the tier that has no escape hatch.
+subrepo settingstier
+ok "a change to .claude/exloom-ci is Tier 3"       "$(sp .claude/exloom-ci)" "3"
+ok "a change to .claude/exloom-min-tier is Tier 3" "$(sp .claude/exloom-min-tier)" "3"
+ok "a change to .claude/exloom-lane is Tier 3"     "$(sp .claude/exloom-lane)" "3"
+ok "an ordinary source file is not"                "$(sp src/ordinary.go)" "1"
+
+section "exloom-min-tier: a floor, and the one tier it can never skip"
+
+subrepo mintier
+printf '2\n' > .claude/exloom-min-tier
+ok "an uncommitted floor is not read"  "$(exloom_min_tier)" "0"
+git add .claude/exloom-min-tier >/dev/null 2>&1; git commit -qm mt >/dev/null 2>&1
+ok "a committed floor is read"         "$(exloom_min_tier)" "2"
+printf '3\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mt3 >/dev/null 2>&1
+ok "a floor above 2 is capped at 2"    "$(exloom_min_tier)" "2"
+printf '9\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mt9 >/dev/null 2>&1
+ok "so Tier 3 is never skippable"      "$(exloom_min_tier)" "2"
+printf 'abc\n' > .claude/exloom-min-tier; git add -A >/dev/null 2>&1; git commit -qm mtx >/dev/null 2>&1
+ok "a non-numeric floor is no floor"   "$(exloom_min_tier)" "0"
+
+# Certified and strict buy rigour deliberately; a floor would sell it back.
+printf '2\n' > .claude/exloom-min-tier
+printf 'certified\n' > .claude/exloom-lane
+git add -A >/dev/null 2>&1; git commit -qm cert >/dev/null 2>&1
+ok "Certified ignores the floor"       "$(exloom_min_tier)" "0"
+git rm -q .claude/exloom-lane >/dev/null 2>&1
+: > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "strict mode ignores the floor"     "$(exloom_min_tier)" "0"
+
+
+section "exloom-min-tier: what a floor skips, and what it records"
+
+PJ='{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}'
+pushrc() { printf '%s' "$PJ" | bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1; echo $?; }
+
+# A Tier 1 branch under a floor of 2 needs no review and no proof.
+subrepo mintierpush
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+SETSHA="$(git rev-parse HEAD)"
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+printf 'a\n' > src/ordinary.txt; git add -A >/dev/null 2>&1; git commit -qm work >/dev/null 2>&1
+ok "a push below the floor is allowed"       "$(pushrc)" "0"
+SK=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).skip.json"
+ok "...and a skip receipt is written"        "$([[ -f "$SK" ]] && echo yes || echo no)" "yes"
+ok "...naming the derived tier"              "$(grep -c '"tier":1' "$SK" 2>/dev/null)" "1"
+ok "...naming the floor"                     "$(grep -c '"min_tier":2' "$SK" 2>/dev/null)" "1"
+ok "...naming the commit that set it"        "$(grep -c "\"set_in\":\"${SETSHA}\"" "$SK" 2>/dev/null)" "1"
+ok "...and who set it"                       "$(grep -c '"set_by":"t"' "$SK" 2>/dev/null)" "1"
+
+# Tier 3 is above the cap, so no floor can reach it.
+subrepo mintierhigh
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+mkdir -p db/migrations; printf 'create table t();\n' > db/migrations/V2.sql
+git add -A >/dev/null 2>&1; git commit -qm mig >/dev/null 2>&1
+ok "a Tier 3 push is still gated"            "$(pushrc)" "2"
+
+# Certified and strict buy rigour; a floor cannot sell it back.
+subrepo mintierstrict
+git checkout -q main
+printf '2\n' > .claude/exloom-min-tier; : > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm floor >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -qB feat/plan main
+printf 'a\n' > src/ordinary.txt; git add -A >/dev/null 2>&1; git commit -qm work >/dev/null 2>&1
+ok "strict mode ignores the floor and gates" "$(pushrc)" "2"
+
+
+section "smoke waiver: a skip that names who skipped it"
+
+# The gate cannot prompt, so the waiver is a committed line. It is accepted only
+# where the lane allows a skip at all, and only when it says who and at which
+# commit — an anonymous waiver is indistinguishable from a forgotten step.
+subrepo smokewaiver
+WOK="- Smoke test waived: no UI on this change — Mahesh O A at 4f2a1c9"
+ok "a waiver naming who and where is read" \
+   "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "0"
+ok "a bare waiver is not"  "$(printf -- '- Smoke test waived\n' | exloom_smoke_waived; echo $?)" "1"
+ok "a reason with no identity is not" \
+   "$(printf -- '- Smoke test waived: no UI\n' | exloom_smoke_waived; echo $?)" "1"
+ok "an unrelated line is not" "$(printf -- '- Smoke test: ran it\n' | exloom_smoke_waived; echo $?)" "1"
+
+# Certified and strict bought the smoke test; a waiver would be selling it back.
+printf 'certified\n' > .claude/exloom-lane
+git add -A >/dev/null 2>&1; git commit -qm cert >/dev/null 2>&1
+ok "Certified refuses a waiver" "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "1"
+git rm -q .claude/exloom-lane >/dev/null 2>&1; : > .claude/exloom-strict
+git add -A >/dev/null 2>&1; git commit -qm strict >/dev/null 2>&1
+ok "strict mode refuses a waiver"  "$(printf '%s\n' "$WOK" | exloom_smoke_waived; echo $?)" "1"
+
+
+section "work type: a bug fix is not a feature, and must not be marched through one"
+
+# exloom_next_step routed every non-sprint branch to spec then plan. A bug fix
+# has no spec to write — the behaviour was already agreed — and marching it
+# through one is what made people run the steps by hand and stop using the gate.
+subrepo worktype
+WTCL=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+mkdir -p "$(dirname "$WTCL")"
+wtset() {   # wtset <work-type-line> [spec] [plan]
+  { printf '# review\n\n**Lane:** standard\n'
+    [[ -n "${1:-}" ]] && printf '**Work type:** %s\n' "$1"
+    [[ -n "${2:-}" ]] && printf '**Spec:** %s\n' "$2"
+    [[ -n "${3:-}" ]] && printf '**Plan:** %s\n' "$3"; } > "$WTCL"
+  git add -A >/dev/null 2>&1; git commit -qm wt >/dev/null 2>&1
+}
+
+wtset '' '' ''
+ok "a feature with no spec still asks for one"  "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+wtset 'new feature' '' ''
+ok "...and so does an explicit new feature"     "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+
+wtset 'bug fix' '' ''
+ok "a bug fix is never sent to spec"            "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^spec$')" "0"
+ok "a bug fix is never sent to plan"            "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^plan$')" "0"
+
+# A change note stands in for the spec; a single task needs no plan beside it.
+printf 'now: x\nnext: y\n1. it does y\n' > docs/change-note.md
+wtset 'change to existing code' '' ''
+ok "a change still needs its note"              "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "spec"
+wtset 'change to existing code' 'docs/change-note.md' 'none'
+ok "the note counts as the spec"                "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^spec$')" "0"
+ok "...and 'none' is an acceptable plan"        "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^plan$')" "0"
+wtset 'new feature' 'docs/change-note.md' 'none'
+ok "but a feature may not plead 'none'"         "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "plan"
+
+
+section "a reviewer is dispatched, never resumed"
+
+# Resuming a reviewer carries its earlier conclusion and the session's framing
+# into the verify pass, which is how a REJECTED finding gets talked into
+# ADDRESSED. Verify runs as a fresh dispatch so it leaves its own receipt.
+GRM="$HOOKS_ABS/guard-reviewer-message.sh"
+subrepo sendmsg
+SMV=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).verdicts"
+mkdir -p "$SMV"
+{ printf '{"agent":"l1-reviewer","key":"final","kind":"review","tool_use_id":"toolu_L1","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_L1","agent_id":"aREVIEWER1","model":"m"}\n'
+  printf '{"agent":"adversarial-reviewer","key":"final","kind":"review","tool_use_id":"toolu_ADV","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_ADV","agent_id":"aREVIEWER2","model":"m"}\n'
+  printf '{"agent":"fixer","key":"fix","kind":"fix","tool_use_id":"toolu_FIX","dispatch_head":"aaa","at":"t"}\n'
+  printf '{"map":true,"tool_use_id":"toolu_FIX","agent_id":"aFIXER","model":"m"}\n'; } > "$SMV/dispatches.jsonl"
+
+sm() {   # sm <recipient> -> hook exit code
+  python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'SendMessage',
+ 'tool_input':{'to':sys.argv[1],'message':'please re-check'}}))" "$1" \
+   | bash "$GRM" >/dev/null 2>&1; echo $?
+}
+
+ok "a message to a dispatched L1 reviewer is refused"          "$(sm aREVIEWER1)" "2"
+ok "a message to a dispatched adversarial reviewer is refused" "$(sm aREVIEWER2)" "2"
+ok "a message to the fixer is allowed"                         "$(sm aFIXER)" "0"
+ok "a message to an agent not in the log is allowed"           "$(sm aSOMEONEELSE)" "0"
+ok "a message named for a reviewer is refused"                 "$(sm exloom:l1-reviewer)" "2"
+ok "a message named for the spec reviewer is refused"          "$(sm exloom:spec-reviewer)" "2"
+ok "a message named for the fixer is allowed"                  "$(sm exloom:fixer)" "0"
+ok "a recipient named in mixed case is still refused"  "$(sm Exloom:L1-Reviewer)" "2"
+ok "...and in upper case"                              "$(sm EXLOOM:SPEC-REVIEWER)" "2"
+ok "...with a plugin prefix"                           "$(sm plugin:exloom:adversarial-reviewer)" "2"
+ok "the refusal names the fresh dispatch instead" \
+   "$(python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'SendMessage',
+ 'tool_input':{'to':'aREVIEWER1','message':'re-check'}}))" | bash "$GRM" 2>&1 | grep -c 'MODE: VERIFY')" "1"
+
+# Another tool is none of its business.
+ok "a Bash call is not touched" \
+   "$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+      | bash "$GRM" >/dev/null 2>&1; echo $?)" "0"
+
+
+section "a reviewer reads a diff, it does not check one out"
+
+# Reviewers were creating a worktree each and removing it inconsistently, which
+# is how a repo collects hundreds of megabytes nobody can account for. A
+# PreToolUse payload raised inside a subagent carries agent_type, so the refusal
+# is scoped to reviewers and cannot catch the fixer, the session, or the proof
+# script's own throwaway worktree.
+GRS="$HOOKS_ABS/guard-reviewer-shell.sh"
+subrepo wtguard
+wt() {   # wt <agent_type|-> <command> -> hook exit code
+  python3 -c "
+import json,sys
+d={'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash',
+   'tool_input':{'command':sys.argv[2]}}
+if sys.argv[1] != '-':
+    d['agent_id']='aAGENT'; d['agent_type']=sys.argv[1]
+print(json.dumps(d))" "$1" "$2" | bash "$GRS" >/dev/null 2>&1; echo $?
+}
+
+ok "a reviewer may not add a worktree" \
+   "$(wt exloom:l1-reviewer 'git worktree add ../wt-review HEAD')" "2"
+ok "...nor the adversarial reviewer" \
+   "$(wt exloom:adversarial-reviewer 'git worktree add .worktrees/adv HEAD')" "2"
+ok "...nor the security auditor" \
+   "$(wt exloom:security-auditor 'git worktree add /tmp/sec HEAD')" "2"
+ok "...nor the spec reviewer" \
+   "$(wt exloom:spec-reviewer 'git worktree add /tmp/spec HEAD')" "2"
+
+ok "the fixer may"            "$(wt exloom:fixer 'git worktree add /tmp/fix HEAD')" "0"
+ok "the session itself may"   "$(wt - 'git worktree add /tmp/mine HEAD')" "0"
+ok "a reviewer may still read a diff" \
+   "$(wt exloom:l1-reviewer 'git diff abc..def -- src/')" "0"
+ok "...and read a file at a commit" \
+   "$(wt exloom:l1-reviewer 'git show abc:src/a.go')" "0"
+ok "...and remove a worktree it should not have made" \
+   "$(wt exloom:l1-reviewer 'git worktree remove /tmp/oops')" "0"
+
+# git takes options before the subcommand, and an option that takes a value
+# breaks a pattern that assumes every option is a bare flag.
+ok "a reviewer may not add a worktree via -C" \
+   "$(wt exloom:l1-reviewer 'git -C /tmp/elsewhere worktree add /tmp/wt HEAD')" "2"
+ok "...nor via --git-dir" \
+   "$(wt exloom:l1-reviewer 'git --git-dir=/tmp/x/.git worktree add /tmp/wt HEAD')" "2"
+ok "...nor with -c config before it" \
+   "$(wt exloom:l1-reviewer 'git -c core.quotepath=false worktree add /tmp/wt HEAD')" "2"
+ok "...nor with the paths reordered" \
+   "$(wt exloom:l1-reviewer 'git worktree --quiet add /tmp/wt HEAD')" "2"
+ok "the refusal names what to use instead" \
+   "$(python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash',
+ 'agent_id':'a1','agent_type':'exloom:l1-reviewer',
+ 'tool_input':{'command':'git worktree add /tmp/x HEAD'}}))" | bash "$GRS" 2>&1 | grep -c 'git show')" "1"
+
+# A sed-based JSON read is not a parser: it stops at the first quote, so an
+# escaped quote truncates the command and the rest escapes inspection. With no
+# parser the decision is made on the raw payload instead, which errs towards
+# refusing.
+RAWF="$(sed -n '/^_raw_names_reviewer() {/,/^}/p' "$HOOKS_ABS/guard-reviewer-shell.sh"; \
+        sed -n '/^_raw_adds_worktree() {/,/^}/p' "$HOOKS_ABS/guard-reviewer-shell.sh")"
+raw() {   # raw <payload-json> -> refuse|allow
+  bash -c 'set -u; HOOK_INPUT="$1"; '"$RAWF"'
+    _raw_names_reviewer && _raw_adds_worktree && echo refuse || echo allow' _ "$1"
+}
+ESCAPED='{"hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"exloom:l1-reviewer","tool_input":{"command":"git -C \"a\\\"b\" worktree add /tmp/wt"}}'
+ok "an escaped quote cannot hide a worktree add" "$(raw "$ESCAPED")" "refuse"
+ok "a reviewer reading a diff is still allowed" \
+   "$(raw '{"agent_type":"exloom:l1-reviewer","tool_input":{"command":"git diff a..b"}}')" "allow"
+ok "a worktree add by the session is allowed" \
+   "$(raw '{"tool_input":{"command":"git worktree add /tmp/x"}}')" "allow"
+ok "the fixer is allowed" \
+   "$(raw '{"agent_type":"exloom:fixer","tool_input":{"command":"git worktree add /tmp/x"}}')" "allow"
+ok "a reviewer removing a worktree is allowed" \
+   "$(raw '{"agent_type":"exloom:security-auditor","tool_input":{"command":"git worktree remove /tmp/x"}}')" "allow"
+
+
+section "reviewers have no file-editing tools"
+
+# Not "read-only": they keep Bash for git, and Bash can write. The honest claim
+# is narrower — no editing TOOL — and the README must not overstate it.
+for a in l1-reviewer adversarial-reviewer security-auditor spec-reviewer; do
+  AF="$HOOKS_ABS/../agents/${a}.md"
+  TOOLS="$(sed -n '/^---$/,/^---$/p' "$AF" | sed -n 's/^tools:[[:space:]]*//p' | head -1)"
+  ok "$a declares its tools"            "$([[ -n "$TOOLS" ]] && echo yes || echo no)" "yes"
+  ok "$a cannot Write"                  "$(printf '%s' "$TOOLS" | grep -cw 'Write')" "0"
+  ok "$a cannot Edit"                   "$(printf '%s' "$TOOLS" | grep -cwE 'Edit|MultiEdit|NotebookEdit')" "0"
+  ok "$a keeps Read"                    "$(printf '%s' "$TOOLS" | grep -cw 'Read')" "1"
+  ok "$a keeps Bash for git"            "$(printf '%s' "$TOOLS" | grep -cw 'Bash')" "1"
+done
+ok "the fixer keeps its editing tools" \
+   "$(sed -n '/^---$/,/^---$/p' "$HOOKS_ABS/../agents/fixer.md" | sed -n 's/^tools:[[:space:]]*//p' | head -1 | grep -cw 'Write')" "0"
+
+
+section "the spec review is advice, and advice gates nothing"
+
+# A spec reviewer that says NOT READY must change nothing a gate can read.
+# Otherwise it is a blocking check wearing an advisory label, and the author
+# finds that out at the push.
+RRV="$HOOKS_ABS/record-reviewer-verdict.sh"
+subrepo specadvice
+SAB="$(git rev-parse --abbrev-ref HEAD)"
+SACL=".claude/reviews/${SAB}.md"
+mkdir -p "$(dirname "$SACL")"
+printf '# review\n\n**Lane:** standard\n**Spec:** docs/s.md\n**Plan:** docs/p.md\n' > "$SACL"
+mkdir -p docs; printf 'spec\n' > docs/s.md; printf 'plan\n' > docs/p.md
+git add -A >/dev/null 2>&1; git commit -qm sa >/dev/null 2>&1
+
+SABEFORE="$(exloom_next_step "$SAB")"
+SAROUNDS="$(exloom_round_count "$SACL" HEAD 2>/dev/null || echo 0)"
+
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop',
+ 'agent_type':'exloom:spec-reviewer','agent_id':'aSPEC',
+ 'last_assistant_message':'VERDICT: NOT READY (2 items)\n\n## Blocking — cannot be built from as written\n- R3 — no acceptance criterion\n'}))" \
+  | bash "$RRV" >/dev/null 2>&1
+
+ok "a NOT READY spec review writes no receipt of its own" \
+   "$(ls .claude/reviews/${SAB}.verdicts/spec-reviewer.json 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "...and writes no receipt at all" \
+   "$(ls -d .claude/reviews/${SAB}.verdicts 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "...does not move the next step" \
+   "$(exloom_next_step "$SAB")" "$SABEFORE"
+ok "...and adds no review round" \
+   "$(exloom_round_count "$SACL" HEAD 2>/dev/null || echo 0)" "$SAROUNDS"
+
+# The same event from a real reviewer still records, so the test above is not
+# passing because the hook simply ignored everything.
+python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'SubagentStop',
+ 'agent_type':'exloom:l1-reviewer','agent_id':'aL1',
+ 'last_assistant_message':'VERDICT: APPROVED\n\nROUND NEEDED AFTER FIX: NO\n'}))" \
+  | bash "$RRV" >/dev/null 2>&1
+ok "an L1 verdict at the same moment does record" \
+   "$(grep -c '"verdict":"APPROVED"' .claude/reviews/${SAB}.verdicts/l1-reviewer.json 2>/dev/null)" "1"
+
+
+section "a tool's scratch folder is not your uncommitted work"
+
+# An untracked .playwright-mcp/ or .gradle/ stopped the branch with "commit your
+# work first" on something nobody wants committed. Untracked only: once a path
+# is tracked it is the repo's business, whatever it is named.
+subrepo scratchdirs
+SDCL=".claude/reviews/$(git rev-parse --abbrev-ref HEAD).md"
+mkdir -p "$(dirname "$SDCL")"; printf '# review\n\n**Lane:** sprint\n' > "$SDCL"
+git add -A >/dev/null 2>&1; git commit -qm cl >/dev/null 2>&1
+for d in .playwright-mcp .superpowers node_modules .pytest_cache __pycache__ .ruff_cache .venv \
+         dist build .gradle bin obj .dart_tool .angular target coverage; do
+  mkdir -p "$d"; printf 'junk\n' > "$d/f"
+done
+ok "scratch alone does not make the tree dirty" "$(exloom_work_is_dirty && echo dirty || echo clean)" "clean"
+ok "...and every one of them is named as skipped" \
+   "$(exloom_scratch_skipped | grep -c .)" "16"
+ok "...with the branch moving past commit-work" \
+   "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)" | grep -c '^commit-work$')" "0"
+
+printf 'real\n' > src/real.go
+ok "real work still makes it dirty"             "$(exloom_work_is_dirty && echo dirty || echo clean)" "dirty"
+ok "...and routes to commit-work"               "$(exloom_next_step "$(git rev-parse --abbrev-ref HEAD)")" "commit-work"
+rm -f src/real.go
+
+# Tracked is tracked. A repo that commits its dist/ has decided dist/ matters.
+git add -f dist/f >/dev/null 2>&1; git commit -qm dist >/dev/null 2>&1
+printf 'changed\n' > dist/f
+ok "a TRACKED scratch path still counts as work" "$(exloom_work_is_dirty && echo dirty || echo clean)" "dirty"
+ok "...and is not reported as skipped"           "$(exloom_scratch_skipped | grep -c '^dist/$')" "0"
+
+
+section "line endings survive a fix, and a CRLF install is reported"
+
+# A fixer that rewrites a whole file can flip its line endings, turning a
+# one-line fix into a whole-file diff that hides the fix from the reviewer.
+FXR="$HOOKS_ABS/../agents/fixer.md"
+ok "the fixer is told to preserve line endings" \
+   "$(grep -ci 'line ending' "$FXR")" "$(grep -ci 'line ending' "$FXR")"
+ok "...and is told so at all" \
+   "$([[ "$(grep -ci 'line ending' "$FXR")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...naming CRLF explicitly" \
+   "$([[ "$(grep -c 'CRLF' "$FXR")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+# exloom cannot fix a checkout it does not own, so setup reports it instead.
+CRLFD="$(sed -n '/^exloom_hooks_are_crlf() {/,/^}/p' "$LIB_ABS")"
+crlfck() { bash -c 'set -u; '"$CRLFD"'
+  exloom_hooks_are_crlf "$1" && echo crlf || echo lf' _ "$1"; }
+CL="$REG/eol-lf"; CC="$REG/eol-crlf"
+rm -rf "$CL" "$CC"; mkdir -p "$CL/hooks" "$CC/hooks"
+printf '#!/usr/bin/env bash\nset -u\n' > "$CL/hooks/lib.sh"
+printf '#!/usr/bin/env bash\r\nset -u\r\n' > "$CC/hooks/lib.sh"
+ok "an LF install is reported as LF"     "$(crlfck "$CL")" "lf"
+ok "a CRLF install is reported as CRLF"  "$(crlfck "$CC")" "crlf"
+ok "a missing install is not a CRLF one" "$(crlfck "$REG/absent")" "lf"
+
+# The remedy must name both halves: the setting, and the reinstall.
+SETUP="$HOOKS_ABS/../commands/exloom-setup.md"
+ok "setup names core.autocrlf input" "$(grep -c 'core.autocrlf input' "$SETUP")" "1"
+ok "...and says to reinstall"        "$([[ "$(grep -ci 'reinstall' "$SETUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+# Setup runs once; /exloom runs constantly. A developer who set exloom up before
+# this existed would otherwise meet the CRLF failure as bare shell noise.
+XLM="$HOOKS_ABS/../commands/exloom.md"
+ok "/exloom checks the installed line endings too" \
+   "$(grep -c 'exloom_hooks_are_crlf' "$XLM")" "1"
+ok "...and names the remedy where the developer reads it" \
+   "$(grep -c 'core.autocrlf input' "$XLM")" "1"
+RDM="$HOOKS_ABS/../README.md"
+ok "the README answers the error the developer will actually see" \
+   "$(grep -c "command not found" "$RDM")" "1"
+ok "...with the setting"   "$(grep -c 'core.autocrlf input' "$RDM")" "1"
+ok "...and the reinstall"  "$([[ "$(grep -ci 'reinstall' "$RDM")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+
+section "a narrowed command that does not run must not block the push"
+
+# The adapters build commands for toolchains this repo cannot run, so one of
+# them being wrong for a particular project is a question of when. That must
+# cost minutes, never a blocked push: a narrowed run that fails is retried with
+# the pinned whole-suite command before anything is concluded.
+PRVF="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+fbrepo() {
+  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+  : > .claude/exloom-gate.enabled
+  printf 'bash tests/t.sh\n' > .claude/exloom-test-command
+  printf 'calc(){ echo 4; }\n' > src/l.sh
+  printf '. ./src/l.sh\n[ "$(calc)" = "4" ]\n' > tests/t.sh
+  git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1
+}
+
+fbrepo fb-broken
+printf './no-such-runner {tests}\n' > .claude/exloom-test-select
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBB="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "5" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRVF" --base "$FBB" >/dev/null 2>&1; FBRC=$?
+FBJ=".claude/reviews/main.verdicts/proof.json"
+ok "a broken narrowed command still concludes"  "$FBRC" "0"
+ok "...as PROVED, on the pinned suite"          "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$FBJ" | tail -1)" "PROVED"
+ok "...and says it fell back"                   "$(sed -n 's/.*"selection_source":"\([a-z-]*\)".*/\1/p' "$FBJ" | tail -1)" "fallback"
+
+# A base that genuinely fails is still void: the fallback rescues a bad command,
+# not a broken repository.
+fbrepo fb-reallyvoid
+printf './no-such-runner {tests}\n' > .claude/exloom-test-select
+printf '. ./missing/dep.sh\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBV="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./missing/dep.sh\n. ./src/l.sh\n[ "$(calc)" = "5" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+ok "a genuinely broken base is still PROOF VOID" \
+   "$(bash "$PRVF" --base "$FBV" >/dev/null 2>&1; echo $?)" "2"
+
+# All-new tests skip run 1, so a wrong narrowed command first shows itself at
+# run 3 — and shows as the author's own change being broken. That blocked the
+# push on a repo the adapters simply guessed wrong about.
+fbrepo fb-allnew
+# The pinned command must be valid at ANY base, so it globs rather than naming
+# this branch's own test file.
+printf 'for f in tests/*.sh; do bash "$f" || exit 1; done
+' > .claude/exloom-test-command
+printf './no-such-runner {tests}
+' > .claude/exloom-test-select
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBN="$(git rev-parse HEAD)"
+printf 'calc(){ echo 4; }
+newfn(){ echo 7; }
+' > src/l.sh
+printf '. ./src/l.sh
+[ "$(newfn)" = "7" ]
+' > tests/brand-new.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRVF" --base "$FBN" >/dev/null 2>&1; FB3RC=$?
+FB3J=".claude/reviews/main.verdicts/proof.json"
+ok "all-new tests + a broken narrowed command do not block" \
+   "$([[ "$FB3RC" -eq 0 ]] && echo "not blocked" || echo "blocked($FB3RC)")" "not blocked"
+ok "...and the receipt says it fell back" \
+   "$(sed -n 's/.*"selection_source":"\([a-z-]*\)".*/\1/p' "$FB3J" | tail -1)" "fallback"
+# run 1 ran the pinned command here, because the selection was empty at base and
+# only the head side was narrowed. It passing is the honest record of that.
+ok "...with run 1 recorded as it actually ran" \
+   "$(sed -n 's/.*"run1":"\([a-z\/]*\)".*/\1/p' "$FB3J" | tail -1)" "pass"
+
+
+section "no unpinned launcher ships in the plugin"
+
+# npx and uvx fetch and run whatever the registry serves, which is a launcher
+# the project never installed. The directory portal blocks them, 6.0.7 removed
+# them once, and the proof adapters put them back — so the validator now owns
+# this rather than a reviewer's memory.
+XDIR="$(cd "$HOOKS_ABS/.." && pwd)"
+LAUNCH_RE='(^|[^A-Za-z-])(npx|uvx)[[:space:]]|@latest'
+ok "no shipped file launches with npx or uvx, or pins @latest" \
+   "$(grep -rlE "$LAUNCH_RE" "$XDIR" --include='*.sh' --include='*.md' --include='*.json' 2>/dev/null \
+      | grep -v '/templates/' | sed "s|$XDIR/||" | tr '\n' ' ')" ""
+
+# The validator must own it, or the next adapter reintroduces it.
+VP="$(cd "$HOOKS_ABS/../../.." && pwd)/scripts/validate-plugin.sh"
+ok "validate-plugin.sh checks for it"  "$([[ "$(grep -c 'npx' "$VP")" -ge 1 ]] && echo yes || echo no)" "yes"
+NXP="$REG/npx-probe"; rm -rf "$NXP"; mkdir -p "$NXP"
+printf 'FASTCMD="npx tsc --noEmit"\n' > "$NXP/bad.sh"
+ok "...and the pattern it uses catches a real one" \
+   "$(grep -rlE "$LAUNCH_RE" "$NXP" | wc -l | tr -d ' ')" "1"
+printf 'run ./node_modules/.bin/tsc --noEmit\n' > "$NXP/bad.sh"
+ok "...without catching a local binary" \
+   "$(grep -rlE "$LAUNCH_RE" "$NXP" | wc -l | tr -d ' ')" "0"
+
+
+section "the selection command is derived once, proved, and then used mechanically"
+
+# The built-in adapters are guesses about syntax exloom cannot run. Setup can
+# work the command out for this repo, prove it on a real test file, and commit
+# it — model judgement once, determinism on every proof after.
+SUP="$HOOKS_ABS/../commands/exloom-setup.md"
+XLM="$HOOKS_ABS/../commands/exloom.md"
+ok "setup derives a selection command"        "$(grep -c 'exloom-test-select' "$SUP")" "$(grep -c 'exloom-test-select' "$SUP")"
+ok "...and mentions it at all"                "$([[ "$(grep -c 'exloom-test-select' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...with a {tests} placeholder"            "$([[ "$(grep -c '{tests}' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...dry-run before it is written"          "$([[ "$(grep -ci 'dry.run' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...writing nothing when the dry run fails" "$([[ "$(grep -ci 'writes nothing\|write nothing' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...on its own branch, through a PR"       "$([[ "$(grep -ci 'pull request' "$SUP")" -ge 2 ]] && echo yes || echo no)" "yes"
+
+# A developer who did not set the repo up is told who can, not told to do it.
+ok "/exloom says once per branch when the repo is not set up" \
+   "$([[ "$(grep -ci 'set up for fast proofs' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...and points at the repo lead, not the developer" \
+   "$([[ "$(grep -ci 'repo lead' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+# Prompt files earn their length; a change may not spend more of it.
+ok "exloom-setup.md is no longer than it was" \
+   "$([[ "$(wc -w < "$SUP")" -le 1033 ]] && echo yes || echo no)" "yes"
+ok "exloom.md is no longer than it was" \
+   "$([[ "$(wc -w < "$XLM")" -le 820 ]] && echo yes || echo no)" "yes"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
@@ -1144,7 +1878,9 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
 vrd() { sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CVD/$1.json" 2>/dev/null | tail -1; }
 fnd() { grep -c . "$CVD/$1.findings.jsonl" 2>/dev/null | head -1; }
 
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
+# The fixer applies findings and the spec reviewer is advice: neither emits a
+# gate verdict, so neither is held to the verdict contract.
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -vE '^(fixer|spec-reviewer)$'); do
   blk="$(agent_block "$a")"
   ok "$a: has an extractable output block" "$([[ -n "$blk" ]] && echo yes || echo no)" "yes"
 
@@ -1162,8 +1898,22 @@ for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//"
      "$([[ "$(fnd "$a")" -ge 1 ]] && echo yes || echo no)" "yes"
 done
 
+
+# The spec reviewer sits outside the verdict contract on purpose. Assert the
+# property that buys it: its own documented block cannot be read as a verdict,
+# whichever way the report reaches the hook.
+SRB="$(agent_block spec-reviewer)"
+ok "spec-reviewer documents an output block"      "$([[ -n "$SRB" ]] && echo yes || echo no)" "yes"
+ok "...which never says APPROVED or REJECTED"     "$(printf '%s' "$SRB" | grep -cE 'VERDICT:[[:space:]]*(APPROVED|REJECTED)')" "0"
+feed spec-reviewer "$SRB"
+ok "...and feeding it records no verdict"         "$(vrd spec-reviewer)" ""
+feed spec-reviewer "$(printf '%s\n\nVERDICT: NOT READY (2 items)\n' "$SRB")"
+ok "...nor does its real NOT READY verdict"       "$(vrd spec-reviewer)" ""
+ok "...nor any findings file at all" \
+   "$([[ -f "$CVD/spec-reviewer.findings.jsonl" ]] && echo yes || echo no)" "no"
+
 # The verdict line each agent literally documents must not be self-defeating.
-for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -v '^fixer$'); do
+for a in $(ls "$HOOKS_ABS/../agents"/*.md | xargs -n1 basename | sed "s/\.md$//" | grep -vE '^(fixer|spec-reviewer)$'); do
   vline="$(grep -m1 '^VERDICT: APPROVED' "$AGENTS_DIR/$a.md" || true)"
   ok "$a: documented verdict line is unambiguous (no '|')" \
      "$(printf '%s' "$vline" | grep -c '|')" "0"

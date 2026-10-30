@@ -232,6 +232,24 @@ YAMLPY
   fi
 done
 
+# --- unpinned launchers -------------------------------------------------------
+# npx and uvx fetch and run whatever the registry serves, which is a package the
+# project never installed; @latest pins nothing. The directory portal rejects
+# them, and they have been removed from this plugin twice.
+
+for plugin in $PLUGINS; do
+  PLUGIN_ROOT="plugins/$plugin"
+  [ -d "$PLUGIN_ROOT" ] || continue
+  launchers=$(grep -rlE '(^|[^A-Za-z-])(npx|uvx)[[:space:]]|@latest' "$PLUGIN_ROOT"       --include='*.sh' --include='*.md' --include='*.json' 2>/dev/null       | grep -v '/templates/' || true)
+  if [ -n "$launchers" ]; then
+    fail "unpinned launcher (npx/uvx/@latest) in $plugin:"
+    echo "$launchers" | sed 's|^|    |'
+    echo "    Use the project's own binary, e.g. ./node_modules/.bin/<tool>."
+  else
+    echo "OK: $plugin ships no unpinned launcher"
+  fi
+done
+
 # --- summary ------------------------------------------------------------------
 
 echo ""

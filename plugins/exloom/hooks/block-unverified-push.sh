@@ -122,6 +122,27 @@ fi
 for br in "${VBRANCHES[@]}"; do
   exloom_is_protected_branch "$br" && continue
   exloom_is_skip_branch "$br" && continue
+
+  # A committed floor turns the gate off below it. Capped at 2, ignored under
+  # Certified and strict, and never silent: the receipt names the tier, the
+  # floor, and who set it where, so a reader of the branch sees the skip.
+  MINT="$(exloom_min_tier)"
+  if [[ "$MINT" -gt 0 ]] 2>/dev/null; then
+    BTIER="$(exloom_derive_tier "$([[ "$br" == "$CURRENT_BRANCH" ]] && echo HEAD || echo "refs/heads/${br}")" 2>/dev/null)"
+    if [[ "$BTIER" =~ ^[0-9]$ ]] && [[ "$BTIER" -lt "$MINT" ]]; then
+      PROV="$(exloom_min_tier_provenance)"
+      SKDIR=".claude/reviews"; mkdir -p "$(dirname "${SKDIR}/${br}.skip.json")" 2>/dev/null
+      printf '{"check":"min-tier-skip","branch":"%s","tier":%s,"min_tier":%s,"set_in":"%s","set_by":"%s","head":"%s","at":"%s"}\n' \
+        "$br" "$BTIER" "$MINT" \
+        "$(printf '%s' "${PROV%%	*}" | tr -cd 'a-f0-9')" \
+        "$(printf '%s' "${PROV#*	}" | tr -cd 'A-Za-z0-9 ._@-' | cut -c1-80)" \
+        "$(git rev-parse HEAD 2>/dev/null)" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" \
+        >> "${SKDIR}/${br}.skip.json" 2>/dev/null
+      echo "exloom: '$br' derives Tier ${BTIER}, below the committed floor of ${MINT} — no review and no proof required. Recorded in ${SKDIR}/${br}.skip.json; commit it so the skip is visible in the PR." >&2
+      continue
+    fi
+  fi
   if [[ "$br" == "$CURRENT_BRANCH" ]]; then
     exloom_validate_checklist ".claude/reviews/${br}.md" "HEAD" 1 "push / open a PR for '$br'"
   else

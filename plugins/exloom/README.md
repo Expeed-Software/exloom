@@ -41,7 +41,35 @@ Four things are **not** the author's to write, and they decide everything else:
 
 - **Reviewer dispatch is recorded, not claimed.** When a reviewer subagent completes, a hook writes `.claude/reviews/<branch>.verdicts/<agent>.json` naming the commit it saw and the verdict it reached. Another hook refuses to let that file be written by hand. The receipt names the commit at dispatch, so a commit made while the reviewer runs is not covered by its approval.
 - **The tier is derived from the diff.** A migration or an auth, tenancy, secrets or crypto path earns Tier 3; a deployment or API surface or a five-file blast radius earns Tier 2. There is no tier field to argue with, and a branch whose base exloom cannot find is blocked until the checklist names it.
-- **The proof is an experiment.** `prove-change-is-tested.sh` runs your suite at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here.
+- **The proof is an experiment.** `prove-change-is-tested.sh` runs your tests at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it. It costs zero model tokens and it is the highest-value thing here. It runs only the tests your diff touches, which is why it takes seconds; Certified and strict mode keep the whole suite.
+
+### What the full-suite evidence is, and is not
+
+Where committed `.claude/exloom-ci` says `none`, the gate requires a passing receipt from `record-full-suite.sh`, which runs the suite and records the command, its exit code and the commit. The receipt is agent-run and self-attested, exactly like a pasted smoke test: exloom records that a run happened and what it returned, not that the result is honest. A repository with CI gets the stronger guarantee from branch protection, which exloom neither sees nor claims to enforce. A receipt stays valid while only documentation (`.md`, `.mmd`, and anything in a committed `.claude/exloom-doc-patterns`) or comment-only source changes land on top.
+
+### What the reviewers can and cannot do
+
+The four reviewers — L1, adversarial, security and spec — have no file-editing tools. That is a narrower claim than read-only: they keep `Bash` because a review reads history with `git`, and `Bash` can write. What they cannot do is create a worktree; a hook refuses it by agent type and names `git diff` and `git show` instead, so reviewers stop leaving working copies behind.
+
+A reviewer is dispatched, never resumed. Messaging one is refused, because a resumed reviewer carries its own earlier verdict and the session's framing into the next pass and leaves no receipt of its own. A verify pass is a fresh dispatch in `MODE: VERIFY <from>..<to>`.
+
+The block reaches the three code reviewers two ways: by name, and by agent id resolved through the branch's recorded dispatches. The spec reviewer is caught **by name only** — it is advisory, so it is deliberately absent from the review log that makes ids resolvable. A message to any agent the branch did not dispatch as a reviewer, the fixer included, is allowed.
+
+The spec reviewer is advisory throughout: it reads the spec and the code but never the conversation, reports under `## Spec review`, and does not gate, count as a review round, or get repeated at the gate.
+
+### Raising the floor is itself a Tier 3 change
+
+`.claude/exloom-min-tier` turns the gate off below the tier it names, so changing any `.claude/exloom-*` setting derives Tier 3 — nobody can add a floor and skip the gate in the same push. `/exloom-setup` asks before writing one, writes it on its own branch, and that branch reaches the main line through the normal Tier 3 review and a pull request, never a direct commit. Every skip writes `.claude/reviews/<branch>.skip.json` naming the derived tier, the floor, and who set it in which commit.
+
+### Three ways a proof can fail to conclude
+
+| | Which run | What it means | Exit |
+|---|---|---|---|
+| `PROOF VOID` | 1 | The suite does not pass at the base commit. Nothing can be concluded about your tests, because the base or the environment is already broken. | 1 |
+| `PROOF_ERROR` | 2 | Your tests ran at base and failed, but the report says they neither asserted nor failed to compile — the run itself broke, on a fixture, a config or the harness. Whether your tests notice your change is unknown. | 2 |
+| `NOT_APPLICABLE` | 2 | Your tests could not compile without the change, because they name code it introduces. That shows they depend on the change, not that they would notice it being wrong. Recorded as the weakest of the three methods. | 0 |
+
+`PROOF_ERROR` is reached only from a machine-readable report — JUnit XML `errors` against `failures`, a TRX `Counters` row, Jest's `testExecError`, a `flutter --machine` error event. Where no such report exists, exloom has no opinion and falls back to the text check it has always used, which can reach `NOT_APPLICABLE` but never `PROOF_ERROR`. The receipt records which path was taken as `classification`.
 - **The verdict is read, not assumed.** A receipt records `APPROVED` or `REJECTED`, and the latest one counts. A rejection is closed by a fix the verify marks ADDRESSED, or by the user's ruling on what stays open; a report with no readable verdict line never passes.
 
 **Only L1 must cover the commit you ship.** Adversarial and security must have run and approved somewhere on the branch; a later fix does not invalidate them. Requiring every reviewer to approve the same moving commit is what produces branches that never converge.
@@ -71,6 +99,10 @@ Optional, all committed:
 | `.claude/exloom-test-report` | where the runner writes JUnit XML, if it is somewhere unusual |
 | `.claude/exloom-mutation-command` | proves a purely additive change, which the three-run proof cannot |
 | `.claude/exloom-provenance-signed.enabled` | require a signed checklist commit |
+| `.claude/exloom-ci` | `github`, `azure` or `none`. With CI, the full suite leaves the gate and branch protection carries it; with `none`, the gate requires a recorded `record-full-suite.sh` receipt before the push |
+| `.claude/exloom-min-tier` | the tier below which the gate does not apply, capped at 2 so Tier 3 is never skippable. Ignored entirely under Certified and in strict mode |
+| `.claude/exloom-fast-command` | the compile or type-check the fast check runs after each task; advisory, never blocking |
+| `.claude/exloom-test-select` | one line with a `{tests}` placeholder, for a runner whose selection syntax exloom does not know |
 
 Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for some stacks the guess hangs or tests nothing:
 
@@ -143,6 +175,16 @@ Two more, because they are what stops a checklist being self-written:
 
 6. Try to create `.claude/reviews/<branch>.verdicts/l1-reviewer.json` by hand — **denied**. Reading it is not.
 7. Touch `auth/` or a migration — the branch derives Tier 3 and the gate asks for all three reviewers.
+
+## Troubleshooting
+
+**`$'\r': command not found`, or the hooks print shell errors instead of evidence.** exloom's installed scripts have Windows line endings, and `bash` outside Git Bash — WSL, Docker, CI — stops at the first `\r`. Nothing is unsafe: a broken hook errors rather than approves, so pushes are blocked rather than let through. Fix it once:
+
+```bash
+git config --global core.autocrlf input
+```
+
+Then reinstall the plugin with `claude plugin install` so the files are checked out again. `/exloom` and `/exloom-setup` both check for this and say the same thing.
 
 ## When the review will not converge
 

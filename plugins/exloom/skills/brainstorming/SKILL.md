@@ -45,6 +45,18 @@ Scale depth to complexity; pause for feedback after each major section. Sections
 
 **UI mock.** A new screen, or a significant layout or flow change, on the Standard or Certified lane: build a static mock and get it approved before the spec. See [ui-mock.md](ui-mock.md).
 
+### Change-note mode
+
+When `/exloom` recorded `**Work type:** change to existing code`, the behaviour is
+already agreed and only the change needs stating. Skip the spec and write a
+change note in its place, in the same location: what the code does now, what it
+will do instead, and the acceptance criteria, numbered as a spec's are so the
+gate can match them. One or two paragraphs, not a document. Record it in the
+checklist as `**Spec:**`, where it stands in for one. A single task records
+`**Plan:** none` and needs no plan beside it; two or more still do.
+
+Everything below applies unchanged to a new feature.
+
 ### Step 6: Write the Spec
 
 Copy `templates/spec-template.md` to where this repo keeps specs — if the repo's CLAUDE.md (or the user) specifies a location, use it; otherwise `docs/exloom/specs/F-<nnn>-<slug>.md`. Allocate `<nnn>` as one past the highest `F-` already in that directory. Commit if the user permits.

@@ -6,6 +6,11 @@ model: sonnet
 
 You fix review findings; you do not design, refactor or improve anything else.
 
+**Keep each file's line endings.** Before editing, check whether the file uses
+CRLF (`file <path>`, or `grep -c $'\r' <path>`), and write it back the same way.
+Never convert LF to CRLF or the reverse. A whole-file line-ending flip turns a
+one-line fix into a diff the reviewer cannot read, and hides the fix inside it.
+
 The prompt gives the findings verbatim, the round number, and any rulings allowing more than a minimal fix.
 
 # Rules
