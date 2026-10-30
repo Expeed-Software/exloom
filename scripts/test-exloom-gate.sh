@@ -1634,6 +1634,42 @@ ok "exloom-setup.md is no longer than it was" \
 ok "exloom.md is no longer than it was" \
    "$([[ "$(wc -w < "$XLM")" -le 820 ]] && echo yes || echo no)" "yes"
 
+
+section "the docs describe the plugin that actually ships"
+
+# A reader's first impression is the inventory, and it was wrong for a whole
+# release: it still said 10 skills and 4 agents after a skill and an agent were
+# added. Counting is the validator's job, not a reviewer's.
+XR="$HOOKS_ABS/.."
+RDM="$XR/README.md"; HIW="$XR/HOW-IT-WORKS.md"
+cnt() { printf '%s' "$(printf '%s\n' "$@" | grep -c .)"; }
+ok "README names the skills it ships" \
+   "$(sed -n 's/.*\*\*\([0-9]*\) skills\*\*.*/\1/p' "$RDM" | head -1)" \
+   "$(ls -d "$XR"/skills/*/ 2>/dev/null | wc -l | tr -d ' ')"
+ok "...the agents"  "$(sed -n 's/.*\*\*\([0-9]*\) agents\*\*.*/\1/p' "$RDM" | head -1)" \
+   "$(ls "$XR"/agents/*.md 2>/dev/null | wc -l | tr -d ' ')"
+ok "...the commands" "$(sed -n 's/.*\*\*\([0-9]*\) commands\*\*.*/\1/p' "$RDM" | head -1)" \
+   "$(ls "$XR"/commands/*.md 2>/dev/null | wc -l | tr -d ' ')"
+ok "...the scripts" "$(sed -n 's/.*\*\*\([0-9]*\) scripts\*\*.*/\1/p' "$RDM" | head -1)" \
+   "$(ls "$XR"/scripts/*.sh 2>/dev/null | wc -l | tr -d ' ')"
+ok "...and the templates" "$(sed -n 's/.*\*\*\([0-9]*\) templates\*\*.*/\1/p' "$RDM" | head -1)" \
+   "$(ls "$XR"/templates/*.md 2>/dev/null | wc -l | tr -d ' ')"
+
+# HOW-IT-WORKS.md is what plugin.json points at as the documentation, and it
+# claims to carry every step. A step it does not name is a step nobody can read
+# about when /exloom stops on it.
+MISSING=""
+while IFS= read -r st; do
+  [[ -n "$st" ]] || continue
+  grep -q -- "$st" "$HIW" || MISSING="$MISSING $st"
+done < <(sed -n '/^exloom_next_step() {/,/^}/p' "$LIB_ABS" | grep -oE 'echo [a-z-]+' | awk '{print $2}' | sort -u)
+ok "every step exloom_next_step returns is documented" "$MISSING" ""
+
+# The new work is only real to a reader if it is written down.
+for t in fixing-bugs spec-reviewer fast-check; do
+  ok "the README names $t" "$([[ "$(grep -c -- "$t" "$RDM")" -ge 1 ]] && echo yes || echo no)" "yes"
+done
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp
