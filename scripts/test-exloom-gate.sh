@@ -1509,6 +1509,50 @@ ok "the README answers the error the developer will actually see" \
 ok "...with the setting"   "$(grep -c 'core.autocrlf input' "$RDM")" "1"
 ok "...and the reinstall"  "$([[ "$(grep -ci 'reinstall' "$RDM")" -ge 1 ]] && echo yes || echo no)" "yes"
 
+
+section "a narrowed command that does not run must not block the push"
+
+# The adapters build commands for toolchains this repo cannot run, so one of
+# them being wrong for a particular project is a question of when. That must
+# cost minutes, never a blocked push: a narrowed run that fails is retried with
+# the pinned whole-suite command before anything is concluded.
+PRVF="$(cd "$(dirname "$LIB_ABS")/../scripts" && pwd)/prove-change-is-tested.sh"
+fbrepo() {
+  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+  : > .claude/exloom-gate.enabled
+  printf 'bash tests/t.sh\n' > .claude/exloom-test-command
+  printf 'calc(){ echo 4; }\n' > src/l.sh
+  printf '. ./src/l.sh\n[ "$(calc)" = "4" ]\n' > tests/t.sh
+  git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1
+}
+
+fbrepo fb-broken
+printf './no-such-runner {tests}\n' > .claude/exloom-test-select
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBB="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./src/l.sh\n[ "$(calc)" = "5" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+bash "$PRVF" --base "$FBB" >/dev/null 2>&1; FBRC=$?
+FBJ=".claude/reviews/main.verdicts/proof.json"
+ok "a broken narrowed command still concludes"  "$FBRC" "0"
+ok "...as PROVED, on the pinned suite"          "$(sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p' "$FBJ" | tail -1)" "PROVED"
+ok "...and says it fell back"                   "$(sed -n 's/.*"selection_source":"\([a-z-]*\)".*/\1/p' "$FBJ" | tail -1)" "fallback"
+
+# A base that genuinely fails is still void: the fallback rescues a bad command,
+# not a broken repository.
+fbrepo fb-reallyvoid
+printf './no-such-runner {tests}\n' > .claude/exloom-test-select
+printf '. ./missing/dep.sh\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm sel >/dev/null 2>&1
+FBV="$(git rev-parse HEAD)"
+printf 'calc(){ echo 5; }\n' > src/l.sh
+printf '. ./missing/dep.sh\n. ./src/l.sh\n[ "$(calc)" = "5" ]\n' > tests/t.sh
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+ok "a genuinely broken base is still PROOF VOID" \
+   "$(bash "$PRVF" --base "$FBV" >/dev/null 2>&1; echo $?)" "2"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

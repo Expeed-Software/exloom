@@ -610,6 +610,20 @@ else
   echo "run 1/3: base source + base tests (control — must pass)…"
   ( cd "$WT" && eval "$CMD_BASE" ) >"$WT/.base-out" 2>&1
   base_rc=$?
+  # An adapter builds commands for toolchains exloom cannot run, so one being
+  # wrong for a given project is a matter of when. That must cost minutes, not a
+  # blocked push: retry on the pinned suite before concluding anything, and if
+  # THAT passes, the narrowing was at fault and the whole run goes wide.
+  if [[ $base_rc -ne 0 && "$SELECTION_SOURCE" != "fallback" ]]; then
+    echo "run 1/3: the narrowed command did not pass here; retrying on the pinned suite…"
+    ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.base-out" 2>&1
+    base_rc=$?
+    if [[ $base_rc -eq 0 ]]; then
+      SELECTION_SOURCE="fallback"; SELECTION=""
+      CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+      echo "selection: none (fallback — the narrowed command did not run in this repo)"
+    fi
+  fi
 fi
 if [[ $base_rc -ne 0 ]]; then
   echo
