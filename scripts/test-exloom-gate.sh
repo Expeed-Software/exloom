@@ -1496,6 +1496,19 @@ SETUP="$HOOKS_ABS/../commands/exloom-setup.md"
 ok "setup names core.autocrlf input" "$(grep -c 'core.autocrlf input' "$SETUP")" "1"
 ok "...and says to reinstall"        "$([[ "$(grep -ci 'reinstall' "$SETUP")" -ge 1 ]] && echo yes || echo no)" "yes"
 
+# Setup runs once; /exloom runs constantly. A developer who set exloom up before
+# this existed would otherwise meet the CRLF failure as bare shell noise.
+XLM="$HOOKS_ABS/../commands/exloom.md"
+ok "/exloom checks the installed line endings too" \
+   "$(grep -c 'exloom_hooks_are_crlf' "$XLM")" "1"
+ok "...and names the remedy where the developer reads it" \
+   "$(grep -c 'core.autocrlf input' "$XLM")" "1"
+RDM="$HOOKS_ABS/../README.md"
+ok "the README answers the error the developer will actually see" \
+   "$(grep -c "command not found" "$RDM")" "1"
+ok "...with the setting"   "$(grep -c 'core.autocrlf input' "$RDM")" "1"
+ok "...and the reinstall"  "$([[ "$(grep -ci 'reinstall' "$RDM")" -ge 1 ]] && echo yes || echo no)" "yes"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

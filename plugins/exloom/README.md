@@ -176,6 +176,16 @@ Two more, because they are what stops a checklist being self-written:
 6. Try to create `.claude/reviews/<branch>.verdicts/l1-reviewer.json` by hand — **denied**. Reading it is not.
 7. Touch `auth/` or a migration — the branch derives Tier 3 and the gate asks for all three reviewers.
 
+## Troubleshooting
+
+**`$'\r': command not found`, or the hooks print shell errors instead of evidence.** exloom's installed scripts have Windows line endings, and `bash` outside Git Bash — WSL, Docker, CI — stops at the first `\r`. Nothing is unsafe: a broken hook errors rather than approves, so pushes are blocked rather than let through. Fix it once:
+
+```bash
+git config --global core.autocrlf input
+```
+
+Then reinstall the plugin with `claude plugin install` so the files are checked out again. `/exloom` and `/exloom-setup` both check for this and say the same thing.
+
 ## When the review will not converge
 
 Every loop is bounded:

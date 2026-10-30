@@ -12,6 +12,8 @@ XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^
 B="$(git rev-parse --abbrev-ref HEAD)"
 ```
 
+If `exloom_hooks_are_crlf` is true, say so before anything else and stop: exloom's installed hooks have Windows line endings, so `bash` outside Git Bash fails at the first `\r` and the gate will report errors rather than evidence. Tell the user to run `git config --global core.autocrlf input` and reinstall the plugin. Setup is run once; this is the step everyone runs, so it is checked here too.
+
 **`/exloom status`:** run `exloom_status_line "$B"`, print it, and stop.
 
 Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop at `push`, at a question only the user can answer, or when a step repeats unchanged. Then print `exloom_status_line "$B"`.
