@@ -201,11 +201,11 @@ Every loop is bounded:
 
 ## What's inside
 
-- **10 skills** — `brainstorming` (with a UI mock step for new screens), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
-- **4 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `fixer`, which applies the smallest fix for findings it is given.
+- **11 skills** — `brainstorming` (with a UI mock step for new screens, and a change-note mode for edits to existing code), `fixing-bugs` (reproduce, then test and fix in one commit), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
+- **5 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `spec-reviewer`, which reads a finished spec against the code and never gates anything; `fixer`, which applies the smallest fix for findings it is given. None of them can edit a file or create a worktree.
 - **7 commands** — `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`.
-- **3 scripts** — `prove-change-is-tested.sh`, `record-smoke.sh`, and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
-- **6 hooks** — record a receipt on real dispatch, deny writing one by hand, enforce review budgets at dispatch, keep code commits to the fixer during the fix loop, block the push without evidence, announce the flow at session start in a repository with the gate on.
+- **5 scripts** — `prove-change-is-tested.sh` (narrowed to the tests the diff touches, falling back to the whole suite when that command will not run), `record-full-suite.sh`, `record-smoke.sh`, `fast-check.sh` (advisory, after each task), and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
+- **8 hook scripts**, 9 registrations — record a receipt on real dispatch, deny writing one by hand, enforce review budgets at dispatch, refuse to resume a reviewer rather than dispatch a fresh one, refuse a worktree from a reviewer, keep code commits to the fixer during the fix loop, block the push without evidence, announce the flow at session start in a repository with the gate on.
 - **2 templates** — the editable part of the review checklist, and the spec format.
 
 ## Honest scope

@@ -250,6 +250,48 @@ for plugin in $PLUGINS; do
   fi
 done
 
+# --- the docs describe what ships ---------------------------------------------
+# The inventory was wrong for a whole release — still "10 skills" after an
+# eleventh shipped. Counting is cheap; noticing afterwards is not.
+
+for plugin in $PLUGINS; do
+  PLUGIN_ROOT="plugins/$plugin"
+  RDM="$PLUGIN_ROOT/README.md"
+  [ -f "$RDM" ] || continue
+  for kind in skills agents commands scripts templates; do
+    claimed=$(grep -oE "[*][*][0-9]+ $kind[*][*]" "$RDM" 2>/dev/null | head -1 | grep -oE "[0-9]+" || true)
+    [ -n "$claimed" ] || continue
+    case "$kind" in
+      skills)    actual=$(find "$PLUGIN_ROOT/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) ;;
+      templates) actual=$(find "$PLUGIN_ROOT/templates" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l) ;;
+      scripts)   actual=$(find "$PLUGIN_ROOT/scripts" -maxdepth 1 -name '*.sh' 2>/dev/null | wc -l) ;;
+      *)         actual=$(find "$PLUGIN_ROOT/$kind" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l) ;;
+    esac
+    actual=$(echo "$actual" | tr -d ' ')
+    if [ "$claimed" != "$actual" ]; then
+      fail "$plugin README says $claimed $kind, $actual ship"
+    else
+      echo "OK: $plugin README names $actual $kind"
+    fi
+  done
+
+  # Every step the router can return must be documented, or a developer who is
+  # stopped on one has nothing to read.
+  HIW="$PLUGIN_ROOT/HOW-IT-WORKS.md"
+  LIB="$PLUGIN_ROOT/hooks/lib.sh"
+  if [ -f "$HIW" ] && [ -f "$LIB" ]; then
+    undocumented=""
+    for st in $(sed -n '/^exloom_next_step() {/,/^}/p' "$LIB"                  | grep -oE 'echo [a-z-]+' | awk '{print $2}' | sort -u); do
+      grep -q -- "$st" "$HIW" || undocumented="$undocumented $st" || true
+    done
+    if [ -n "$undocumented" ]; then
+      fail "$plugin HOW-IT-WORKS.md documents no step:$undocumented"
+    else
+      echo "OK: $plugin documents every step it can stop on"
+    fi
+  fi
+done
+
 # --- summary ------------------------------------------------------------------
 
 echo ""
