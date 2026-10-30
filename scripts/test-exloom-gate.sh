@@ -1583,6 +1583,57 @@ ok "...and the receipt says it fell back" \
 ok "...with run 1 recorded as it actually ran" \
    "$(sed -n 's/.*"run1":"\([a-z\/]*\)".*/\1/p' "$FB3J" | tail -1)" "pass"
 
+
+section "no unpinned launcher ships in the plugin"
+
+# npx and uvx fetch and run whatever the registry serves, which is a launcher
+# the project never installed. The directory portal blocks them, 6.0.7 removed
+# them once, and the proof adapters put them back — so the validator now owns
+# this rather than a reviewer's memory.
+XDIR="$(cd "$HOOKS_ABS/.." && pwd)"
+LAUNCH_RE='(^|[^A-Za-z-])(npx|uvx)[[:space:]]|@latest'
+ok "no shipped file launches with npx or uvx, or pins @latest" \
+   "$(grep -rlE "$LAUNCH_RE" "$XDIR" --include='*.sh' --include='*.md' --include='*.json' 2>/dev/null \
+      | grep -v '/templates/' | sed "s|$XDIR/||" | tr '\n' ' ')" ""
+
+# The validator must own it, or the next adapter reintroduces it.
+VP="$(cd "$HOOKS_ABS/../../.." && pwd)/scripts/validate-plugin.sh"
+ok "validate-plugin.sh checks for it"  "$([[ "$(grep -c 'npx' "$VP")" -ge 1 ]] && echo yes || echo no)" "yes"
+NXP="$REG/npx-probe"; rm -rf "$NXP"; mkdir -p "$NXP"
+printf 'FASTCMD="npx tsc --noEmit"\n' > "$NXP/bad.sh"
+ok "...and the pattern it uses catches a real one" \
+   "$(grep -rlE "$LAUNCH_RE" "$NXP" | wc -l | tr -d ' ')" "1"
+printf 'run ./node_modules/.bin/tsc --noEmit\n' > "$NXP/bad.sh"
+ok "...without catching a local binary" \
+   "$(grep -rlE "$LAUNCH_RE" "$NXP" | wc -l | tr -d ' ')" "0"
+
+
+section "the selection command is derived once, proved, and then used mechanically"
+
+# The built-in adapters are guesses about syntax exloom cannot run. Setup can
+# work the command out for this repo, prove it on a real test file, and commit
+# it — model judgement once, determinism on every proof after.
+SUP="$HOOKS_ABS/../commands/exloom-setup.md"
+XLM="$HOOKS_ABS/../commands/exloom.md"
+ok "setup derives a selection command"        "$(grep -c 'exloom-test-select' "$SUP")" "$(grep -c 'exloom-test-select' "$SUP")"
+ok "...and mentions it at all"                "$([[ "$(grep -c 'exloom-test-select' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...with a {tests} placeholder"            "$([[ "$(grep -c '{tests}' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...dry-run before it is written"          "$([[ "$(grep -ci 'dry.run' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...writing nothing when the dry run fails" "$([[ "$(grep -ci 'writes nothing\|write nothing' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...on its own branch, through a PR"       "$([[ "$(grep -ci 'pull request' "$SUP")" -ge 2 ]] && echo yes || echo no)" "yes"
+
+# A developer who did not set the repo up is told who can, not told to do it.
+ok "/exloom says once per branch when the repo is not set up" \
+   "$([[ "$(grep -ci 'set up for fast proofs' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
+ok "...and points at the repo lead, not the developer" \
+   "$([[ "$(grep -ci 'repo lead' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
+
+# Prompt files earn their length; a change may not spend more of it.
+ok "exloom-setup.md is no longer than it was" \
+   "$([[ "$(wc -w < "$SUP")" -le 1033 ]] && echo yes || echo no)" "yes"
+ok "exloom.md is no longer than it was" \
+   "$([[ "$(wc -w < "$XLM")" -le 820 ]] && echo yes || echo no)" "yes"
+
 section "re-find disposition: next-line keyword, and legacy checklists"
 
 subrepo disp

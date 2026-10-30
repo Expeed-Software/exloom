@@ -32,7 +32,7 @@ fi
 if [[ -z "$FASTCMD" ]]; then
   if   [[ -f gradlew ]]; then FASTCMD="./gradlew compileJava compileTestJava"
   elif [[ -f mvnw ]]; then FASTCMD="./mvnw -q test-compile"
-  elif [[ -f tsconfig.json ]]; then FASTCMD="npx tsc --noEmit"
+  elif [[ -f tsconfig.json ]]; then FASTCMD="./node_modules/.bin/tsc --noEmit"
   elif [[ -f go.mod ]]; then FASTCMD="go build ./..."
   elif [[ -f Cargo.toml ]]; then FASTCMD="cargo check"
   elif [[ -f pyproject.toml || -f setup.cfg ]]; then FASTCMD="python3 -m compileall -q ."

@@ -19,23 +19,33 @@ Create `.claude/exloom-gate.enabled` (empty).
 
 ## Step 3 — Pin the test command
 
-Detect the stack from the repository root and propose the command:
+Detect the stack from the repository root and propose:
 
 | Found | Command |
 |---|---|
 | `angular.json` | `./node_modules/.bin/ng test --watch=false --browsers=ChromeHeadless` |
 | `package.json` with `vitest` | `./node_modules/.bin/vitest run` |
 | `package.json` with `jest` or `react-scripts` | `CI=true npm test` |
-| `package.json` with `@strapi/strapi` | `npm test`, only if a `test` script exists; otherwise ask the user for one |
+| `package.json` with `@strapi/strapi` | `npm test`, if a `test` script exists; else ask |
 | one `*.sln` (or one `*.csproj`) | `dotnet test <that file>` |
 | `pubspec.yaml` | `flutter test` |
 | `gradlew` / `mvnw` | `./gradlew test --rerun-tasks` / `./mvnw -q test` |
 | `pyproject.toml` / `pytest.ini` | `pytest -q` |
 | `go.mod` / `Cargo.toml` | `go test ./... -count=1` / `cargo test` |
 
-Dry-run it once, non-interactively, with a timeout. It must exit 0 on the current tree without waiting for input or opening a browser. If it hangs, fails or asks for input, show the last lines and ask the user for the right command; do not pin one that has not passed. Then write it to `.claude/exloom-test-command`.
+Dry-run it once, non-interactively, with a timeout. It must exit 0 without waiting for input or opening a browser. If it hangs, fails or asks for input, show the last lines and ask for the right one; never pin a command that has not passed. Then write `.claude/exloom-test-command`.
 
-If the suite cannot run from tracked files alone (it needs local secrets or untracked state), the proof cannot run here. Ask the user, and with their agreement write `.claude/exloom-proof.disabled` instead.
+If the suite needs local secrets or untracked state, the proof cannot run here. Ask, and with the user's agreement write `.claude/exloom-proof.disabled` instead.
+
+## Step 3b — A command that runs only some tests
+
+Work out this repo's "run only these tests" form, with `{tests}` where the paths or class names go — `./gradlew test --continue --tests {tests}`, `pytest {tests}` — reading the build file and test layout, not just the language.
+
+Dry-run it with one existing test file in `{tests}`. It must exit 0 **and** show that test ran. Only then write `.claude/exloom-test-select`.
+
+If it fails or runs no tests, write nothing and say so: the built-in adapters and whole-suite fallback apply instead.
+
+Write it on the setup branch; like the minimum tier it reaches main through review and a pull request, never a direct commit. Setup is per repository, so once merged everyone gets fast proofs.
 
 ## Step 4 — Check that review files can be committed
 
@@ -57,25 +67,25 @@ Apply it only when the user agrees.
 
 The defaults are `docs/db/`, `docs/api/`, `docs/data-model/` and `docs/architecture/`. If the repository keeps those docs elsewhere, write `.claude/exloom-docs` with one `<doc-dir>: <code globs>` line per doc (format in `exloom:maintaining-reference-docs`). If the defaults fit, or there are no docs, write nothing.
 
-If the repository has migrations, an API or ORM models but none of the matching docs, ask once with AskUserQuestion: "Create the database, API and data-model docs from the code now?" On yes, write them from the code as that skill describes, on the current branch, and commit them as their own commit. On no, create nothing. Never create architecture docs or diagrams.
+If the repository has migrations, an API or ORM models but none of the matching docs, ask once: "Create the database, API and data-model docs from the code now?" On yes, write them as that skill describes and commit separately. On no, create nothing. Never create architecture docs or diagrams.
 
 ## Step 5 — Strict mode
 
-Ask once with AskUserQuestion: "Strict mode — every branch on the Certified lane (no escape hatches, signed review commits)?" Recommend **No** unless the repository is regulated. On yes, create `.claude/exloom-strict`.
+Ask once: "Strict mode — every branch on the Certified lane (no escape hatches, signed review commits)?" Recommend **No** unless the repository is regulated. On yes, create `.claude/exloom-strict`.
 
 ## Step 5b — Who owns the full suite
 
-Ask once with AskUserQuestion: "Does this repository run CI on pull requests?" Propose a value from `.github/workflows/*.yml` or `azure-pipelines.yml` and let the user correct it. Write `github`, `azure` or `none` to `.claude/exloom-ci`.
+Ask once with AskUserQuestion: "Does this repository run CI on pull requests?" Propose a value from `.github/workflows/*.yml` or `azure-pipelines.yml`. Write `github`, `azure` or `none` to `.claude/exloom-ci`.
 
-On `github` or `azure`, say plainly that the full suite now leaves the gate and that **branch protection must require the CI check before merge** — exloom cannot see branch protection and does not enforce it. On `none`, say that the gate will require a `record-full-suite.sh` receipt before every push.
+On `github` or `azure`, say the full suite leaves the gate and **branch protection must require the CI check before merge** — exloom cannot see or enforce it. On `none`, the gate requires a `record-full-suite.sh` receipt before every push.
 
 ## Step 5c — A minimum tier (ask, never assume)
 
-Only when the user raises it. Do not offer it unprompted.
+Only when the user raises it; never offer it unprompted.
 
-Ask with AskUserQuestion, in plain words: "Set a minimum tier? Below it, exloom asks for no review and no proof — a branch at that tier can be pushed with nothing checked. Tier 3 can never be skipped. Every skip is recorded with your name and the commit that set the floor."
+Ask in plain words: "Set a minimum tier? Below it exloom asks for no review and no proof — a branch at that tier can be pushed with nothing checked. Tier 3 can never be skipped, and every skip records your name and the commit that set the floor."
 
-On yes, take the value, cap it at 2, and write `.claude/exloom-min-tier` **on its own branch**. Do not commit it to the main line: changing any `.claude/exloom-*` setting derives Tier 3, so the floor reaches main through the normal Tier 3 review and a pull request, like any other change to the protection. Say so when you write it.
+On yes, cap the value at 2 and write `.claude/exloom-min-tier` **on its own branch**. Changing any `.claude/exloom-*` setting derives Tier 3, so the floor reaches main through the normal review and a pull request, never a direct commit. Say so when you write it.
 
 ## Step 5d — Line endings on the installed hooks
 
@@ -83,11 +93,9 @@ On yes, take the value, cap it at 2, and write `.claude/exloom-min-tier` **on it
 exloom_hooks_are_crlf && echo CRLF || echo LF
 ```
 
-On CRLF, say this and stop for the user's answer — exloom cannot fix a checkout it does not own, and the plugin ships no `.gitattributes` rule for its own files:
+On CRLF, say this and stop:
 
-> exloom's installed hook scripts have Windows line endings. Git Bash tolerates them; `bash` under WSL, Docker or CI stops at the first `\r`, so the hooks fail with `$'\r': command not found` and the gate reports errors instead of evidence.
->
-> Fix it once, globally: `git config --global core.autocrlf input`, then reinstall the plugin with `claude plugin install` so the files are checked out again.
+> exloom's installed hooks have Windows line endings. `bash` outside Git Bash stops at the first `\r`, so the gate reports errors instead of evidence. Run `git config --global core.autocrlf input`, then reinstall with `claude plugin install`.
 
 On LF, say nothing.
 
@@ -97,7 +105,7 @@ On LF, say nothing.
 exloom_policy_load; echo "rc=$?"; exloom_policy_error; exloom_policy_fingerprint
 ```
 
-A non-zero rc means `.exloom.yml` is invalid and the gate blocks every push: print the error and stop. Otherwise print:
+A non-zero rc means `.exloom.yml` is invalid and the gate blocks every push: print the error and stop. Else print:
 
 ```
 Gate:            on
@@ -112,7 +120,7 @@ Required reviewers by tier
   Tier 3      l1-reviewer, adversarial-reviewer, security-auditor
 ```
 
-If the branch already has a diff, add `exloom_derive_tier HEAD; exloom_tier_reasons`: the tier and the rule behind it. Repository rules in `.exloom.yml` only ever raise a tier or add a reviewer.
+With a diff on the branch, add `exloom_derive_tier HEAD; exloom_tier_reasons`. Repository rules only raise a tier.
 
 ## Step 7 — Commit after the user confirms
 

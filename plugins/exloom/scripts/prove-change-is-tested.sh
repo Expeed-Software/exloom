@@ -268,10 +268,10 @@ _narrow_cmd() {   # _narrow_cmd <adapter> <paths…>
       printf 'pytest -q --junitxml=.exloom-junit.xml%s' "$sel" ;;
     jest)
       for p in "$@"; do sel="$sel '$p'"; done
-      printf 'npx jest --json --outputFile=.exloom-jest.json --runTestsByPath%s' "$sel" ;;
+      printf './node_modules/.bin/jest --json --outputFile=.exloom-jest.json --runTestsByPath%s' "$sel" ;;
     vitest)
       for p in "$@"; do sel="$sel '$p'"; done
-      printf 'npx vitest run --reporter=json --outputFile=.exloom-jest.json%s' "$sel" ;;
+      printf './node_modules/.bin/vitest run --reporter=json --outputFile=.exloom-jest.json%s' "$sel" ;;
     flutter)
       for p in "$@"; do sel="$sel '$p'"; done
       printf 'flutter test --machine%s' "$sel" ;;

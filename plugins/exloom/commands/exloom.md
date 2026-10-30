@@ -12,7 +12,9 @@ XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/hooks/lib.sh";[[ $XL_ROOT =~ ^
 B="$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-If `exloom_hooks_are_crlf` is true, say so before anything else and stop: exloom's installed hooks have Windows line endings, so `bash` outside Git Bash fails at the first `\r` and the gate will report errors rather than evidence. Tell the user to run `git config --global core.autocrlf input` and reinstall the plugin. Setup is run once; this is the step everyone runs, so it is checked here too.
+If `exloom_hooks_are_crlf` is true, say so and stop: the installed hooks have Windows line endings, so `bash` outside Git Bash fails at the first `\r` and the gate reports errors, not evidence. Tell the user to run `git config --global core.autocrlf input` and reinstall.
+
+Without a committed `.claude/exloom-test-select`, say once per branch: "This repo isn't set up for fast proofs; ask the repo lead to run `/exloom-setup`." Never ask the developer to run setup.
 
 **`/exloom status`:** run `exloom_status_line "$B"`, print it, and stop.
 
@@ -22,9 +24,9 @@ Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop a
 |---|---|
 | `setup` | Run `/exloom-setup`. |
 | `branch` | Protected branch: run `exloom:isolating-execution` to move the work onto a feature branch. |
-| `init` | Follow `/review-init`; the tier is pending until code exists. Ask once, "Quick fix?" — yes means `**Lane:** sprint`, never at derived tier 3. Then ask once what kind of work this is: **a new feature**, **a bug fix**, or **a change to existing code**. Record the answer in the checklist as `**Work type:** new feature` / `bug fix` / `change to existing code`, spelled exactly so — `exloom_next_step` reads it. A new feature takes the full flow. A bug fix runs `exloom:fixing-bugs` and is never sent to the spec or plan step. A change to existing code runs `exloom:brainstorming` in its change-note mode: the note goes in `**Spec:**`, and a single task records `**Plan:** none`. |
+| `init` | Follow `/review-init`; the tier is pending until code exists. Ask once, "Quick fix?" — yes means `**Lane:** sprint`, never at derived tier 3. Then ask once what kind of work this is: **a new feature**, **a bug fix**, or **a change to existing code**. Record it as `**Work type:** new feature` / `bug fix` / `change to existing code`, spelled exactly so — `exloom_next_step` reads it. A new feature takes the full flow. A bug fix runs `exloom:fixing-bugs`, never the spec or plan step. A change to existing code runs `exloom:brainstorming` in its change-note mode: the note goes in `**Spec:**`, and a single task records `**Plan:** none`. |
 | `commit` | Commit `.claude/reviews/` on its own. |
-| `commit-work` | Commit the changes outside `.claude/reviews/` first. Run `exloom_scratch_skipped` and, if it names anything, tell the user which untracked scratch folders were passed over and suggest adding them to `.gitignore`; never add them yourself. |
+| `commit-work` | Commit the changes outside `.claude/reviews/` first. Run `exloom_scratch_skipped`; if it names anything, say which untracked scratch folders were passed over and suggest `.gitignore`, never adding them yourself. |
 | `spec` | Run `exloom:brainstorming`; put its path in `**Spec:**`. A change to existing code writes a change note there instead. Then, on the Standard and Certified lanes only, dispatch `exloom:spec-reviewer` once with that path: show the user its findings and append them under `## Spec review` in the checklist. It never blocks and is not a review round — carry on to `plan` whatever it says — and it is never resumed; a materially changed spec gets a fresh dispatch. |
 | `plan` | Run `exloom:planning-for-handoff`; put its path in `**Plan:**`. |
 | `build` | With a plan, run `exloom:executing-handoff-plans`, one reviewed task at a time, until every task is approved. Without one, make the change and commit. After each task run `${CLAUDE_PLUGIN_ROOT}/scripts/fast-check.sh`; it is advisory, so report a warning and carry on. |
