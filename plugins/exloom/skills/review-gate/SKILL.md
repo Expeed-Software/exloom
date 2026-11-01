@@ -7,16 +7,16 @@ description: Used by /exloom when closing work (done, complete, ready, shipping,
 
 **This is exloom's one enforced mechanism.** When the gate is on, a `PreToolUse` hook run by the harness, not the model, blocks `git push` or a PR (shell **and** GitHub MCP) until the tier's evidence is in `.claude/reviews/<branch>.md`.
 
-**One gate, at push.** Nothing blocks a completion claim, freezes the working tree, or gates the first source edit.
+**One gate, at push.** Nothing blocks a completion claim, freezes the working tree or gates the first source edit.
 
-The gate binds this session, not the repository: matching is text-based, so an obfuscated command, a push from outside Claude Code, or a raw API call gets through, and a benign command containing `git push` may be over-blocked (rephrase, or use `EXLOOM_REVIEW_SKIP=1`). See [failure-modes.md](failure-modes.md) and [rationale.md](rationale.md).
+The gate binds this session, not the repository: matching is text-based, so an obfuscated command, a push from outside Claude Code or a raw API call gets through, and a benign command containing `git push` may be over-blocked (rephrase, or set `EXLOOM_REVIEW_SKIP=1`). See [failure-modes.md](failure-modes.md) and [rationale.md](rationale.md).
 
-## Four rules people expect that do not exist
+## Four rules people expect that don't exist
 
 | Not a rule | What is true |
 |---|---|
-| Every required reviewer must approve the **same commit** | Only `l1-reviewer` must cover the commit you ship. Adversarial and security must have run and approved *anywhere* on the branch; a later fix does not invalidate them. |
-| The working tree is **frozen** while a reviewer reads it | There is no freeze marker and no state machine. Do not invent one. |
+| Every required reviewer must approve the **same commit** | Only `l1-reviewer` must cover the commit you ship. Adversarial and security must have approved *anywhere* on the branch; a later fix does not invalidate them. |
+| The working tree is **frozen** while a reviewer reads it | There is no freeze marker and no state machine. |
 | A source edit is blocked until a **plan is approved** | There is no plan gate. |
 | A finding must be fixed **across its whole class** | Fix the instance; track the class in a ticket. |
 
@@ -146,17 +146,17 @@ Dispatch the `security-auditor` agent; its method, scanners and finding format l
 
 ## Checklist template
 
-`templates/review-checklist.md` holds only the editable part (base branch, lane, rulings). `/review-init` and `/exloom` generate the checklist with `exloom_render_report`, which adds an evidence block rebuilt from the receipts on every run.
+`templates/review-checklist.md` holds only the editable part (base branch, lane, rulings). `/review-init` and `/exloom` generate the checklist with `exloom_render_report`, which adds an evidence block rebuilt from the receipts every run.
 
-## Turn it on (per repo)
+## Turn it on
 
-The gate is **opt-in**; without this committed marker the hooks no-op:
+**Opt-in**, per branch by default: `/exloom` asks once and commits the checklist the hooks read. `/exloom-setup` commits the repo-wide switch instead:
 
 ```bash
 mkdir -p .claude && touch .claude/exloom-gate.enabled
 ```
 
-`/review-complete` also records a **Provenance** block — AI-assisted, model id, directing human, base commit — bound to the reviewed commit. Signed-commit option: [rationale.md](rationale.md).
+`/review-complete` also records a **Provenance** block — AI-assisted, model id, directing human, base commit — bound to the reviewed commit. Signed commits: [rationale.md](rationale.md).
 
 ## The emergency bypass
 

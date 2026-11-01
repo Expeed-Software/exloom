@@ -30,13 +30,24 @@ A Sprint branch that turns out to matter gets `/harden`: it recovers the spec fr
 
 A repository may also commit `.claude/exloom-min-tier`, a floor below which the gate asks for nothing. It is capped at 2 so Tier 3 is never skippable, ignored under Certified and strict mode, and every skip writes `.claude/reviews/<branch>.skip.json` naming the tier, the floor, and who set it in which commit.
 
+## Optional, or mandatory
+
+A repository runs the gate one of two ways, and `/exloom-setup` asks which.
+
+**Optional (per branch, the default).** No gate switch is committed. The first `/exloom` on a branch asks "Use exloom on this branch?" A yes commits the branch's checklist, and that committed checklist is what every hook reads, so the answer holds for every later session on the branch. A branch that said no is never checked, and nor is a developer who never answered — which is the point: a committed switch would gate the whole team, including the people who chose not to use exloom. Deleting the checklist from the working tree does not revoke the yes; only a commit does.
+
+**Mandatory (repo-wide).** A committed `.claude/exloom-gate.enabled` checks every branch and overrides any per-branch answer. Everything else — strict mode, the minimum tier, the pinned test command — behaves the same in both modes; on an ungated branch those settings simply do nothing.
+
+Neither mode is enforcement. Both are hooks in the developer's own session, and `EXLOOM_REVIEW_SKIP=1` turns them off. What actually stops an unreviewed change from merging is CI and branch protection; the gate's job is to produce evidence those checks can read.
+
+In optional mode the proof uses its own auto-detected test command. Pinning one per branch would make ordinary work a Tier 3 change, because every `.claude/exloom-*` setting does; a repository that needs a custom command has its lead commit it once through `/exloom-setup`.
+
 ## The loop
 
 `/exloom` runs the next step that is not done, then stops when a person has to decide. It is a priority order, not a pipeline — the same command does the right next thing whatever state the branch is in.
 
 | Step | What it means | Run |
 |---|---|---|
-| `setup` | the gate is not on in this repository | `/exloom-setup` |
 | `branch` | you are on a protected branch | `exloom:isolating-execution` |
 | `init` | no checklist yet; asks the lane and the work type | `/review-init` |
 | `commit` | `.claude/reviews/` has uncommitted changes | commit it alone |

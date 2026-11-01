@@ -137,5 +137,5 @@ Answer **yes** to "Quick fix?" at `init`. `spec` and `plan` never appear; `build
 | Review round 4, 5, 6… | `fix` | Findings are being treated as design briefs. Fix what is cited; a fix needing new architecture is a ticket, not this branch. |
 | `PROOF VOID` | `proof` | The suite did not pass at the base commit. Either the throwaway worktree lacks gitignored deps, or the pinned test command names test classes that do not exist at the base. Pin one valid at any base. |
 | Push blocked on a branch you thought was done | `push` | Run `/exloom`; it names the missing step. `EXLOOM_VERBOSE=1` prints the full reason. |
-| Nothing blocks at all | — | The gate is opt-in. It is on only when `.claude/exloom-gate.enabled` exists in the repo. |
+| Nothing blocks at all | — | The gate is opt-in: on where the checklist is committed, else only with `.claude/exloom-gate.enabled`. |
 | Gate demands a reviewer that already ran | `review` | Its receipt covers an older commit. Only L1 must cover the commit you ship; /exloom re-dispatches that one. |

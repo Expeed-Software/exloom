@@ -52,6 +52,22 @@ subrepo() {   # subrepo <name> [noorigin]
   git checkout -q -b feat/plan
 }
 
+obrepo() {   # obrepo <name> — a repo in per-branch mode: no committed gate switch
+  subrepo "$1" || return 1
+  git checkout -q main
+  rm -f .claude/exloom-gate.enabled
+  git add -A >/dev/null 2>&1; git commit -qm "chore: no repo-wide gate" >/dev/null 2>&1
+  git update-ref refs/remotes/origin/main HEAD
+  git checkout -q -B feat/plan
+}
+optin() {   # optin [branch] — commit the branch's checklist: the user's yes
+  local b="${1:-$(git rev-parse --abbrev-ref HEAD)}"
+  mkdir -p ".claude/reviews/$(dirname "$b")"
+  printf '# checklist\n\n**Lane:** standard\n\n## Rulings\n\nnone\n' > ".claude/reviews/$b.md"
+  git add -A >/dev/null 2>&1; git commit -qm "chore: review checklist" >/dev/null 2>&1
+}
+active() { exloom_gate_active "${1:-$(git rev-parse --abbrev-ref HEAD)}" && echo on || echo off; }
+
 PASS=0; FAIL=0
 ok() {
   if [[ "$2" == "$3" ]]; then
@@ -4025,7 +4041,7 @@ ok "the branch summary line has duration, rounds, criteria and rulings" \
    "$(exloom_branch_summary feat/plan "2026-01-01T10:42:00Z" | grep -cE '^42 min · [0-9]+ review rounds? · [0-9]+(/[0-9]+)? criteria proved · 1 ruling$')" "1"
 git checkout -q -- .claude/reviews/feat/plan.md
 rm -f .claude/exloom-gate.enabled
-ok "gate off -> setup" "$(exloom_next_step feat/plan)" "setup"
+ok "with the gate switch gone the step is never setup" "$(exloom_next_step feat/plan | grep -c '^setup$')" "0"
 
 section "the reviewer model is a committed per-repo setting, Opus by default"
 
@@ -4757,6 +4773,178 @@ ok "it no longer edits CLAUDE.md directly" "$(grep -ci 'directly' "$CLD/SKILL.md
 ok "nothing proposes changes to exloom's own repository" \
    "$(grep -rlE 'plugins/exloom|PRs to the exloom|plugin maintainer' "$CLD" | wc -l | tr -d ' ')" "0"
 ok "a PR goes only to a repository the user names" "$(grep -c 'repository the user names' "$CLD/SKILL.md")" "1"
+
+section "the gate is optional per branch"
+
+# A committed .claude/exloom-gate.enabled gates every branch in the repository.
+# That is right for a team that chose exloom together and wrong for a mixed one:
+# once merged it gates developers who never opted in. Without it the gate is per
+# branch, and a COMMITTED checklist is the branch's recorded yes.
+
+obrepo pbgate
+ok "no gate switch and no committed checklist -> the gate is off"  "$(active feat/plan)" "off"
+optin
+ok "a checklist committed on the branch -> the gate is on"         "$(active feat/plan)" "on"
+rm -f .claude/reviews/feat/plan.md
+ok "deleting the checklist does not switch the gate off"           "$(active feat/plan)" "on"
+git checkout -q -- .claude/reviews
+git checkout -q -b feat/renamed
+ok "...nor does renaming the branch"                               "$(active feat/renamed)" "on"
+git checkout -q feat/plan
+
+# A checklist that only exists in the working tree is not a yes: it is one
+# `touch` away from gating a developer who never chose exloom, and one `rm` away
+# from ungating a branch that did.
+obrepo pbuncommitted
+mkdir -p .claude/reviews/feat
+printf '# checklist\n' > .claude/reviews/feat/plan.md
+ok "an uncommitted checklist is not a yes"                         "$(active feat/plan)" "off"
+
+# A branch forked from a base that already carries merged checklists has not
+# opted in: the commits that committed them are below the fork point.
+obrepo pbinherited
+optin feat/plan
+git checkout -q main; git merge -q --no-ff -m merge feat/plan >/dev/null 2>&1
+git update-ref refs/remotes/origin/main HEAD
+git checkout -q -b feat/second
+printf 'y\n' > src/other.txt; git add -A >/dev/null 2>&1; git commit -qm other >/dev/null 2>&1
+ok "a checklist merged into the base does not gate a later branch" "$(active feat/second)" "off"
+
+# The repo-wide switch wins over everything: it is how a team makes exloom
+# mandatory, and a branch cannot decline it.
+subrepo pbmandatory
+ok "a committed gate switch gates a branch with no checklist"      "$(active feat/plan)" "on"
+ok "...and gates the protected branch too"                         "$(active main)" "on"
+rm -f .claude/exloom-gate.enabled
+ok "with the switch gone the branch falls back to per-branch mode" "$(active feat/plan)" "off"
+
+section "every hook reads the one shared gate check"
+
+# Twelve raw `[[ -f .claude/exloom-gate.enabled ]]` tests were twelve chances for
+# one of them to disagree with the rest. There is one now, and this fails if a
+# raw one comes back.
+ok "the gate switch is tested in exactly one place" \
+   "$(grep -rhE '\-(f|e)[[:space:]]+"?[^";]*exloom-gate\.enabled' \
+        "$HOOKS_ABS"/*.sh "$HOOKS_ABS"/../scripts/*.sh | wc -l | tr -d ' ')" "1"
+ok "...and that place is exloom_gate_active" \
+   "$(awk '/^exloom_gate_active\(\)/{p=1} p{print} p&&/^\}/{exit}' "$LIB_ABS" \
+      | grep -cE '\-(f|e)[[:space:]]+"?[^";]*exloom-gate\.enabled')" "1"
+ok "every hook and script that gates calls it" \
+   "$(grep -rlE 'exloom_gate_active' "$HOOKS_ABS"/*.sh "$HOOKS_ABS"/../scripts/*.sh \
+      | wc -l | tr -d ' ')" "10"
+
+# An ungated branch is never blocked, by any hook.
+pbwt() {   # pbwt — a reviewer trying to add a worktree
+  python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'Bash','agent_id':'aA',
+ 'agent_type':'exloom:l1-reviewer','tool_input':{'command':'git worktree add /tmp/r HEAD'}}))" \
+    | bash "$HOOKS_ABS/guard-reviewer-shell.sh" >/dev/null 2>&1; echo $?
+}
+pbmsg() {   # pbmsg — a message to a reviewer named outright
+  python3 -c "
+import json
+print(json.dumps({'session_id':'s','hook_event_name':'PreToolUse','tool_name':'SendMessage',
+ 'tool_input':{'to':'exloom:l1-reviewer','message':'re-check'}}))" \
+    | bash "$HOOKS_ABS/guard-reviewer-message.sh" >/dev/null 2>&1; echo $?
+}
+pbpush() { printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}' \
+             | bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1; echo $?; }
+pbrm() {   # pbrm — deleting a reviewer receipt
+  printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm .claude/reviews/feat/plan.verdicts/l1-reviewer.json"}}' \
+    | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?
+}
+pbss() { bash "$HOOKS_ABS/session-start.sh" </dev/null 2>/dev/null | grep -c 'exloom'; }
+
+obrepo pbhooks
+mkdir -p .claude/reviews/feat/plan.verdicts
+printf '{"agent":"l1-reviewer","head":"x","verdict":"APPROVED"}\n' > .claude/reviews/feat/plan.verdicts/l1-reviewer.json
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+ok "ungated: a push is not blocked"               "$(pbpush)" "0"
+ok "ungated: a reviewer may add a worktree"       "$(pbwt)" "0"
+ok "ungated: a reviewer may be messaged"          "$(pbmsg)" "0"
+ok "ungated: a receipt may be deleted"            "$(pbrm)" "0"
+ok "ungated: the session-start note stays quiet"  "$(pbss)" "0"
+
+optin
+ok "opted in: the push is blocked"                "$(pbpush)" "2"
+ok "opted in: the worktree is refused"            "$(pbwt)" "2"
+ok "opted in: the message is refused"             "$(pbmsg)" "2"
+ok "opted in: the receipt is protected"           "$(pbrm)" "2"
+ok "opted in: the session-start note appears"     "$(pbss)" "1"
+
+# Deleting the checklist from the working tree is the obvious way out, so every
+# hook has to keep enforcing after it.
+rm -f .claude/reviews/feat/plan.md
+ok "the checklist deleted: the push is still blocked" "$(pbpush)" "2"
+ok "...the worktree still refused"                    "$(pbwt)" "2"
+ok "...the receipt still protected"                   "$(pbrm)" "2"
+git checkout -q -- .claude/reviews
+
+# The fix-loop guard holds a session that commits code over an open rejection.
+obrepo pbfixloop
+optin
+PFV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$PFV"
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+PFH="$(git rev-parse HEAD)"
+printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T10:00:00Z"}\n' "$PFH" > "$PFV/l1-reviewer.json"
+printf '{"round":1,"agent":"l1-reviewer","severity":"HIGH","scope":"IN-SCOPE","cite":"src/a.go:1","fingerprint":"f","head":"%s","at":"n"}\n' "$PFH" > "$PFV/l1-reviewer.findings.jsonl"
+git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
+pbfl() { printf '{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m fix"}}' \
+           | bash "$HOOKS_ABS/guard-fix-loop.sh" >/dev/null 2>&1; echo $?; }
+printf 'b\n' > src/a.go; git add src/a.go
+ok "opted in: committing over an open rejection is refused" "$(pbfl)" "2"
+
+# The verdict recorder resolves which repo a receipt belongs to by asking each
+# candidate whether its gate is on, so it has to answer the per-branch question
+# too — otherwise a reviewer completes and no receipt is ever written.
+obrepo pbverdict
+optin
+printf 'a\n' > src/a.go; git add -A >/dev/null 2>&1; git commit -qm a >/dev/null 2>&1
+PVH="$(git rev-parse HEAD)"
+python3 -c "
+import json,sys
+print(json.dumps({'session_id':'s','hook_event_name':'PostToolUse','tool_name':'Agent',
+ 'tool_use_id':'t1','tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'Review '+sys.argv[1]},
+ 'tool_response':{'content':[{'type':'text','text':'VERDICT: APPROVED'}],'agentId':'ag1'}}))" "$PVH" \
+  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+ok "opted in: a completed reviewer leaves a receipt" \
+   "$(grep -c '"verdict":"APPROVED"' .claude/reviews/feat/plan.verdicts/l1-reviewer.json 2>/dev/null || echo 0)" "1"
+
+# The proof's receipt is written only where the gate is on, so it follows the
+# same rule.
+proofrepo pbproof 'exit 0' 'echo hi'
+rm -f .claude/exloom-gate.enabled; git add -A >/dev/null 2>&1; git commit -qm ungate >/dev/null 2>&1
+printf 'exit 0\n# more\n' > tests/calc_test.sh; git add -A >/dev/null 2>&1; git commit -qm t >/dev/null 2>&1
+bash "$PROVE" --base "$BASESHA" >/dev/null 2>&1
+ok "ungated: the proof writes no receipt" \
+   "$([[ -f .claude/reviews/feat/proof.verdicts/proof.json ]] && echo written || echo none)" "none"
+optin feat/proof
+bash "$PROVE" --base "$BASESHA" >/dev/null 2>&1
+ok "opted in: the proof writes its receipt" \
+   "$(grep -c '"result":"TESTS_ONLY"' .claude/reviews/feat/proof.verdicts/proof.json 2>/dev/null || echo 0)" "1"
+
+section "/exloom asks for the branch instead of routing to setup"
+
+# Routing to /exloom-setup whenever the gate switch was missing is what made the
+# switch look mandatory. In per-branch mode the next step is the branch's own
+# checklist, and the question that precedes it is asked in the init step.
+obrepo pbnext
+ok "per-branch mode goes to init"               "$(exloom_next_step feat/plan)" "init"
+ok "setup is no longer a step the gate returns" "$(grep -c 'echo setup' "$LIB_ABS")" "0"
+ok "...and /exloom no longer has a setup row"   "$(grep -c '^| `setup`' "$HOOKS_ABS/../commands/exloom.md")" "0"
+ok "the init step asks whether to use exloom on this branch" \
+   "$(grep -ciE 'use exloom on this branch' "$HOOKS_ABS/../commands/exloom.md")" "1"
+ok "a protected branch still goes to branch"    "$(exloom_next_step main)" "branch"
+
+ok "/exloom-setup offers an optional and a mandatory mode" \
+   "$(grep -cE 'Optional|Mandatory' "$HOOKS_ABS/../commands/exloom-setup.md" | awk '{print ($1>1)?"yes":"no"}')" "yes"
+for d in README.md HOW-IT-WORKS.md; do
+  ok "$d explains both modes" \
+     "$(grep -ciE 'per branch|per-branch' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
+  ok "$d says enforcement comes from CI and branch protection" \
+     "$(grep -ciE 'branch protection' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
+done
 
 cd "$WORK" || exit 1
 

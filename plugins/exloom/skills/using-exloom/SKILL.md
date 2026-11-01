@@ -13,7 +13,6 @@ exloom produces **evidence** that transfers between people — spec, plan, proof
 
 | Step | What happens | What it produces |
 |---|---|---|
-| `setup` | gate not on here — `/exloom-setup` | `.claude/exloom-gate.enabled`, pinned test command |
 | `branch` | protected branch — `exloom:isolating-execution` | a feature branch (the hooks skip protected ones) |
 | `init` | `/review-init`, used by /exloom; asks once "Quick fix?" (yes = Sprint) | `.claude/reviews/<branch>.md` |
 | `commit` | commit the review files on their own | checklist and receipts in history |
@@ -81,4 +80,4 @@ Call yourself: `exloom:capturing-learnings`, `exloom:authoring-claude-md`. Skip 
 
 ## Is the gate on in this repo?
 
-Only when `.claude/exloom-gate.enabled` exists. Then `git push` on a feature branch is blocked until the checklist is complete and bound to the reviewed commit. **Never create that marker yourself** — it gates everyone. `/exloom-setup` offers it; the user decides.
+Where the branch's checklist is committed, or anywhere if `.claude/exloom-gate.enabled` is. Then `git push` on a feature branch is blocked until the checklist is complete and bound to the reviewed commit. **Never create that marker yourself** — it gates everyone, including people who did not choose exloom. `/exloom-setup` offers it; the user decides.

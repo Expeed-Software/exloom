@@ -64,7 +64,10 @@ TO="$(_field tool_input.to)"
 git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 cd "$ROOT" 2>/dev/null || exit 0
-[[ -f ".claude/exloom-gate.enabled" ]] || exit 0
+_XLDIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_XLDIR" == "${BASH_SOURCE[0]}" ]] && _XLDIR=.
+# shellcheck source=/dev/null
+. "$_XLDIR/lib.sh"
+exloom_gate_active || exit 0
 
 REVIEWERS='l1-reviewer|adversarial-reviewer|security-auditor|spec-reviewer'
 

@@ -23,7 +23,7 @@ Do not begin until all four preconditions hold.
 
 Confirm the working tree is a git repository. If `git rev-parse --is-inside-work-tree` fails: for a brand-new or empty project, run `git init`, note it in the deviation log, and continue; for an existing folder that already has code but no git, STOP and ask before initializing. Never execute without per-task commits.
 
-Then isolate the workspace before the first commit: run `exloom:isolating-execution`. It moves the work onto a feature branch where the review gate can fire (the hooks skip `main`/`dev`) and checks whether the repo has enabled the gate (`.claude/exloom-gate.enabled`), telling you if you are isolated but not gated. Skip it only if Level 0 there finds you are already on a feature branch or in a worktree.
+Then isolate the workspace before the first commit: run `exloom:isolating-execution`. It moves the work onto a feature branch where the review gate can fire (the hooks skip `main`/`dev`) and checks whether the gate is on for the branch, telling you if you are isolated but not gated. Skip it only if Level 0 there finds you are already on a feature branch or in a worktree.
 
 **4. Refuse to start on an ambiguous plan.** The author closes the gaps, not the executor. "Reasonable assumptions, noted" is still improvisation.
 

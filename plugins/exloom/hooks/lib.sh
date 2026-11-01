@@ -149,6 +149,37 @@ exloom_is_protected_branch() {
   return 1
 }
 
+# Is the review gate active on branch $1 (default: the current branch)?
+#
+# A committed .claude/exloom-gate.enabled is REPO-WIDE: every branch is gated and
+# no branch can decline, which is what a team that adopted exloom together wants.
+# It wins over everything else.
+#
+# Without it the gate is PER BRANCH and the user's own choice, because a mixed
+# team has developers who never opted in and a committed switch gates them too.
+# The yes is a checklist COMMITTED on the branch. The working tree does not
+# count: a file there is one `touch` from gating someone who declined and one
+# `rm` from ungating a branch that agreed.
+#
+# Any checklist among the branch's own first-parent commits counts, not only the
+# one named for the branch, so a rename does not revoke the yes; merges from the
+# base are excluded, because a checklist that arrived with someone else's merged
+# work was never this branch's choice.
+exloom_gate_active() {   # exloom_gate_active [branch]
+  local br="${1:-}" root base
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ -n "$root" ]] || return 1
+  [[ -f "$root/.claude/exloom-gate.enabled" ]] && return 0
+  [[ -n "$br" ]] || br="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  [[ -n "$br" && "$br" != "HEAD" ]] || return 1
+  git rev-parse --verify --quiet "$br" >/dev/null 2>&1 || return 1
+  base="$(exloom_fork_point "$br" 2>/dev/null)"
+  [[ -n "$base" ]] || return 1
+  [[ -n "$(git log --first-parent --format=%H "${base}..${br}" \
+             -- ':(top,glob).claude/reviews/*.md' ':(top,glob).claude/reviews/**/*.md' \
+             2>/dev/null | head -1)" ]]
+}
+
 # Should the gate skip branch $1 entirely via .claude/exloom-skip-branches?
 # This is a deliberate widening of an enforcement boundary, so it is honored ONLY
 # when the file is COMMITTED (an uncommitted skip-list would be an invisible
@@ -648,9 +679,10 @@ $(exloom_verdict_dir "$1")/ before treating any of this as review evidence."
 exloom_bypass_receipt() {
   local action="${1:-unknown}" root branch sha who when file
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
-  [[ -n "$root" && -f "$root/.claude/exloom-gate.enabled" ]] || return 0
+  [[ -n "$root" ]] || return 0
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
+  exloom_gate_active "$branch" || return 0
   sha="$(git rev-parse HEAD 2>/dev/null || true)"
   who="$(git config user.name 2>/dev/null || true)"
   when="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
@@ -1971,7 +2003,6 @@ exloom_render_report() {   # exloom_render_report <branch>
 # fix, rulings, proof, push, or blocked (read the full message).
 exloom_next_step() {   # exloom_next_step <branch>
   local branch="$1" cl=".claude/reviews/$1.md" out lane spec plan fork progress
-  [[ -f .claude/exloom-gate.enabled ]] || { echo setup; return 0; }
   exloom_is_protected_branch "$branch" && { echo branch; return 0; }
   [[ -f "$cl" ]] || { echo init; return 0; }
   [[ -n "$(git status --porcelain -- .claude/reviews 2>/dev/null)" ]] && { echo commit; return 0; }

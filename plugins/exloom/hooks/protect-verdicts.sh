@@ -125,7 +125,7 @@ esac
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [[ -n "$REPO_ROOT" ]] || exit 0
 cd "$REPO_ROOT" || exit 0
-[[ -f ".claude/exloom-gate.enabled" ]] || exit 0
+exloom_gate_active || exit 0
 
 printf '%s\n' \
   'exloom review gate: DENIED — cannot write a reviewer verdict receipt by hand.' \

@@ -62,17 +62,9 @@ Do not nest worktrees. If Level 0 found you in one, do not create another.
 
 ## Gated, or just isolated?
 
-A feature branch is necessary for the gate but not sufficient. The hooks enforce only when `.claude/exloom-gate.enabled` exists and is committed.
+A feature branch is necessary for the gate but not sufficient. The hooks enforce where the branch's checklist is committed, or everywhere `.claude/exloom-gate.enabled` is.
 
-After isolating, check and report:
-
-```bash
-test -f .claude/exloom-gate.enabled && echo "gated" || echo "isolated, NOT gated"
-```
-
-If the marker is absent, say so plainly. Then either enable enforcement (`mkdir -p .claude && touch
-.claude/exloom-gate.enabled`, then commit it — see the README's gate section and
-`exloom:review-gate`) or continue knowingly without it. Never call the branch "gated" when the marker isn't there.
+After isolating, run `/exloom`: it asks once per branch whether to use exloom and commits the checklist on yes, which is what the hooks read. Say plainly when a branch is not gated, and never create the repo-wide marker yourself — it gates everyone, including people who never chose exloom. Never call a branch "gated" when it is not.
 
 ## Decision table
 
