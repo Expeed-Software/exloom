@@ -36,7 +36,9 @@ A repository runs the gate one of two ways, and `/exloom-setup` asks which.
 
 **Optional (per branch, the default).** No gate switch is committed. The first `/exloom` on a branch asks "Use exloom on this branch?" A yes commits the branch's checklist, and that committed checklist is what every hook reads, so the answer holds for every later session on the branch. A branch that said no is never checked, and nor is a developer who never answered — which is the point: a committed switch would gate the whole team, including the people who chose not to use exloom. Deleting the checklist from the working tree does not revoke the yes; only a commit does.
 
-**Mandatory (repo-wide).** A committed `.claude/exloom-gate.enabled` checks every branch and overrides any per-branch answer. Everything else — strict mode, the minimum tier, the pinned test command — behaves the same in both modes; on an ungated branch those settings simply do nothing.
+**Mandatory (repo-wide).** A **committed** `.claude/exloom-gate.enabled` checks every branch, for everyone, and overrides any per-branch answer. Everything else — strict mode, the minimum tier, the pinned test command — behaves the same in both modes; on an ungated branch those settings simply do nothing.
+
+**Personal always-on.** The gate switch is read from the working tree, not from the index, so a developer who keeps an uncommitted `.claude/exloom-gate.enabled` is gated on every branch in that clone and nobody else is. Committing it is what makes it the repository's rule; leaving it uncommitted makes it one person's habit. Add it to `.git/info/exclude` so it stays out of commits and off everyone else's radar.
 
 Neither mode is enforcement. Both are hooks in the developer's own session, and `EXLOOM_REVIEW_SKIP=1` turns them off. What actually stops an unreviewed change from merging is CI and branch protection; the gate's job is to produce evidence those checks can read.
 

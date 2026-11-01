@@ -4818,6 +4818,27 @@ ok "...and gates the protected branch too"                         "$(active mai
 rm -f .claude/exloom-gate.enabled
 ok "with the switch gone the branch falls back to per-branch mode" "$(active feat/plan)" "off"
 
+# No base: a repo whose integration branch is named none of the candidates
+# exloom_fork_point knows. The gate must not fall open there - a branch whose
+# checklist is committed has opted in whether or not its base can be found.
+obrepo pbnobase
+git branch -m main integration
+git update-ref -d refs/remotes/origin/main
+git checkout -q feat/plan
+ok "no base found and no checklist -> the gate is off"             "$(active feat/plan)" "off"
+optin
+ok "no base found but a committed checklist -> the gate is on"     "$(active feat/plan)" "on"
+rm -f .claude/reviews/feat/plan.md
+ok "...and deleting it does not switch the gate off"               "$(active feat/plan)" "on"
+
+# The switch is read from the working tree, so an uncommitted one is a personal
+# always-on: every branch in that clone, nobody else's.
+obrepo pblocalswitch
+ok "a branch with no checklist starts ungated"                     "$(active feat/plan)" "off"
+: > .claude/exloom-gate.enabled
+ok "an uncommitted gate switch gates the branch anyway"            "$(active feat/plan)" "on"
+ok "...and every other branch in that clone"                       "$(active main)" "on"
+
 section "every hook reads the one shared gate check"
 
 # Twelve raw `[[ -f .claude/exloom-gate.enabled ]]` tests were twelve chances for
@@ -4944,6 +4965,8 @@ for d in README.md HOW-IT-WORKS.md; do
      "$(grep -ciE 'per branch|per-branch' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
   ok "$d says enforcement comes from CI and branch protection" \
      "$(grep -ciE 'branch protection' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
+  ok "$d distinguishes an uncommitted switch from a committed one" \
+     "$(grep -ciE 'uncommitted' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
 done
 
 cd "$WORK" || exit 1

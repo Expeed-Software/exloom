@@ -165,8 +165,13 @@ exloom_is_protected_branch() {
 # one named for the branch, so a rename does not revoke the yes; merges from the
 # base are excluded, because a checklist that arrived with someone else's merged
 # work was never this branch's choice.
+#
+# No base found means the branch's commits cannot be told from its base's, not
+# that the branch declined. The whole reachable history is read instead, merges
+# included, because a gate that opens there would unreview everyone whose
+# integration branch is named something exloom_fork_point does not guess.
 exloom_gate_active() {   # exloom_gate_active [branch]
-  local br="${1:-}" root base
+  local br="${1:-}" root base range fp=--first-parent
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   [[ -n "$root" ]] || return 1
   [[ -f "$root/.claude/exloom-gate.enabled" ]] && return 0
@@ -174,8 +179,8 @@ exloom_gate_active() {   # exloom_gate_active [branch]
   [[ -n "$br" && "$br" != "HEAD" ]] || return 1
   git rev-parse --verify --quiet "$br" >/dev/null 2>&1 || return 1
   base="$(exloom_fork_point "$br" 2>/dev/null)"
-  [[ -n "$base" ]] || return 1
-  [[ -n "$(git log --first-parent --format=%H "${base}..${br}" \
+  if [[ -n "$base" ]]; then range="${base}..${br}"; else range="$br"; fp=""; fi
+  [[ -n "$(git log ${fp:+"$fp"} --format=%H "$range" \
              -- ':(top,glob).claude/reviews/*.md' ':(top,glob).claude/reviews/**/*.md' \
              2>/dev/null | head -1)" ]]
 }
