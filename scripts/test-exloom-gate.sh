@@ -4956,6 +4956,8 @@ ok "setup is no longer a step the gate returns" "$(grep -c 'echo setup' "$LIB_AB
 ok "...and /exloom no longer has a setup row"   "$(grep -c '^| `setup`' "$HOOKS_ABS/../commands/exloom.md")" "0"
 ok "the init step asks whether to use exloom on this branch" \
    "$(grep -ciE 'use exloom on this branch' "$HOOKS_ABS/../commands/exloom.md")" "1"
+ok "...and asks it only when the shared check says the gate is off" \
+   "$(grep -cE 'Unless .exloom_gate_active. is already true' "$HOOKS_ABS/../commands/exloom.md")" "1"
 ok "a protected branch still goes to branch"    "$(exloom_next_step main)" "branch"
 
 ok "/exloom-setup offers an optional and a mandatory mode" \
