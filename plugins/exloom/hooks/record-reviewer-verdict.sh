@@ -26,6 +26,8 @@ case "$_DIR" in /*|[A-Za-z]:*) ;; *) _DIR="$PWD/$_DIR" ;; esac
 # shellcheck source=/dev/null
 . "$_DIR/prefilter.sh"
 exloom_may_be_reviewer "$HOOK_INPUT" || exit 0
+# shellcheck source=/dev/null
+. "$_DIR/lib.sh"
 
 # ---------- nested field extraction (jq -> python3 -> sed) ----------
 # Args: <dotted-path> e.g. "tool_input.subagent_type". The sed fallback is a
@@ -114,7 +116,7 @@ esac
 # evidence about what it read. This cannot manufacture a receipt for a review
 # that did not happen — the hook only runs on a real completion. It only decides
 # where the review it just observed belongs.
-_repo_is_gated() { [[ -n "$1" && -d "$1" && -f "$1/.claude/exloom-gate.enabled" ]]; }
+_repo_is_gated() { [[ -n "$1" && -d "$1" ]] && ( cd "$1" && exloom_gate_active ); }
 
 _repo_of_path() {
   # Walk up to the first real directory rather than dirname-ing once: a cite can

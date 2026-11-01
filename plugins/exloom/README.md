@@ -78,7 +78,15 @@ After every reviewer completes, the gate says where it stands — the tier it de
 
 ## Turn on the gate
 
-Off by default. exloom never blocks a repo that did not ask for it. Run `/exloom-setup` once: it creates the `.claude/exloom-gate.enabled` marker, pins and dry-runs the test command, checks that review files are not git-ignored, and asks about strict mode. Commit what it writes and the whole team has the gate.
+Off by default. exloom never blocks a repo that did not ask for it. Run `/exloom-setup` once: it asks whether exloom is optional or mandatory here, pins and dry-runs the test command, checks that review files are not git-ignored, and asks about strict mode.
+
+**Optional (per branch, the default).** No gate switch is committed. The first `/exloom` on a branch asks "Use exloom on this branch?"; a yes commits the branch's checklist, which is what the hooks read, so every later session on that branch behaves the same. A branch that said no is never gated, and neither is anyone who never answered. This is the mode for a mixed team.
+
+**Mandatory (repo-wide).** `/exloom-setup` **commits** `.claude/exloom-gate.enabled`, which gates every branch for everyone and overrides any per-branch answer. It reaches main through the setup branch and a pull request.
+
+**Personal always-on.** The switch is read from the working tree, not the index. An uncommitted `.claude/exloom-gate.enabled` gates every branch in your own clone and nobody else's — one developer's habit rather than the repository's rule, which is what committing it makes it. Keep it in `.git/info/exclude` so it never lands in a commit.
+
+Neither mode is enforcement. Both are hooks in the developer's own session, and `EXLOOM_REVIEW_SKIP=1` turns them off on any lane. What actually stops an unreviewed change from merging is CI and branch protection; the gate's job is to produce the evidence those checks can read.
 
 It applies to **feature branches only** — work committed directly to `main`, `master`, `dev` or `develop` is deliberately not gated, so start on a branch. A repo can extend or narrow that with committed glob files: `.claude/exloom-protected-branches` and `.claude/exloom-skip-branches`. Both are honoured only when committed, and every skip is logged.
 

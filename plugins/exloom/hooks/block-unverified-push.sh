@@ -94,9 +94,9 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 [[ -z "$REPO_ROOT" ]] && exit 0
 cd "$REPO_ROOT" || exit 0
-[[ -f ".claude/exloom-gate.enabled" ]] || exit 0
-
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+exloom_gate_active "$CURRENT_BRANCH" || exit 0
+
 DOC_WARN=""
 exloom_is_protected_branch "$CURRENT_BRANCH"   || DOC_WARN="$(exloom_doc_warnings ".claude/reviews/${CURRENT_BRANCH}.md" HEAD 2>/dev/null)"
 

@@ -6,7 +6,10 @@
 set -u
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[[ -f "${ROOT}/.claude/exloom-gate.enabled" ]] || exit 0
+_XLDIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_XLDIR" == "${BASH_SOURCE[0]}" ]] && _XLDIR=.
+# shellcheck source=/dev/null
+. "$_XLDIR/lib.sh"
+exloom_gate_active || exit 0
 GATE="ON — git push is blocked until the branch's review evidence is complete"
 
 read -r -d '' MSG <<EOF || true

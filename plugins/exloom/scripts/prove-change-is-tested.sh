@@ -54,6 +54,9 @@
 
 set -u
 
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../hooks" && pwd)/lib.sh"
+
 BASE=""; TESTCMD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -344,7 +347,7 @@ _receipt_early() {   # _receipt_early <result> <method>
   local branch vdir head
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
-  [[ -f ".claude/exloom-gate.enabled" ]] || return 0
+  exloom_gate_active "$branch" || return 0
   head="$(git rev-parse HEAD 2>/dev/null)" || return 0
   vdir=".claude/reviews/${branch}.verdicts"
   mkdir -p "$vdir" 2>/dev/null || return 0
@@ -409,8 +412,6 @@ fi
 
 NNB=0
 if [[ -z "$TST" ]]; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../hooks" && pwd)/lib.sh"
   if ! git diff --quiet HEAD -- . ':(exclude).claude' 2>/dev/null \
      || [[ -n "$(git ls-files --others --exclude-standard -- . ':(exclude).claude' 2>/dev/null)" ]]; then
     echo "no test changed: commit the change first, then re-run, so the suite runs on what ships." >&2
@@ -550,7 +551,7 @@ _receipt() {
   local result="$1" method="${2:-three-run}" branch vdir head
   branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
-  [[ -f ".claude/exloom-gate.enabled" ]] || return 0
+  exloom_gate_active "$branch" || return 0
   head="$(git rev-parse HEAD 2>/dev/null)" || return 0
   vdir=".claude/reviews/${branch}.verdicts"
   mkdir -p "$vdir" 2>/dev/null || return 0

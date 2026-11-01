@@ -82,8 +82,10 @@ printf '%s' "$CMD" | grep -Eq '(^|[^A-Za-z-])worktree([^A-Za-z-]|$)' || exit 0
 printf '%s' "$CMD" | grep -Eq '(^|[^A-Za-z-])add([^A-Za-z-]|$)' || exit 0
 
 git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-[[ -f "${ROOT}/.claude/exloom-gate.enabled" ]] || exit 0
+_XLDIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_XLDIR" == "${BASH_SOURCE[0]}" ]] && _XLDIR=.
+# shellcheck source=/dev/null
+. "$_XLDIR/lib.sh"
+exloom_gate_active || exit 0
 
 cat >&2 <<EOF
 exloom: ${AGENT} may not create a worktree.
