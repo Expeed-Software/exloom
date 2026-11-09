@@ -5192,6 +5192,59 @@ bash "$RVF" --agent adversarial-reviewer --verdict APPROVED --head "$FRR" --roun
 ok "a finding without a cite is dropped" \
    "$(cat "$FRD/adversarial-reviewer.findings.jsonl" 2>/dev/null | grep -c '"cite":')" "0"
 
+section "a reviewer cannot state its way past its own findings"
+
+# Everything the reviewer states is checked. The three ways a stated fact could
+# have weakened the gate: approving over open findings, narrowing scope with an
+# unchecked verify range, and answering a carried-forward finding by prefix.
+
+RVS="$HOOKS_ABS/../scripts/record-verdict.sh"
+subrepo statedcheck
+SCC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$SCC")"
+SCD="$(exloom_verdict_dir "$SCC")"
+printf '# checklist\n' > "$SCC"
+printf 'a\nb\nc\nd\n' > src/s.go; git add -A >/dev/null 2>&1; git commit -qm s >/dev/null 2>&1
+SC1="$(git rev-parse HEAD)"
+
+# APPROVED over an open blocking finding is recorded as REJECTED.
+printf 'HIGH\tIN-SCOPE\tsrc/s.go:2\tunchecked index\n' > "$REG/sc1.tsv"
+bash "$RVS" --agent l1-reviewer --verdict APPROVED --head "$SC1" --round-needed NO --findings "$REG/sc1.tsv" >/dev/null 2>&1
+ok "an APPROVED over a blocking finding is recorded REJECTED" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$SCD/l1-reviewer.json" | tail -1)" "REJECTED"
+ok "...and another round is demanded"        "$(grep -c '"round_needed":"YES"' "$SCD/l1-reviewer.json")" "1"
+
+# A verify range that is not where this agent last reviewed is not a verify
+# pass, so it cannot demote findings to non-blocking.
+printf 'e\n' >> src/s.go; git add -A >/dev/null 2>&1; git commit -qm e >/dev/null 2>&1
+SC2="$(git rev-parse HEAD)"
+printf 'HIGH\tIN-SCOPE\tsrc/s.go:2\tstill unchecked\n' > "$REG/sc2.tsv"
+bash "$RVS" --agent l1-reviewer --verdict APPROVED --head "$SC2" --round-needed NO \
+  --mode verify --from "$SC2" --findings "$REG/sc2.tsv" >/dev/null 2>&1
+ok "a bogus verify range does not demote a finding" \
+   "$(grep -c '"scope":"OUT-OF-SCOPE"' "$SCD/l1-reviewer.findings.jsonl")" "0"
+ok "...and the verdict is still REJECTED" \
+   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$SCD/l1-reviewer.json" | tail -1)" "REJECTED"
+
+# A carried-forward finding is answered only by its own cite, not by one that
+# merely starts with it.
+subrepo carryfwd
+CFC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$CFC")"
+CFD="$(exloom_verdict_dir "$CFC")"
+printf '# checklist\n' > "$CFC"
+printf 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\n' > src/c.go
+git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+CF1="$(git rev-parse HEAD)"
+printf 'HIGH\tIN-SCOPE\tsrc/c.go:1\tfirst defect\n' > "$REG/cf1.tsv"
+bash "$RVS" --agent l1-reviewer --verdict REJECTED --head "$CF1" --round-needed YES --findings "$REG/cf1.tsv" >/dev/null 2>&1
+printf 'z\n' >> src/c.go; git add -A >/dev/null 2>&1; git commit -qm z >/dev/null 2>&1
+CF2="$(git rev-parse HEAD)"
+printf 'HIGH\tADDRESSED\tsrc/c.go:12\tdifferent line entirely\n' > "$REG/cf2.tsv"
+bash "$RVS" --agent l1-reviewer --verdict APPROVED --head "$CF2" --round-needed NO \
+  --mode verify --from "$CF1" --findings "$REG/cf2.tsv" >/dev/null 2>&1
+ok "src/c.go:1 is not answered by src/c.go:12" \
+   "$(grep -c '"cite":"src/c.go:1","fingerprint"' "$CFD/l1-reviewer.findings.jsonl")" "2"
+ok "...so the pass cannot approve"            "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CFD/l1-reviewer.json" | tail -1)" "REJECTED"
+
 cd "$WORK" || exit 1
 
 echo
