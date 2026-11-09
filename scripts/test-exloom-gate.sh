@@ -5147,6 +5147,14 @@ RVC='bash x/scripts/record-verdict.sh --agent l1-reviewer --verdict APPROVED --h
 ok "a clean invocation is allowed"               "$(pvc "$RVC")" "0"
 ok "a receipt write chained onto it is refused"    "$(pvc "$RVC ; echo forged >> .claude/reviews/feat/plan.verdicts/adversarial-reviewer.json")" "2"
 ok "a receipt write && chained onto it is refused" "$(pvc "$RVC && printf x >> .claude/reviews/feat/plan.verdicts/l1-reviewer.json")" "2"
+ok "the documented plugin-root form is allowed" \
+   "$(pvc 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh" --agent l1-reviewer --verdict APPROVED --head abc123 --round-needed NO')" "0"
+# The allow skips every check below it, so anything that is not this exact shape
+# must not reach it - a blocklist of punctuation does not hold that line.
+ok "an interpreter writing a receipt is refused" \
+   "$(pvc 'python3 -c open(.claude/reviews/feat/plan.verdicts/l1-reviewer.json,a).write(record-verdict.sh)')" "2"
+ok "a second command after the flags is refused" \
+   "$(pvc "$RVC --agent l1-reviewer cp forged.json .claude/reviews/feat/plan.verdicts/l1-reviewer.json")" "2"
 cd "$WORK" || exit 1
 
 echo
