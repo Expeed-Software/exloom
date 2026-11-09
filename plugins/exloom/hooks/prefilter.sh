@@ -4,7 +4,7 @@
 
 exloom_may_touch_receipts() {
   case "$1" in
-    *verdicts*|*reviews*|*exloom-gate*|*clean*|*apply*) return 0 ;;
+    *verdicts*|*reviews*|*exloom-gate*|*clean*|*apply*|*record-verdict*) return 0 ;;
   esac
   return 1
 }

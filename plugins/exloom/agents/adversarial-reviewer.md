@@ -190,3 +190,13 @@ exloom blocks the push until the work's owner answers each. State options by COS
 - Flagging nothing is allowed, but show what you ran and traced. A clean report naming what you checked is a good result; one with no evidence of effort is not acceptable.
 - Do not soften findings ("might not read this field"). Grep, then state it plainly.
 - Integration gaps cost the most: spend more time on Q1 and Q2 than on the rest combined.
+
+# Record your verdict
+
+Your last action is to record it yourself, because exloom cannot reliably tell
+from the outside which commit you read or which dispatch you answered:
+
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh"       --agent adversarial-reviewer --verdict APPROVED|REJECTED       --head <the commit you reviewed> --round-needed YES|NO       [--task <id> if this was a per-task review]
+
+Only a reviewer may run it, and only for itself. Still print the verdict lines in
+your report: both are read, and the first to land wins.

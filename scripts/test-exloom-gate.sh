@@ -5077,6 +5077,64 @@ exloom_check_verdicts "$NVC" 1 HEAD "$NVR" "test" 2>/dev/null
 ok "the finished report is recorded and clears the gate" "$?" "0"
 ok "...and the receipt holds exactly one verdict line"    "$(grep -c '"verdict":' "$NVD/l1-reviewer.json")" "1"
 
+section "a reviewer records its own verdict, and only a reviewer may"
+
+# The report-reading hook infers which commit a reviewer read and which dispatch
+# its report belongs to by correlating async events. The reviewer knows both.
+
+RV="$HOOKS_ABS/../scripts/record-verdict.sh"
+subrepo selfrec
+SRC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$SRC")"
+SRD="$(exloom_verdict_dir "$SRC")"
+printf '# checklist
+
+**Lane:** standard
+
+## Rulings
+
+none
+' > "$SRC"
+printf 'a
+' > src/sr.go; git add -A >/dev/null 2>&1; git commit -qm sr >/dev/null 2>&1
+SRR="$(git rev-parse HEAD)"
+
+bash "$RV" --agent l1-reviewer --verdict APPROVED --head "$SRR" --round-needed NO >/dev/null 2>&1
+ok "the reviewer's own verdict is written"       "$(grep -c '"verdict":"APPROVED"' "$SRD/l1-reviewer.json")" "1"
+ok "...marked as written by the reviewer"        "$(grep -c '"via":"reviewer"' "$SRD/l1-reviewer.json")" "1"
+git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
+exloom_check_verdicts "$SRC" 1 HEAD "$SRR" "test" 2>/dev/null
+ok "...and it satisfies the gate"                "$?" "0"
+
+bash "$RV" --agent l1-reviewer --verdict APPROVED --head "$SRR" --round-needed NO >/dev/null 2>&1
+ok "the same verdict twice is one fact"          "$(grep -c '"verdict":"APPROVED"' "$SRD/l1-reviewer.json")" "1"
+
+# A task review belongs in the task receipt, which is the routing the hook loses
+# when it cannot resolve the dispatch.
+bash "$RV" --agent l1-reviewer --verdict APPROVED --head "$SRR" --round-needed NO --task sf-11 >/dev/null 2>&1
+ok "a task verdict goes to the task receipt"     "$(grep -c '"task":"sf-11"' "$SRD/l1-reviewer.tasks.json")" "1"
+ok "...and never into the branch receipt"        "$(grep -c 'sf-11' "$SRD/l1-reviewer.json")" "0"
+
+# A head the branch does not contain is refused: a receipt naming it would vouch
+# for code nobody read.
+ok "a head outside the branch is refused"    "$(bash "$RV" --agent l1-reviewer --verdict APPROVED --head 0000000000000000000000000000000000000000 --round-needed NO >/dev/null 2>&1; echo $?)" "2"
+ok "a verdict that is neither APPROVED nor REJECTED is refused"    "$(bash "$RV" --agent l1-reviewer --verdict MAYBE --head "$SRR" --round-needed NO >/dev/null 2>&1; echo $?)" "2"
+
+# The guard: the authoring session cannot write its own approval, which is the
+# whole reason the gate trusts a receipt.
+pv() {   # pv <agent_type|-> -> exit code of protect-verdicts.sh
+  local at="$1"
+  python3 -c "
+import json,sys
+d={'tool_name':'Bash','session_id':'s',
+   'tool_input':{'command':'bash .../scripts/record-verdict.sh --agent l1-reviewer --verdict APPROVED --head HEAD --round-needed NO'}}
+if sys.argv[1] != '-': d['agent_type']=sys.argv[1]
+print(json.dumps(d))" "$at"     | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?
+}
+ok "a reviewer may record its verdict"           "$(pv exloom:l1-reviewer)" "0"
+ok "the authoring session may not"               "$(pv -)" "2"
+ok "another subagent may not"                    "$(pv exloom:fixer)" "2"
+ok "a reviewer may not record as another agent"  "$(pv exloom:adversarial-reviewer)" "2"
+
 cd "$WORK" || exit 1
 
 echo

@@ -144,3 +144,13 @@ exloom blocks the push until the work's owner answers each. State options by COS
 - Flagging nothing is allowed; a clean report still names what you ran and traced.
 - Rate severity by real impact, not category: a hardcoded production DB password is Critical; a weak RNG for a non-security nonce is Low.
 - No exploit code beyond the minimal proof a finding needs.
+
+# Record your verdict
+
+Your last action is to record it yourself, because exloom cannot reliably tell
+from the outside which commit you read or which dispatch you answered:
+
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh"       --agent security-auditor --verdict APPROVED|REJECTED       --head <the commit you reviewed> --round-needed YES|NO       [--task <id> if this was a per-task review]
+
+Only a reviewer may run it, and only for itself. Still print the verdict lines in
+your report: both are read, and the first to land wins.

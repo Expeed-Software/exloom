@@ -162,3 +162,13 @@ exloom blocks the push until the work's owner answers each. State options by COS
 # Exit condition
 
 Return when every changed file is cited in a finding or listed under "Nothing to flag in". If the diff is too large for one pass, say so and recommend batching; never fake coverage.
+
+# Record your verdict
+
+Your last action is to record it yourself, because exloom cannot reliably tell
+from the outside which commit you read or which dispatch you answered:
+
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh"       --agent l1-reviewer --verdict APPROVED|REJECTED       --head <the commit you reviewed> --round-needed YES|NO       [--task <id> if this was a per-task review]
+
+Only a reviewer may run it, and only for itself. Still print the verdict lines in
+your report: both are read, and the first to land wins.
