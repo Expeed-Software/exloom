@@ -5155,6 +5155,43 @@ ok "an interpreter writing a receipt is refused" \
    "$(pvc 'python3 -c open(.claude/reviews/feat/plan.verdicts/l1-reviewer.json,a).write(record-verdict.sh)')" "2"
 ok "a second command after the flags is refused" \
    "$(pvc "$RVC --agent l1-reviewer cp forged.json .claude/reviews/feat/plan.verdicts/l1-reviewer.json")" "2"
+section "a reviewer states its findings, instead of them being read out of prose"
+
+# Severity used to be taken from the report's headings - l1 writes Critical,
+# adversarial writes Blocking, security writes High - and scope from prose
+# beside the cite. Stated outright, neither can be misread.
+
+RVF="$HOOKS_ABS/../scripts/record-verdict.sh"
+subrepo findrec
+FRC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$FRC")"
+FRD="$(exloom_verdict_dir "$FRC")"
+printf '# checklist\n' > "$FRC"
+printf 'a\n' > src/f.go; git add -A >/dev/null 2>&1; git commit -qm f >/dev/null 2>&1
+FRR="$(git rev-parse HEAD)"
+FF="$REG/findings.tsv"
+printf 'HIGH\tIN-SCOPE\tsrc/f.go:3\tnil deref when the list is empty\n' > "$FF"
+printf 'LOW\tIN-SCOPE\tsrc/f.go:9\tname could be clearer\n' >> "$FF"
+printf 'MED\tPRE-EXISTING\tsrc/old.go:2\tpredates this branch\n' >> "$FF"
+bash "$RVF" --agent l1-reviewer --verdict REJECTED --head "$FRR" --round-needed YES --findings "$FF" >/dev/null 2>&1
+
+ok "every stated finding is recorded"        "$(grep -c '"cite":' "$FRD/l1-reviewer.findings.jsonl")" "3"
+ok "the severity is the one stated"          "$(grep -c '"severity":"HIGH"' "$FRD/l1-reviewer.findings.jsonl")" "1"
+ok "pre-existing scope is kept"              "$(grep -c '"scope":"PRE-EXISTING"' "$FRD/l1-reviewer.findings.jsonl")" "1"
+ok "a blocking finding stays out of the ledger" \
+   "$(cat .claude/reviews/feat/plan.ledger.md 2>/dev/null | grep -c 'src/f.go:3')" "0"
+ok "minor and pre-existing go to the ledger" \
+   "$(grep -c '^- \[ \]' .claude/reviews/feat/plan.ledger.md)" "2"
+
+# The same finding twice is one ledger entry, not two.
+bash "$RVF" --agent l1-reviewer --verdict REJECTED --head "$FRR" --round-needed YES --findings "$FF" >/dev/null 2>&1
+ok "the ledger does not repeat a finding"    "$(grep -c '^- \[ \]' .claude/reviews/feat/plan.ledger.md)" "2"
+
+# A finding with no cite is not a finding.
+printf 'HIGH\tIN-SCOPE\tnot-a-cite\tno line number here\n' > "$REG/bad.tsv"
+bash "$RVF" --agent adversarial-reviewer --verdict APPROVED --head "$FRR" --round-needed NO --findings "$REG/bad.tsv" >/dev/null 2>&1
+ok "a finding without a cite is dropped" \
+   "$(cat "$FRD/adversarial-reviewer.findings.jsonl" 2>/dev/null | grep -c '"cite":')" "0"
+
 cd "$WORK" || exit 1
 
 echo
