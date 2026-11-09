@@ -388,6 +388,20 @@ case "$VLINE" in
   REJECTED) VERDICT="REJECTED" ;;
 esac
 
+# A reviewer stops several times before it reports, and those stops carry
+# partial text. No VERDICT line at all means it has not finished; recording
+# UNKNOWN there puts the gate on its REJECTED path, which demands rulings on
+# findings that do not exist - a block with no way forward. Treated as no
+# report it records a launch, which blocks as firmly and asks for a re-dispatch.
+#
+# A VERDICT line that does not parse is the opposite case: the reviewer finished
+# and hedged. That stays UNKNOWN, because it stated something and what it stated
+# was not an approval.
+if [[ "$VERDICT" == "UNKNOWN" ]] && ! printf '%s''
+' "$SCAN" | tr -d '*_`#>'      | sed -e 's/^[[:space:]-]*//' | grep -qE '^VERDICT:[[:space:]]*[A-Za-z]'; then
+  REPORT_SEEN=0
+fi
+
 # ---------- the loop-termination signal ----------
 # Every agent emits `ROUND NEEDED AFTER FIX: YES | NO`; recording it is what lets
 # /review-complete decide the loop is over. UNKNOWN counts as YES to any
@@ -694,8 +708,6 @@ fi
 # reader scanning it newest-first would invert the answer.
 #
 # So the append is conditional on the line being NEW INFORMATION for this commit.
-# The first UNKNOWN for a commit is still recorded and still blocks, because a
-# reviewer that states no verdict has not approved anything.
 _recorded_for_head() {
   # $1: a JSON fragment to look for on a line already naming this HEAD.
   local f="$RECEIPT"
@@ -721,13 +733,6 @@ if [[ $REPORT_SEEN -eq 0 ]]; then
   exit 0
 fi
 
-# An UNKNOWN adds nothing once ANY verdict is on file for this commit — it is
-# almost always an intermediate stop arriving after (or before) the real report.
-# A stated verdict is always recorded, even if an UNKNOWN preceded it; that is
-# the line the gate acts on.
-if [[ "$VERDICT" == "UNKNOWN" ]] && _recorded_for_head '"verdict":"'; then
-  exit 0
-fi
 # And the same conclusion twice for the same commit is one fact, not two. The
 # key is verdict AND round_needed together, because those two fields are the
 # whole content of the line — a second report that changes its mind about

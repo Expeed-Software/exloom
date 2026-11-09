@@ -628,7 +628,8 @@ Item 2 (Acceptance Criteria): not testable.'
 ok "REJECTED verdict recorded" "$(grep -c '"verdict":"REJECTED"' "$VF" 2>/dev/null | head -1)" "1"
 
 disp 'The plan looks broadly fine to me, shipping notes below.'
-ok "no verdict line -> UNKNOWN" "$(grep -c '"verdict":"UNKNOWN"' "$VF" 2>/dev/null | head -1)" "1"
+ok "no verdict line -> no verdict recorded" "$(cat "$VF" 2>/dev/null | grep -c '"verdict":')" "0"
+ok "...a launch line instead, which still blocks" "$(cat "$VF" 2>/dev/null | grep -c '"dispatch":true')" "1"
 
 # A reviewer that echoes its own output-format template must not be read as an
 # approval: that template line literally contains "VERDICT: APPROVED | REJECTED".
@@ -1872,8 +1873,8 @@ print(json.dumps({'tool_name':'Task','session_id':'s',
  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review'},
  'tool_response':[{'type':'text','text':'I looked at it and it seems fine.'}]}))" \
  | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
-ok "a real report with no VERDICT line -> still UNKNOWN" \
-   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$ADV/l1-reviewer.json" 2>/dev/null | tail -1)" "UNKNOWN"
+ok "a real report with no VERDICT line -> no verdict, a launch" \
+   "$(cat "$ADV/l1-reviewer.json" 2>/dev/null | grep -c '"verdict":')" "0"
 
 section "payload shape: the field the harness actually sends"
 
@@ -2121,9 +2122,9 @@ lines() { grep -c . "$DSV/l1-reviewer.json" 2>/dev/null || printf '0'; }
 
 # Seven intermediate stops, then the real report — the field sequence exactly.
 for _ in 1 2 3 4 5 6 7; do stop 'Let me read the next file.'; done
-ok "seven intermediate stops -> ONE unknown line, not seven" "$(lines)" "1"
-ok "...and it blocks, because no verdict was stated" \
-   "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$DSV/l1-reviewer.json" | tail -1)" "UNKNOWN"
+ok "seven intermediate stops -> ONE line, not seven" "$(lines)" "1"
+ok "...and it states no verdict, so it blocks" \
+   "$(grep -c '"verdict":' "$DSV/l1-reviewer.json")" "0"
 
 stop 'No findings.
 
@@ -5030,6 +5031,51 @@ none
 git add -A >/dev/null 2>&1; git commit -qm checklist >/dev/null 2>&1
 ok "the gate blocks a NOT_COVERED proof"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>/dev/null; echo $?)" "2"
 ok "...and names the command, not the tests"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 >/dev/null | grep -ci 'exloom-test-select\|test command')" "1"
+
+section "a report with no verdict line is an unfinished reviewer, not an UNKNOWN"
+
+# A reviewer stops several times before it finishes. Reading one of those stops
+# and recording UNKNOWN puts the gate on its REJECTED path, which demands
+# rulings on findings that do not exist - a block with no way forward. A launch
+# line blocks just as firmly and asks for a re-dispatch.
+
+subrepo noverdict
+NVC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$NVC")"
+NVD="$(exloom_verdict_dir "$NVC")"
+printf '# checklist
+
+**Lane:** standard
+
+## Rulings
+
+none
+' > "$NVC"
+printf 'a
+' > src/nv.go; git add -A >/dev/null 2>&1; git commit -qm nv >/dev/null 2>&1
+NVR="$(git rev-parse HEAD)"
+nvfeed() {   # nvfeed <report-text>
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Task','session_id':'s',
+  'tool_input':{'subagent_type':'exloom:l1-reviewer','prompt':'review the diff'},
+  'tool_response':[{'type':'text','text':sys.argv[1]}]}))" "$1"     | bash "$HOOKS_ABS/record-reviewer-verdict.sh" >/dev/null 2>&1
+  git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
+}
+
+nvfeed 'Reading the diff now. I have opened src/nv.go and will report shortly.'
+ok "a partial report records no UNKNOWN verdict"    "$(cat "$NVD/l1-reviewer.json" 2>/dev/null | grep -c '"verdict":"UNKNOWN"')" "0"
+exloom_check_verdicts "$NVC" 1 HEAD "$NVR" "test" 2>/dev/null
+ok "...and the gate still blocks" "$?" "2"
+ok "...naming it as a launch awaiting a verdict"    "$(exloom_check_verdicts "$NVC" 1 HEAD "$NVR" "test" 2>&1 >/dev/null | grep -ciE 'launch|dispatch|no verdict' | awk '{print ($1>0)?"yes":"no"}')" "yes"
+
+# The real report still lands and still decides.
+nvfeed 'Done.
+
+VERDICT: APPROVED
+ROUND NEEDED AFTER FIX: NO'
+exloom_check_verdicts "$NVC" 1 HEAD "$NVR" "test" 2>/dev/null
+ok "the finished report is recorded and clears the gate" "$?" "0"
+ok "...and the receipt holds exactly one verdict line"    "$(grep -c '"verdict":' "$NVD/l1-reviewer.json")" "1"
 
 cd "$WORK" || exit 1
 
