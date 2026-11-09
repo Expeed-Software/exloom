@@ -43,7 +43,18 @@ _tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 # agent_type, which the authoring session's calls do not. The session still
 # cannot write its own approval, which is the property that makes a receipt
 # evidence. A reviewer naming an agent other than itself is denied too.
-if [[ "$TOOL" == "Bash" ]] && printf '%s' "$(_tool_input command)" | grep -qF 'record-verdict.sh'; then
+_is_record_verdict_call() {
+  # ONE invocation and nothing chained onto it. Matching the script name
+  # anywhere would let `record-verdict.sh … ; echo … >> receipt.json` carry a
+  # hand-written receipt through on the allow. A command line that merely
+  # mentions the script falls through to the checks below instead.
+  local c="$1"
+  printf '%s' "$c" | grep -qF 'record-verdict.sh' || return 1
+  [[ "$c" == *$'\n'* ]] && return 1
+  printf '%s' "$c" | grep -qE '[;&|`<>]|[$][(]' && return 1
+  return 0
+}
+if [[ "$TOOL" == "Bash" ]] && _is_record_verdict_call "$(_tool_input command)"; then
   _CALLER="$(exloom_json_field "$HOOK_INPUT" agent_type)"
   _CLAIMED="$(printf '%s' "$(_tool_input command)" \
     | grep -oE -- '--agent[[:space:]]+[A-Za-z0-9-]+' | head -1 | awk '{print $2}')"

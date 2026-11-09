@@ -5135,6 +5135,18 @@ ok "the authoring session may not"               "$(pv -)" "2"
 ok "another subagent may not"                    "$(pv exloom:fixer)" "2"
 ok "a reviewer may not record as another agent"  "$(pv exloom:adversarial-reviewer)" "2"
 
+# The allow is for one clean invocation, not for a command line that mentions
+# the script. Otherwise a reviewer chains a hand-written receipt onto it.
+pvc() {   # pvc <command> -> exit code, called as a real reviewer
+  python3 -c "
+import json,sys
+print(json.dumps({'tool_name':'Bash','session_id':'s','agent_type':'exloom:l1-reviewer',
+   'tool_input':{'command':sys.argv[1]}}))" "$1"     | bash "$HOOKS_ABS/protect-verdicts.sh" >/dev/null 2>&1; echo $?
+}
+RVC='bash x/scripts/record-verdict.sh --agent l1-reviewer --verdict APPROVED --head H --round-needed NO'
+ok "a clean invocation is allowed"               "$(pvc "$RVC")" "0"
+ok "a receipt write chained onto it is refused"    "$(pvc "$RVC ; echo forged >> .claude/reviews/feat/plan.verdicts/adversarial-reviewer.json")" "2"
+ok "a receipt write && chained onto it is refused" "$(pvc "$RVC && printf x >> .claude/reviews/feat/plan.verdicts/l1-reviewer.json")" "2"
 cd "$WORK" || exit 1
 
 echo
