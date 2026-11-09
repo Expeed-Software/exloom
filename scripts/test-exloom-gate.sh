@@ -4971,6 +4971,66 @@ for d in README.md HOW-IT-WORKS.md; do
      "$(grep -ciE 'uncommitted' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
 done
 
+section "the proof will not judge a run that never ran the diff's tests"
+
+# A pinned command filtered to tests the diff does not touch cannot answer the
+# proof's question. Run 2 then passes because the branch's tests never executed,
+# not because they fail to notice the change - and NOT_PROVED asserts the second.
+
+proofrepo notcovered 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'
+printf 'true
+' > tests/other_test.sh
+printf 'bash tests/other_test.sh --tests other_test
+' > .claude/exloom-test-command
+git add -A >/dev/null 2>&1; git commit -qm pin >/dev/null 2>&1; B="$(git rev-parse HEAD)"
+printf 'echo 5
+' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]
+' > tests/calc_test.sh
+git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
+ok "a filtered command that excludes the diff's tests blocks"      "$(prove "$B")" "1"
+ok "...and the receipt says NOT_COVERED, never NOT_PROVED"         "$(proofres)" "NOT_COVERED"
+
+# The filter naming the diff's own test is fine: those tests did run.
+proofrepo covered 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'
+printf 'bash tests/calc_test.sh --tests calc_test
+' > .claude/exloom-test-command
+git add -A >/dev/null 2>&1; git commit -qm pin >/dev/null 2>&1; B="$(git rev-parse HEAD)"
+printf 'echo 5
+' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]
+' > tests/calc_test.sh
+git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
+ok "a filter that names the diff's test still proves normally"     "$(prove "$B")" "0"
+ok "...with a PROVED receipt"                                      "$(proofres)" "PROVED"
+
+# An unfiltered command runs everything, so a weak test is attributable and
+# NOT_PROVED stays reachable. Without this the fix would mute the real finding.
+proofrepo stillweak 'v=$(bash src/calc.sh); [ -n "$v" ]' 'echo 4'; B="$BASESHA"
+printf 'echo 5
+' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ -n "$v" ]  # still only non-empty
+' > tests/calc_test.sh
+git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
+ok "an unfiltered command still reaches NOT_PROVED"                "$(prove "$B" >/dev/null; proofres)" "NOT_PROVED"
+
+# The gate must block on it, and say what to change. A result it does not know
+# would otherwise fall through to "no receipt covers this commit".
+cd "$REG/notcovered" || exit 1
+NCC=".claude/reviews/feat/proof.md"
+mkdir -p "$(dirname "$NCC")"
+printf '# checklist
+
+**Lane:** standard
+
+## Rulings
+
+none
+' > "$NCC"
+git add -A >/dev/null 2>&1; git commit -qm checklist >/dev/null 2>&1
+ok "the gate blocks a NOT_COVERED proof"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>/dev/null; echo $?)" "2"
+ok "...and names the command, not the tests"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 >/dev/null | grep -ci 'exloom-test-select\|test command')" "1"
+
 cd "$WORK" || exit 1
 
 echo

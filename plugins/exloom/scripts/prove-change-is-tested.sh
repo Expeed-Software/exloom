@@ -571,6 +571,42 @@ _receipt() {
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
 }
+# ---------- can this run answer the question at all? ----------
+# Run 2 proves the tests notice the change by FAILING without it. A command
+# filtered to tests the diff does not touch fails nothing and passes run 2 - so
+# the proof would report NOT_PROVED, which asserts the tests are weak. It has no
+# evidence for that: those tests never ran. The honest result names the gap.
+_chk_sel="${_sel_head:-$(_selected_tests head)}"
+if [[ "$SELECTION_SOURCE" == fallback && -n "$_chk_sel" ]]    && printf '%s' "$CMD_HEAD" | grep -qE '(^|[[:space:]])(--tests|--filter|--grep|--testNamePattern|-k|-run)([[:space:]]|=)'; then
+  _unrun=""
+  while IFS= read -r _t; do
+    [[ -n "$_t" ]] || continue
+    _b="${_t##*/}"; _b="${_b%.*}"
+    printf '%s' "$CMD_HEAD" | grep -qF -- "$_b" || _unrun="${_unrun}${_unrun:+ }${_t}"
+  done < <(printf '%s
+' "$_chk_sel")
+  if [[ -n "$_unrun" ]]; then
+    SELECTION="$(printf '%s' "$_chk_sel" | tr '
+' ' ' | sed 's/ *$//')"
+    _receipt NOT_COVERED not-covered
+    echo
+    echo "NOT COVERED - the pinned command filters to tests this change does not touch."
+    echo
+    echo "command: $CMD_HEAD"
+    echo "never run: $_unrun"
+    echo
+    echo "The proof cannot say whether these tests notice the change, because they"
+    echo "did not run. This is not a finding about your tests."
+    echo
+    echo "What clears it, by the repo lead and committed on its own branch:"
+    echo "  1. .claude/exloom-test-command holds the WHOLE-suite command, not a filter;"
+    echo "  2. .claude/exloom-test-select holds the selection form, e.g."
+    echo "     ./gradlew test --tests {tests}"
+    echo "     exloom then runs the tests each diff touches, and this stops recurring."
+    exit 1
+  fi
+fi
+
 
 # ---------- RUN 1: base source + base tests. MUST PASS. ----------
 # Without this control the whole check is meaningless, because "the tests failed

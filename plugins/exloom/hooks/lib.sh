@@ -2141,7 +2141,7 @@ otherwise paste what you saw under '## Smoke test' in ${cl}."
 # run" is the failure this whole mechanism exists to prevent.
 exloom_check_proof() {
   local checklist="$1" tip="$2" reviewed="$3" action="$4" tier="${5:-1}"
-  local vdir file content sha ok=0 seen_notproved=0 seen_cmdswap=0 seen_notapplicable=0 seen_nnb_blocked=0 seen_refactor_blocked=0 seen_other=""
+  local vdir file content sha ok=0 seen_notproved=0 seen_notcovered=0 seen_cmdswap=0 seen_notapplicable=0 seen_nnb_blocked=0 seen_refactor_blocked=0 seen_other=""
 
   # On whenever the gate is on. A repo whose suite needs untracked local state
   # opts out with a COMMITTED .claude/exloom-proof.disabled.
@@ -2202,6 +2202,7 @@ exloom_check_proof() {
           if MSYS_NO_PATHCONV=1 git show "${tip}:${checklist}" 2>/dev/null | tr -d ''                | grep -qE '^-?[[:space:]]*Proof:[[:space:]]*refactor[[:space:]]*(—|–|-)[[:space:]]*[^[:space:]]'; then
             ok=1; seen_other="NO_TEST_CHANGED - passed as a refactor on the user's ruling"
           else seen_refactor_blocked=1; fi ;;
+        *'"result":"NOT_COVERED"'*) seen_notcovered=1 ;;
         *'"result":"NOT_PROVED"'*) seen_notproved=1 ;;
       esac
     done < <(printf '%s\n' "$content")
@@ -2237,6 +2238,16 @@ since it was written, so the receipt proves a command that is no longer the one
 this repo runs. Re-run the proof against the current command:
 
     bash \"$EXLOOM_LIB_DIR/../scripts/prove-change-is-tested.sh\""
+  elif [[ $seen_notcovered -eq 1 ]]; then
+    detail="The proof recorded NOT_COVERED: the command it ran filters to tests this
+change does not touch, so it never ran yours. That is a gap in the measurement,
+not a finding about your tests, and another run will repeat it.
+
+The repo lead clears it, committed on its own branch:
+  1. .claude/exloom-test-command must hold the WHOLE-suite command, not a filter;
+  2. .claude/exloom-test-select holds the selection form, e.g.
+         ./gradlew test --tests {tests}
+     exloom then runs the tests each diff touches."
   elif [[ $seen_notproved -eq 1 ]]; then
     detail="The proof ran on this code and came back NOT_PROVED: with your source change
 removed and your tests kept, the tests still PASS. They do not notice the change.
