@@ -15,8 +15,8 @@
 set -u
 
 _DIR="${BASH_SOURCE[0]%[/\\]*}"; [[ "$_DIR" == "${BASH_SOURCE[0]}" ]] && _DIR=.
-# shellcheck source=/dev/null
-. "$_DIR/../hooks/lib.sh"
+# lib.sh is sourced only where it is needed. It is large, this script runs
+# once per review - and the test suite runs it hundreds of times.
 
 AGENT=""; VERDICT=""; HEAD_SHA=""; ROUND=""; TASK=""; MODE="full"; FROM=""; FINDINGS_IN=""
 while [[ $# -gt 0 ]]; do
@@ -86,6 +86,8 @@ fi
 
 FIX_LINES=""
 if [[ "$MODE" == "verify" && -n "$FROM" ]]; then
+  # shellcheck source=/dev/null
+  . "$_DIR/../hooks/lib.sh"
   OWN_FROM="$(exloom_own_base "$FROM" "$HEAD_SHA" 2>/dev/null || true)"
   FIX_LINES="$(git -c core.quotepath=false diff -U0 "${OWN_FROM:-$FROM}" "$HEAD_SHA" -- . ':(exclude).claude/reviews' 2>/dev/null \
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
@@ -143,11 +145,13 @@ if [[ -n "$FINDINGS_IN" && -f "$FINDINGS_IN" ]]; then
       n_found=$((n_found + 1)); continue
     fi
 
-    # On a verify pass, a finding away from the lines the fix touched is not
-    # what this pass is for. Never demoted when the range produced no lines:
-    # that is a failure to compute the range, not evidence about the finding.
+    # A verify pass is about the lines the fix touched. A finding elsewhere is
+    # out of scope, unless the range is empty (it failed to compute) or the
+    # finding was already open: an untouched line is how one stays unaddressed.
     if [[ "$MODE" == "verify" && -n "$FIX_LINES" && "$scope" == "IN-SCOPE" ]] \
-       && { [[ "$sev" == "LOW" ]] || ! _in_fix "$cite"; }; then
+       && { [[ "$sev" == "LOW" ]] || ! _in_fix "$cite"; } \
+       && ! grep -F "\"cite\":\"${cite}\"" "$FINDINGS_FILE" 2>/dev/null \
+            | grep -F '"scope":"IN-SCOPE"' | grep -qvF '"severity":"LOW"'; then
       scope="OUT-OF-SCOPE"
     fi
 
@@ -204,7 +208,7 @@ if [[ -f "$RECEIPT" ]] && grep -F "\"head\":\"${HEAD_SHA}\"" "$RECEIPT" 2>/dev/n
      | grep -qF "\"verdict\":\"${VERDICT}\",\"round_needed\":\"${ROUND}\""; then
   echo "exloom: ${AGENT} verdict already recorded at ${HEAD_SHA:0:12}" >&2
 else
-  printf '{"agent":"%s","subagent_type":"exloom:%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","mode":"%s","via":"reviewer"%s}\n' \
+  printf '{"agent":"%s","subagent_type":"exloom:%s","head":"%s","verdict":"%s","round_needed":"%s","at":"%s","session":"%s","via":"reviewer","mode":"%s"%s}\n' \
     "$AGENT" "$AGENT" "$HEAD_SHA" "$VERDICT" "$ROUND" "$STAMP" \
     "$(_safe "${CLAUDE_SESSION_ID:-}")" "${MODE:-full}" "$EXTRA" \
     >> "$RECEIPT" || { rm -f "$PENDING" "$PENDING_LEDGER"; echo "record-verdict: could not write ${RECEIPT}" >&2; exit 2; }

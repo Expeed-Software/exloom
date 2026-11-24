@@ -193,10 +193,28 @@ exloom blocks the push until the work's owner answers each. State options by COS
 
 # Record your verdict
 
-Your last action is to record it yourself, because exloom cannot reliably tell
-from the outside which commit you read or which dispatch you answered:
+exloom does not read your report. What you record here is the review, so it is
+your last action, in two steps.
 
-    bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh"       --agent adversarial-reviewer --verdict APPROVED|REJECTED       --head <the commit you reviewed> --round-needed YES|NO       [--task <id> if this was a per-task review]
+**1. Write your findings to a file**, one per line, TAB separated. Skip this
+step when you have none.
 
-Only a reviewer may run it, and only for itself. Still print the verdict lines in
-your report: both are read, and the first to land wins.
+    printf 'HIGH\tIN-SCOPE\tsrc/a.go:12\tnull dereference on the error path\n' > /tmp/exloom-adversarial-reviewer-findings.tsv
+
+| Field | Values |
+|---|---|
+| Severity | `HIGH` (Critical), `MED` (Important), `LOW` (Minor or advisory) |
+| Scope | `IN-SCOPE`, `PRE-EXISTING`, or `ADDRESSED` (an earlier finding now fixed) |
+| Cite | `path/file.ext:line` |
+| Reason | one sentence |
+
+On a verify pass, list every earlier finding: `ADDRESSED` if fixed, otherwise
+again with its original severity and scope.
+
+**2. Record it**, as one command on one line:
+
+    bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-verdict.sh" --agent adversarial-reviewer --verdict APPROVED|REJECTED --head <the commit you reviewed> --round-needed YES|NO [--findings /tmp/exloom-adversarial-reviewer-findings.tsv] [--task <id>] [--mode verify --from <first commit of the fix range>]
+
+`--task` for a per-task review; `--mode verify --from` for a verify pass. Only a
+reviewer may run it, and only for itself. An APPROVED recorded over a HIGH or MED
+in-scope finding is stored as REJECTED.
