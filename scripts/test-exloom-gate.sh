@@ -1581,12 +1581,6 @@ ok "...dry-run before it is written"          "$([[ "$(grep -ci 'dry.run' "$SUP"
 ok "...writing nothing when the dry run fails" "$([[ "$(grep -ci 'writes nothing\|write nothing' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
 ok "...on its own branch, through a PR"       "$([[ "$(grep -ci 'pull request' "$SUP")" -ge 2 ]] && echo yes || echo no)" "yes"
 
-# A developer who did not set the repo up is told who can, not told to do it.
-ok "/exloom says once per branch when the repo is not set up" \
-   "$([[ "$(grep -ci 'set up for fast proofs' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
-ok "...and points at the repo lead, not the developer" \
-   "$([[ "$(grep -ci 'repo lead' "$XLM")" -ge 1 ]] && echo yes || echo no)" "yes"
-
 # Prompt files earn their length; a change may not spend more of it.
 ok "exloom-setup.md is no longer than it was" \
    "$([[ "$(wc -w < "$SUP")" -le 1033 ]] && echo yes || echo no)" "yes"
@@ -4522,65 +4516,38 @@ for d in README.md HOW-IT-WORKS.md; do
      "$(grep -ciE 'uncommitted' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"
 done
 
-section "the proof will not judge a run that never ran the diff's tests"
-
-# A pinned command filtered to tests the diff does not touch cannot answer the
-# proof's question. Run 2 then passes because the branch's tests never executed,
-# not because they fail to notice the change - and NOT_PROVED asserts the second.
+section "a pinned filter that leaves out the diff's tests is dropped, not blocked on"
 
 proofrepo notcovered 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'
-printf 'true
-' > tests/other_test.sh
-printf 'bash tests/other_test.sh --tests other_test
-' > .claude/exloom-test-command
+printf 'true\n' > tests/other_test.sh
+printf 'if [ "$1" = "--tests" ]; then bash "tests/$2.sh"; else for t in tests/*.sh; do bash "$t" || exit 1; done; fi\n' > run.sh
+printf 'bash run.sh --tests other_test\n' > .claude/exloom-test-command
 git add -A >/dev/null 2>&1; git commit -qm pin >/dev/null 2>&1; B="$(git rev-parse HEAD)"
-printf 'echo 5
-' > src/calc.sh
-printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]
-' > tests/calc_test.sh
+printf 'echo 5\n' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
 git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
-ok "a filtered command that excludes the diff's tests blocks"      "$(prove "$B")" "1"
-ok "...and the receipt says NOT_COVERED, never NOT_PROVED"         "$(proofres)" "NOT_COVERED"
+ok "a filter that excludes the diff's tests does not block"        "$(prove "$B")" "0"
+ok "...the suite ran without it, so the change is proved"          "$(proofres)" "PROVED"
+ok "...and the receipt records the command that actually ran" \
+   "$(grep -c '"cmd":"bash run.sh"' .claude/reviews/feat/proof.verdicts/proof.json)" "1"
 
-# The filter naming the diff's own test is fine: those tests did run.
+# The filter naming the diff's own test is left alone: those tests did run.
 proofrepo covered 'v=$(bash src/calc.sh); [ "$v" = "4" ]' 'echo 4'
-printf 'bash tests/calc_test.sh --tests calc_test
-' > .claude/exloom-test-command
+printf 'bash tests/calc_test.sh --tests calc_test\n' > .claude/exloom-test-command
 git add -A >/dev/null 2>&1; git commit -qm pin >/dev/null 2>&1; B="$(git rev-parse HEAD)"
-printf 'echo 5
-' > src/calc.sh
-printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]
-' > tests/calc_test.sh
+printf 'echo 5\n' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ "$v" = "5" ]\n' > tests/calc_test.sh
 git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
 ok "a filter that names the diff's test still proves normally"     "$(prove "$B")" "0"
 ok "...with a PROVED receipt"                                      "$(proofres)" "PROVED"
+ok "...and the filter is kept" \
+   "$(grep -c -- '--tests calc_test' .claude/reviews/feat/proof.verdicts/proof.json)" "1"
 
-# An unfiltered command runs everything, so a weak test is attributable and
-# NOT_PROVED stays reachable. Without this the fix would mute the real finding.
 proofrepo stillweak 'v=$(bash src/calc.sh); [ -n "$v" ]' 'echo 4'; B="$BASESHA"
-printf 'echo 5
-' > src/calc.sh
-printf 'v=$(bash src/calc.sh); [ -n "$v" ]  # still only non-empty
-' > tests/calc_test.sh
+printf 'echo 5\n' > src/calc.sh
+printf 'v=$(bash src/calc.sh); [ -n "$v" ]  # still only non-empty\n' > tests/calc_test.sh
 git add -A >/dev/null 2>&1; git commit -qm five >/dev/null 2>&1
 ok "an unfiltered command still reaches NOT_PROVED"                "$(prove "$B" >/dev/null; proofres)" "NOT_PROVED"
-
-# The gate must block on it, and say what to change. A result it does not know
-# would otherwise fall through to "no receipt covers this commit".
-cd "$REG/notcovered" || exit 1
-NCC=".claude/reviews/feat/proof.md"
-mkdir -p "$(dirname "$NCC")"
-printf '# checklist
-
-**Lane:** standard
-
-## Rulings
-
-none
-' > "$NCC"
-git add -A >/dev/null 2>&1; git commit -qm checklist >/dev/null 2>&1
-ok "the gate blocks a NOT_COVERED proof"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>/dev/null; echo $?)" "2"
-ok "...and names the command, not the tests"    "$(exloom_check_proof "$NCC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 >/dev/null | grep -ci 'exloom-test-select\|test command')" "1"
 
 section "a reviewer records its own verdict, and only a reviewer may"
 

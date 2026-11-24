@@ -128,7 +128,6 @@ The proof records one of these results:
 
 - `PROVED` or `PROVED_BY_MUTATION`: passes.
 - `NOT_PROVED`: blocks. The tests ran and passed without the change.
-- `NOT_COVERED`: blocks. The command filters to tests the diff does not touch, so the question was never asked. Cleared by the repo lead pinning the whole-suite command and a `.claude/exloom-test-select` form, not by the author.
 - `NOT_APPLICABLE`: the tests do not compile without the change. Passes at every tier, reported as the weakest result.
 - `NOT_TESTABLE`: every changed file is a style, asset, lockfile, dependency manifest or config file (`*.css`, `*.scss`, `*.less`, images, fonts, `package.json`, `*.lock`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `*.yml`, `*.yaml`, `*.json`, plus `.claude/exloom-not-testable-patterns`). Passes at every tier; a dependency change still gets the security auditor.
 - `TESTS_ONLY`: only tests changed. Passes at every tier.

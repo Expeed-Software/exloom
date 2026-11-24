@@ -14,8 +14,6 @@ B="$(git rev-parse --abbrev-ref HEAD)"
 
 If `exloom_hooks_are_crlf` is true, say so and stop: the hooks have Windows line endings, so `bash` outside Git Bash fails at the first `\r`. Tell the user to run `git config --global core.autocrlf input` and reinstall.
 
-Without a committed `.claude/exloom-test-select`, say once per branch: "This repo isn't set up for fast proofs; ask the repo lead to run `/exloom-setup`." Never ask the developer to run setup, and never pin a test command on a branch yourself.
-
 **`/exloom status`:** run `exloom_status_line "$B"`, print it, and stop.
 
 Otherwise run `exloom_next_step "$B"`, do what it says, and run it again. Stop at `push`, at a question only the user can answer, or when a step repeats unchanged. Then print `exloom_status_line "$B"`.

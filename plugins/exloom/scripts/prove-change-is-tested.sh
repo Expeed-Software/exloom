@@ -571,39 +571,25 @@ _receipt() {
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
 }
-# ---------- can this run answer the question at all? ----------
-# Run 2 proves the tests notice the change by FAILING without it. A command
-# filtered to tests the diff does not touch fails nothing and passes run 2 - so
-# the proof would report NOT_PROVED, which asserts the tests are weak. It has no
-# evidence for that: those tests never ran. The honest result names the gap.
+# A pinned command filtered to tests the diff does not touch passes run 2 having
+# run none of them, which would read as weak tests. Drop the filter and run the
+# suite: that costs minutes, not a blocked push.
 _chk_sel="${_sel_head:-$(_selected_tests head)}"
-if [[ "$SELECTION_SOURCE" == fallback && -n "$_chk_sel" ]]    && printf '%s' "$CMD_HEAD" | grep -qE '(^|[[:space:]])(--tests|--filter|--grep|--testNamePattern|-k|-run)([[:space:]]|=)'; then
+_filter_re='(--tests|--filter|--grep|--testNamePattern|-k|-run)'
+if [[ "$SELECTION_SOURCE" == fallback && -n "$_chk_sel" ]] \
+   && printf '%s' "$CMD_HEAD" | grep -qE "(^|[[:space:]])${_filter_re}([[:space:]]|=)"; then
   _unrun=""
   while IFS= read -r _t; do
     [[ -n "$_t" ]] || continue
     _b="${_t##*/}"; _b="${_b%.*}"
     printf '%s' "$CMD_HEAD" | grep -qF -- "$_b" || _unrun="${_unrun}${_unrun:+ }${_t}"
-  done < <(printf '%s
-' "$_chk_sel")
+  done <<< "$_chk_sel"
   if [[ -n "$_unrun" ]]; then
-    SELECTION="$(printf '%s' "$_chk_sel" | tr '
-' ' ' | sed 's/ *$//')"
-    _receipt NOT_COVERED not-covered
-    echo
-    echo "NOT COVERED - the pinned command filters to tests this change does not touch."
-    echo
-    echo "command: $CMD_HEAD"
-    echo "never run: $_unrun"
-    echo
-    echo "The proof cannot say whether these tests notice the change, because they"
-    echo "did not run. This is not a finding about your tests."
-    echo
-    echo "What clears it, by the repo lead and committed on its own branch:"
-    echo "  1. .claude/exloom-test-command holds the WHOLE-suite command, not a filter;"
-    echo "  2. .claude/exloom-test-select holds the selection form, e.g."
-    echo "     ./gradlew test --tests {tests}"
-    echo "     exloom then runs the tests each diff touches, and this stops recurring."
-    exit 1
+    TESTCMD="$(printf '%s' "$TESTCMD" \
+      | sed -E "s/(^|[[:space:]])${_filter_re}(=|[[:space:]]+)('[^']*'|\"[^\"]*\"|[^[:space:]]+)//g")"
+    CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+    echo "the pinned command filters out tests this change touches (${_unrun}); running without the filter"
+    echo "command: $TESTCMD"
   fi
 fi
 
