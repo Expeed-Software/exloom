@@ -32,7 +32,7 @@ The test of a plan: a skilled developer who has never seen this codebase execute
    - a validation step: the command and its expected output, never "make sure it works";
    - a commit message, in the repo's convention.
 
-   Business logic is validated by an automated test, written first in the same task: write the failing test, then implement until it passes. Never split "implement X" and "test X". Put the criterion ref in the test's name — `@DisplayName("F-012/R-3/AC-2 - rejects an over-large discount")` or `test_F012_R3_AC2_...` — because the proof reads which criteria passed from the test names. Only pure wiring with no logic may be validated by a build or a manual check. Sizing: [task-sizing.md](task-sizing.md).
+   Business logic is validated by an automated test, written first in the same task: write the failing test, then implement until it passes. Never split "implement X" and "test X". Put the criterion ref in the test's name — `@DisplayName("F-012/R-3/AC-2 - rejects an over-large discount")` or `test_F012_R3_AC2_...` — because the proof reads which criteria passed from the test names. Only pure wiring with no logic may be validated by a build or a manual check. A task that changes a screen, in a project with an end-to-end runner, also writes an end-to-end test of the user action: the smoke step runs it. Sizing: [task-sizing.md](task-sizing.md).
 
 9. **Check coverage both ways.**
 

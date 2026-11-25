@@ -13,6 +13,8 @@ Most of exloom is guidance a model reads and follows. One part is enforcement: w
 - **Bash.** On Windows, Claude Code runs plugin hooks through Git Bash. If you run the proof or lint scripts by hand, use Git Bash rather than WSL or PowerShell.
 - **`jq` or `python3`**, for the full gate. Without either, the push block still works but falls back to coarse text matching, which can occasionally over-block a benign command that mentions `git push`. Git Bash bundles neither — install one if you want the complete gate.
 
+Optional, and not bundled: a **Playwright** browser plugin lets exloom look at a screen when it themes a new project or compares a result with its mock, and **Context7** lets it check current library versions when it starts a project. With neither installed, exloom says what it did not check and carries on.
+
 ## Install
 
 ```
@@ -136,7 +138,7 @@ The proof records one of these results:
 
 **Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
 
-Smoke evidence: for a CLI or API change at Tier 0–2, `/smoke-test` runs the check through the plugin's `scripts/record-smoke.sh`, which records the command, exit code and output as a receipt. A UI change or Tier 3 needs a result pasted under `## Smoke test`.
+Smoke evidence: for a CLI or API change at Tier 0–2, `/smoke-test` runs the check through the plugin's `scripts/record-smoke.sh`, which records the command, exit code and output as a receipt. A UI change below Tier 3 needs an end-to-end test of the user action, run through the same script with `--method e2e`, or a result pasted under `## Smoke test`. Tier 3 needs the pasted result.
 
 Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env. It is honoured unconditionally, and records itself in `.claude/reviews/<branch>.bypass.json` — commit that with the change so the bypass is findable afterwards.
 
@@ -209,7 +211,7 @@ Every loop is bounded:
 
 ## What's inside
 
-- **18 skills** — seven you type as commands: `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`. The rest are playbooks `/exloom` uses: `brainstorming` (with a UI mock step for new screens, and a change-note mode for edits to existing code), `fixing-bugs` (reproduce, then test and fix in one commit), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
+- **20 skills** — seven you type as commands: `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`. The rest are playbooks `/exloom` uses, plus `starting-a-project` for a new project (product and architecture docs, and a skeleton whose commands pass) and `defining-a-design-system` (tokens, components and UI patterns in one document, checked at review): `brainstorming` (with a UI mock step for new screens, and a change-note mode for edits to existing code), `fixing-bugs` (reproduce, then test and fix in one commit), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
 - **5 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `spec-reviewer`, which reads a finished spec against the code and never gates anything; `fixer`, which applies the smallest fix for findings it is given. None of them can edit a file or create a worktree.
 - **6 scripts** — `prove-change-is-tested.sh` (narrowed to the tests the diff touches, falling back to the whole suite when that command will not run), `record-full-suite.sh`, `record-smoke.sh`, `fast-check.sh` (advisory, after each task), `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders), and `record-verdict.sh`, which a reviewer calls to record its own verdict — nothing else may.
 - **8 hook scripts**, 9 registrations — record a receipt on real dispatch, deny writing one by hand, enforce review budgets at dispatch, refuse to resume a reviewer rather than dispatch a fresh one, refuse a worktree from a reviewer, keep code commits to the fixer during the fix loop, block the push without evidence, announce the flow at session start in a repository with the gate on.

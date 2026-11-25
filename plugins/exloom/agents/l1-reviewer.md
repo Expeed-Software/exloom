@@ -17,6 +17,7 @@ The examples below are JVM and TypeScript; apply each check's equivalent in this
 3. **Test quality.** No assertion. Asserting only that a mock was called. Happy path only, on code with obvious edge cases. Skipped tests with no issue link. A test that claims an integration contract (data persisted, message sent, threads racing) but mocks that boundary: ask whether the assertion would still pass if the stub returned something else. Do not flag a unit test that mocks a collaborator to isolate one component.
 4. **Consistency.** New code that diverges from its file's style, duplicates an existing helper, or hardcodes what its neighbours read from config.
 5. **UI against an approved mock** — only when the spec in the checklist's `**Spec:**` has a `UI mock: … — approved` line. The implementation needs the mock's main, empty, loading and error states with its labels and fields. A missing state is Important; a different label is Minor. Do not judge visual fidelity.
+6. **UI against the design system** — only when `docs/design-system.md` exists and the diff changes UI code. A raw colour, size, spacing or font added where that document names a token, or a new component that duplicates a listed one, is Important. Values the document has no token for are not findings.
 
 # Report
 
@@ -65,7 +66,7 @@ The prompt gives one plan task's text and its diff. State `SPEC: MATCHES`, `MISS
 
 exloom does not read your report: what you record here is the review. Do it last.
 
-**1. Write your findings to a file**, one per line, TAB separated. Skip this when you have none.
+**1. Write your findings to a file**, one per line, TAB separated. Skip this only on a first review with no findings: a verify pass always writes the file, because an earlier finding it leaves out is recorded as still open.
 
     printf 'HIGH\tIN-SCOPE\tsrc/a.go:12\tnull dereference on the error path\n' > /tmp/exloom-l1-reviewer-findings.tsv
 

@@ -3622,7 +3622,7 @@ printf 'c\n' > src/b.go; git add src/b.go
 ok "once every finding is ruled, the session commits again" "$(fl 'git commit -m next')" "0"
 ok "an ordinary command is not judged" "$(fl 'git status')" "0"
 
-section "smoke evidence: agent-run for CLI and API at Tier 0-2, pasted for UI and Tier 3"
+section "smoke evidence: agent-run for CLI and API, an end-to-end run or a pasted result for UI, pasted at Tier 3"
 
 subrepo smoke
 SMC=".claude/reviews/feat/plan.md"; SMV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$SMV"
@@ -3646,7 +3646,19 @@ SMH="$(git rev-parse HEAD)"
 printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO"}\n' "$SMH" >> "$SMV/l1-reviewer.json"
 printf '{"check":"change-is-tested","result":"PROVED","head":"%s"}\n' "$SMH" >> "$SMV/proof.json"
 bash "$SMOKE" -- true >/dev/null 2>&1
-ok "a UI change needs a pasted result, not an agent receipt" "$(smchk | grep -c 'pasted' | head -1)" "1"
+ok "a UI change is not covered by a plain agent receipt" "$(smchk | grep -c 'end-to-end test or a pasted result' | head -1)" "1"
+bash "$SMOKE" --method e2e -- false >/dev/null 2>&1
+ok "...nor by an end-to-end run that failed" "$(smchk | grep -c 'smoke test' | head -1)" "1"
+bash "$SMOKE" --method e2e -- true >/dev/null 2>&1
+ok "the recorder names the method" "$(tail -1 "$SMV/smoke.json" | grep -c '"method":"e2e"')" "1"
+ok "...and a passing end-to-end run covers a UI change" "$(smchk | grep -c 'smoke test' | head -1)" "0"
+ok "...the report says how the smoke test ran" "$(grep -c '^e2e: ' "$SMC")" "1"
+printf '<p>more</p>\n' >> web/page.html; git add -A >/dev/null 2>&1; git commit -qm ui2 >/dev/null 2>&1
+ok "...but not once the UI changed after it" "$(exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 | grep -c "end-to-end test or a pasted result")" "1"
+ok "an unknown method is refused" "$(bash "$SMOKE" --method looked -- true >/dev/null 2>&1; echo $?)" "2"
+ok "at Tier 3 an end-to-end receipt is not enough" \
+   "$(bash "$SMOKE" --method e2e -- true >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm e >/dev/null 2>&1
+      exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 3 2>&1 | grep -c 'it is Tier 3')" "1"
 sed -i 's/^## Rulings$/## Smoke test\n\nOpened \/page.html; the paragraph rendered.\n\n## Rulings/' "$SMC"
 ok "...and the pasted section satisfies it" "$(smchk | grep -c 'smoke test' | head -1)" "0"
 
@@ -4642,6 +4654,49 @@ bash "$RVS" --agent l1-reviewer --verdict APPROVED --head "$CF2" --round-needed 
 ok "src/c.go:1 is not answered by src/c.go:12" \
    "$(grep -c '"cite":"src/c.go:1","fingerprint"' "$CFD/l1-reviewer.findings.jsonl")" "2"
 ok "...so the pass cannot approve"            "$(sed -n 's/.*"verdict":"\([A-Z]*\)".*/\1/p' "$CFD/l1-reviewer.json" | tail -1)" "REJECTED"
+
+# A Minor finding handed to a verify pass cannot become a rejection, however
+# often the reviewer records that pass.
+subrepo minorverify
+MVC=".claude/reviews/feat/plan.md"; mkdir -p "$(dirname "$MVC")"
+MVD="$(exloom_verdict_dir "$MVC")"
+printf '# checklist\n' > "$MVC"
+printf 'a\nb\nc\nd\n' > src/m.go; printf 't\n' > src/m_test.go
+git add -A >/dev/null 2>&1; git commit -qm m >/dev/null 2>&1
+MV1="$(git rev-parse HEAD)"
+printf 'MED\tIN-SCOPE\tsrc/m.go:2\traw value\nLOW\tIN-SCOPE\tsrc/m_test.go:1\tcould test more\n' > "$REG/mv1.tsv"
+bash "$RVS" --agent l1-reviewer --verdict REJECTED --head "$MV1" --round-needed YES --findings "$REG/mv1.tsv" >/dev/null 2>&1
+printf 'a\nB\nc\nd\n' > src/m.go; git add -A >/dev/null 2>&1; git commit -qm fix >/dev/null 2>&1
+MV2="$(git rev-parse HEAD)"
+printf 'MED\tIN-SCOPE\tsrc/m_test.go:1\tstill no extra test\nMED\tADDRESSED\tsrc/m.go:2\tfixed\n' > "$REG/mv2.tsv"
+mvrec() { bash "$RVS" --agent l1-reviewer --verdict REJECTED --head "$MV2" --round-needed YES \
+  --mode verify --from "$MV1" --findings "$REG/mv2.tsv" >/dev/null 2>&1; }
+mvopen() { grep -F "\"head\":\"$MV2\"" "$MVD/l1-reviewer.findings.jsonl" | grep -F 'm_test.go' | grep -c '"scope":"IN-SCOPE"'; }
+mvrec
+ok "a Minor raised again in a verify pass is not blocking" "$(mvopen)" "0"
+ok "...and that pass asks for no further round" "$(tail -1 "$MVD/l1-reviewer.json" | grep -c '"round_needed":"NO"')" "1"
+mvrec
+ok "recording the same verify pass again keeps it a verify pass" "$(mvopen)" "0"
+ok "...with nothing left to rule" \
+   "$(git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1; _exloom_unruled_findings "$MVC" HEAD l1-reviewer "$MV2" 0 >/dev/null; echo $?)" "0"
+printf 'a\nb\n' > src/n.go; git add -A >/dev/null 2>&1; git commit -qm n >/dev/null 2>&1
+printf 'MED\tIN-SCOPE\tsrc/n.go:1\tdefect\n' > "$REG/mvn.tsv"
+bash "$RVS" --agent adversarial-reviewer --verdict REJECTED --head "$(git rev-parse HEAD)" --round-needed YES --findings "$REG/mvn.tsv" >/dev/null 2>&1
+MVN1="$(git rev-parse HEAD)"
+printf 'A\nb\n' > src/n.go; git add -A >/dev/null 2>&1; git commit -qm nfix >/dev/null 2>&1
+MVN2="$(git rev-parse HEAD)"
+ok "a verify approval with no findings file is refused" \
+   "$(bash "$RVS" --agent adversarial-reviewer --verdict APPROVED --head "$MVN2" --round-needed NO --mode verify --from "$MVN1" >/dev/null 2>&1; echo $?)" "2"
+ok "...and records nothing, so the commit can still be approved" "$(grep -c "\"head\":\"$MVN2\"" "$MVD/adversarial-reviewer.json")" "0"
+printf 'MED\tADDRESSED\tsrc/n.go:1\tfixed\n' > "$REG/mvn2.tsv"
+bash "$RVS" --agent adversarial-reviewer --verdict APPROVED --head "$MVN2" --round-needed NO --mode verify --from "$MVN1" --findings "$REG/mvn2.tsv" >/dev/null 2>&1
+ok "...which the pass with its findings stated then does" "$(tail -1 "$MVD/adversarial-reviewer.json" | grep -c '"verdict":"APPROVED"')" "1"
+printf 'MED\tIN-SCOPE\tsrc/m.go:2\tnot fixed\n' > "$REG/mv3.tsv"
+printf 'x\n' >> src/m_test.go; git add -A >/dev/null 2>&1; git commit -qm t >/dev/null 2>&1
+MV3="$(git rev-parse HEAD)"
+bash "$RVS" --agent l1-reviewer --verdict REJECTED --head "$MV3" --round-needed YES \
+  --mode verify --from "$MV2" --findings "$REG/mv3.tsv" >/dev/null 2>&1
+ok "an earlier blocking finding still open keeps its round" "$(tail -1 "$MVD/l1-reviewer.json" | grep -c '"round_needed":"YES"')" "1"
 
 cd "$WORK" || exit 1
 
