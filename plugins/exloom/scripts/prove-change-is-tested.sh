@@ -235,6 +235,20 @@ _selected_tests() {   # _selected_tests <base|head>
     done | sort -u
 }
 
+# With no test in the diff, the tests named after the changed source files:
+# PaymentService.java -> PaymentServiceTest.java, login.ts -> login.spec.ts.
+_tests_by_name() {
+  local f s all
+  all="$(git ls-files 2>/dev/null)"
+  while IFS= read -r f; do
+    s="${f##*/}"; s="${s%.*}"
+    [[ ${#s} -ge 3 ]] || continue
+    s="$(printf '%s' "$s" | sed 's/[^A-Za-z0-9_-]/./g')"
+    printf '%s\n' "$all" \
+      | grep -E "(^|/)(${s}(Test|Tests|IT|Spec)|${s}[._-](test|spec)|test[_-]${s})\.[A-Za-z0-9]+$"
+  done <<< "$SRC" | while IFS= read -r f; do is_test "$f" && printf '%s\n' "$f"; done | sort -u
+}
+
 # Which runner this repo uses, for selection only. A stack with no adapter runs
 # the whole suite exactly as before.
 _adapter() {
@@ -435,6 +449,11 @@ SELECTION=""; SELECTION_SOURCE="fallback"; CLASSIFICATION="fallback"; RUN1_STATE
 CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
 if ! _wide_lane; then
   _sel_head="$(_selected_tests head)"; _sel_base="$(_selected_tests base)"
+  _named=0
+  if [[ -z "$TST" ]]; then
+    _sel_head="$(_tests_by_name)"; _sel_base="$_sel_head"
+    [[ -n "$_sel_head" ]] && _named=1
+  fi
   _tmpl=""
   if [[ -f .claude/exloom-test-select ]] && git ls-files --error-unmatch .claude/exloom-test-select >/dev/null 2>&1; then
     _tmpl="$(head -1 .claude/exloom-test-select 2>/dev/null | tr -d '
@@ -456,6 +475,7 @@ if ! _wide_lane; then
   fi
   SELECTION="$(printf '%s' "$_sel_head" | tr '
 ' ' ' | sed 's/ *$//')"
+  [[ $_named -eq 1 && "$SELECTION_SOURCE" != fallback ]] && SELECTION_SOURCE="name"
   [[ "$SELECTION_SOURCE" != fallback && -z "$CMD_BASE" ]] && RUN1_STATE="n/a"
   [[ "$SELECTION_SOURCE" != fallback ]] && echo "selection: ${SELECTION:-none} (${SELECTION_SOURCE})"
 fi
@@ -571,6 +591,28 @@ _receipt() {
     >> "${vdir}/proof.json" 2>/dev/null || return 0
   echo "exloom: recorded proof receipt (${result}, ${method}) at ${vdir}/proof.json — commit it with the checklist" >&2
 }
+# A pinned command filtered to tests the diff does not touch passes run 2 having
+# run none of them, which would read as weak tests. Drop the filter and run the
+# suite: that costs minutes, not a blocked push.
+_chk_sel="$(_selected_tests head)"
+_filter_re='(--tests|--filter|--grep|--testNamePattern|-k|-run)'
+if [[ "$SELECTION_SOURCE" == fallback && -n "$_chk_sel" ]] \
+   && printf '%s' "$CMD_HEAD" | grep -qE "(^|[[:space:]])${_filter_re}([[:space:]]|=)"; then
+  _unrun=""
+  while IFS= read -r _t; do
+    [[ -n "$_t" ]] || continue
+    _b="${_t##*/}"; _b="${_b%.*}"
+    printf '%s' "$CMD_HEAD" | grep -qF -- "$_b" || _unrun="${_unrun}${_unrun:+ }${_t}"
+  done <<< "$_chk_sel"
+  if [[ -n "$_unrun" ]]; then
+    TESTCMD="$(printf '%s' "$TESTCMD" \
+      | sed -E "s/(^|[[:space:]])${_filter_re}(=|[[:space:]]+)('[^']*'|\"[^\"]*\"|[^[:space:]]+)//g")"
+    CMD_BASE="$TESTCMD"; CMD_HEAD="$TESTCMD"
+    echo "the pinned command filters out tests this change touches (${_unrun}); running without the filter"
+    echo "command: $TESTCMD"
+  fi
+fi
+
 
 # ---------- RUN 1: base source + base tests. MUST PASS. ----------
 # Without this control the whole check is meaningless, because "the tests failed
@@ -584,21 +626,33 @@ _receipt() {
 # The control turns all of those into "the environment cannot run the suite".
 if [[ -z "$TST" ]]; then
   git -C "$WT" checkout -q "$(git rev-parse HEAD)" >/dev/null 2>&1 || { echo "worktree failed" >&2; exit 2; }
-  echo "no test changed: running the full suite at the tip…"
+  _how="full-suite"
+  if [[ "$SELECTION_SOURCE" == fallback ]]; then
+    echo "no test changed: running the full suite at the tip…"
+  else
+    _how="selected"
+    echo "no test changed: running the tests named after the changed files at the tip…"
+  fi
   ( cd "$WT" && eval "$CMD_HEAD" ) >"$WT/.tip-out" 2>&1
   tip_rc=$?
+  if [[ $tip_rc -ne 0 && "$SELECTION_SOURCE" != fallback ]]; then
+    echo "the narrowed command did not pass here; retrying on the pinned suite…"
+    ( cd "$WT" && eval "$TESTCMD" ) >"$WT/.tip-out" 2>&1
+    tip_rc=$?
+    _how="full-suite"; SELECTION_SOURCE="fallback"; SELECTION=""
+  fi
   if [[ $tip_rc -eq 0 && $NNB -eq 1 ]]; then
-    _receipt NO_NEW_BEHAVIOUR full-suite
+    _receipt NO_NEW_BEHAVIOUR "$_how"
     echo "NO_NEW_BEHAVIOUR — the change only removes code, and the suite passes at the tip."
     exit 0
   elif [[ $tip_rc -eq 0 ]]; then
-    _receipt NO_TEST_CHANGED full-suite
+    _receipt NO_TEST_CHANGED "$_how"
     echo "NO_TEST_CHANGED — no test changed, and the suite passes at the tip."
     echo "It passes the gate only as a refactor: ask the user, and record their reason under"
     echo "'## Rulings' as  - Proof: refactor — <reason>. Otherwise add a test that fails without the change."
     exit 0
   fi
-  _receipt NOT_PROVED full-suite
+  _receipt NOT_PROVED "$_how"
   echo "NOT PROVED — no test changed, and the suite fails at the tip:"
   tail -25 "$WT/.tip-out" 2>/dev/null
   exit 1

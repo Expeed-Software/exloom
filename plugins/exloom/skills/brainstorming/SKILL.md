@@ -5,119 +5,41 @@ description: Use when the user asks for a new feature, or when what to build is 
 
 # Brainstorming
 
-## Overview
+Explore intent, requirements and design before any code exists, starting from "what already exists, and what is the minimum we need to add?" The output is a written spec for `exloom:planning-for-handoff`.
 
-Explore intent, requirements and design before any code exists, starting from "what already exists, and what is the minimum we need to add?" The output is a written spec that `exloom:planning-for-handoff` consumes.
+Depth scales with the work: a CRUD endpoint gets a half-page spec, a new subsystem two to four pages. No step is skipped. Too large for one spec: decompose, and brainstorm the first part.
 
-## Scaling Effort to Complexity
+## Change-note mode
 
-The process is the same; the depth scales.
-
-| Complexity | Examples | Time | What scales down |
-|---|---|---|---|
-| **Simple** | CRUD endpoint, config change, add a column | 15-20 min | Design is 3-4 sentences. Steps 5-7 collapse into one message. Spec is half a page. |
-| **Medium** | New API with integrations, new UI page, add auth to a flow | 30-45 min | Full process, but 2-3 approaches is enough. Spec is 1-2 pages. |
-| **Complex** | New subsystem, cross-cutting concern, multi-service feature | 60-90 min | Full process, all steps at full depth. Spec is 2-4 pages. |
-
-Beyond 90 minutes, decompose and brainstorm the first sub-project. Simple work skips no step.
+When `/exloom` recorded `**Work type:** change to existing code`, skip the spec and write a change note in its place, in the same location: what the code does now, what it will do instead, and the acceptance criteria, numbered as a spec's are. One or two paragraphs. Record it in the checklist as `**Spec:**`. A single task records `**Plan:** none`; two or more still need a plan. The process below, including the lint, is for a new feature: do not run it on a change note.
 
 ## Process
 
-### Step 1: Explore Project Context
+1. **Read first.** CLAUDE.md, the README, recent commits, similar features and the test patterns. Never ask what the code already answers.
+2. **Find the problem under the solution.** "I need a caching layer" may be a slow query. Who has the problem, how do they solve it today, what happens if we do not build this?
+3. **Ask one question at a time**, most important first, multiple choice where possible. Ask about constraints, not preferences. Stop when you can predict the answer.
+4. **Offer two or three approaches**, your recommendation first, each grounded in this codebase. No strawmen. If the user disagrees, they decide; note both views in the spec.
+5. **Present the design in sections** and pause after each: overview, components (every file, class, endpoint, table), data flow, error handling, edge cases, non-goals. Get the overview approved first. A new screen or a significant layout change on the Standard or Certified lane needs an approved static mock before the spec: [ui-mock.md](ui-mock.md).
+6. **Write the spec.** Copy `templates/spec-template.md` to where the repo keeps specs, else `docs/exloom/specs/F-<nnn>-<slug>.md`, with `<nnn>` one past the highest there. Write for someone who was not in the session, citing code by path.
+   - Each requirement (`R-<n> · <type>`) is one behaviour in an EARS shape, with at least one acceptance criterion (`AC-<n> · <level>`) as Given/When/Then. "Works correctly" is not a requirement.
+   - Say what the system does, never how it is built: `SHALL persist the job so it survives a restart`, not `SHALL store the job in Postgres`.
+   - Anything touching money, permissions or data loss needs an `unwanted` requirement: `IF <bad thing> THEN THE SYSTEM SHALL <response>`.
+   - Refs such as `F-012/R-3/AC-2` are permanent once the spec is approved. Changing what one means creates a new one and marks the old `superseded`.
+7. **Lint it** and fix the errors. Warnings are heuristics: judge them.
 
-Before asking the user anything, read CLAUDE.md and README, the last 20-30 commits, the stack and architecture, similar features (by name, concept and problem), and the test suite's patterns. Never ask what the code already answers.
+   ```bash
+   XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/lint-spec.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE" docs/exloom/specs/F-012-slug.md
+   ```
 
-### Step 2: Understand the Problem, Not the Solution
+8. **Get the user's approval of the whole spec**, then invoke `exloom:planning-for-handoff`. Never go straight to implementation.
 
-Find the problem under the proposed solution ("I need a caching layer" may be a slow query). Ask: Who has this problem? How do they solve it today? What happens if we don't build this?
+## Brownfield discipline
 
-### Step 3: Ask Clarifying Questions One at a Time
+The codebase already has an opinion; find it before forming yours.
 
-One question per message, most important first, wait for the answer. Prefer multiple choice: "Should this handle (a) only logged-in users, (b) all users including anonymous, or (c) only admin users?" Ask about constraints (performance, backwards compatibility, deployment, offline), not preferences ("Redux or MobX?"). Stop when you can predict the user's answer.
+- **Search by concept, not only by name.** For notifications, also search "alert", "event", "publish". Prove nothing exists before proposing something new.
+- **Match the surrounding code**: its base classes, error handling, logging and DI. Check for an existing library before adding a dependency.
+- **Extend before building new.** If an existing feature does most of what is needed, extend it.
+- **Justify any deviation in the spec.** The bar: the existing pattern cannot solve the problem. "Simpler" is not a justification.
 
-### Step 4: Explore the Solution Space
-
-Present 2-3 approaches, leading with your recommendation: "I recommend Approach B because..." Each approach: two-sentence summary, 1-2 pros/cons, one-sentence "recommended when," grounded in this codebase ("extends the existing EventBus pattern"). No strawmen.
-
-### Step 5: Present the Design in Sections
-
-Scale depth to complexity; pause for feedback after each major section. Sections: **Overview** (what, why, fit — one paragraph), **Components** (name every file, class, function, endpoint, table), **Data flow** (happy path and primary failure), **Error handling** (what fails, detection, recovery), **Edge cases** (null, concurrent, network, scale — with handling), **Non-goals** (what this does not do). Get the overview approved before the rest.
-
-**UI mock.** A new screen, or a significant layout or flow change, on the Standard or Certified lane: build a static mock and get it approved before the spec. See [ui-mock.md](ui-mock.md).
-
-### Change-note mode
-
-When `/exloom` recorded `**Work type:** change to existing code`, the behaviour is
-already agreed and only the change needs stating. Skip the spec and write a
-change note in its place, in the same location: what the code does now, what it
-will do instead, and the acceptance criteria, numbered as a spec's are so the
-gate can match them. One or two paragraphs, not a document. Record it in the
-checklist as `**Spec:**`, where it stands in for one. A single task records
-`**Plan:** none` and needs no plan beside it; two or more still do.
-
-Everything below applies unchanged to a new feature.
-
-### Step 6: Write the Spec
-
-Copy `templates/spec-template.md` to where this repo keeps specs — if the repo's CLAUDE.md (or the user) specifies a location, use it; otherwise `docs/exloom/specs/F-<nnn>-<slug>.md`. Allocate `<nnn>` as one past the highest `F-` already in that directory. Commit if the user permits.
-
-Write for someone not in the session. The template's shape: problem, chosen approach with rationale, rejected approaches with rationale, numbered requirements each carrying at least one acceptance criterion, edge cases, non-goals, open questions. Reference code by file path. Record contentious decisions with both perspectives. Mark ambiguity as open questions.
-
-**Requirements.** Each requirement (`R-<n> · <type>`) is one behaviour, in one of the five EARS shapes, with at least one acceptance criterion (`AC-<n> · <level>`) written as Given/When/Then. Unverifiable requirements ("works correctly", "performance is acceptable") are not requirements.
-
-- **Say what the system does, never how it is built.** `SHALL store the job in Postgres` is an architecture decision; `SHALL persist the job so it survives a restart` is the requirement.
-- **Anything touching money, permissions, or data loss needs an `unwanted` requirement** — `IF <bad thing> THEN THE SYSTEM SHALL <response>`.
-
-**Refs are permanent once the spec is approved.** `F-012/R-3/AC-2` is cited by plans, tests and review checklists. While the spec is `draft`, renumber freely. After approval, changing what a criterion means creates a new one and marks the old `superseded`.
-
-### Step 7: Lint the Spec
-
-Fix lint errors:
-
-```bash
-XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/lint-spec.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE" docs/exloom/specs/F-012-slug.md
-```
-
-**Judge the warnings** — they are heuristics (a named implementation; money, permissions or deletion without `unwanted`); ignore one you disagree with.
-
-### Step 8: User Reviews, Then Transition
-
-Ask the user to read the whole spec: problem, non-goals, edge cases. Never transition without explicit approval — "looks good" after thirty seconds is not approval. Once approved, invoke `exloom:planning-for-handoff`; never go straight to implementation.
-
-## Brownfield Discipline
-
-The codebase already has an opinion; find it before forming your own.
-
-1. **Search for existing implementations** by concept, not just name — for notifications, search "notification", "alert", "event", "message", "publish", "subscribe"; `AlertDispatcher` counts. Prove nothing exists before proposing something new.
-2. **Read the surrounding code.** Match the base classes, error handling, logging and DI of existing code in the same layer.
-3. **Check for shared libraries** in the codebase and the repo's CLAUDE.md before adding a dependency.
-4. **Match existing patterns; justify deviation** in the spec. The bar: the existing pattern cannot solve the problem, and the new pattern's total cost is lower. "Simpler" is not a justification; "the ORM we're integrating only supports Active Record" is.
-5. **Propose extending before building new.** If an existing feature does 60%+ of what's needed, extend it unless that produces a worse outcome for team maintenance and clarity.
-
-"The existing implementation is bad" needs a technical assessment, not an opinion.
-
-## Decision Points
-
-| Situation | Decision |
-|---|---|
-| User arrives with a solution, not a problem | Ask "what problem does this solve?" Verify the solution addresses the root cause. |
-| Scope too large for one spec | Decompose; brainstorm the first sub-project; list the rest as future work in non-goals. |
-| User wants to skip brainstorming | "A quick pass confirms it, or catches a wrong assumption before code." |
-| Existing feature does 80% of what's needed | Propose extending. Document the gap and the extension approach, unless extension compromises the existing feature. |
-| User disagrees with your recommendation | Accept their choice, note both perspectives in the spec. You advise; they decide. |
-| Multiple valid approaches, no clear winner | Recommend the simplest. YAGNI. |
-| Problem unclear even after questions | Document what's known, unknown, and assumed. No false precision. |
-
-## Failure Modes
-
-See [failure-modes.md](failure-modes.md).
-
-## Worked Example
-
-See [worked-example.md](worked-example.md).
-
-## Integration
-
-- **You arrive here from:** a user request, a ticket, an idea, a product requirement, or mid-execution when a task needs design work the plan did not anticipate.
-- **You leave here toward:** `exloom:planning-for-handoff` — always. Never directly to implementation.
-- **During any step:** route a learning about the codebase or team conventions through `exloom:capturing-learnings`.
+See [failure-modes.md](failure-modes.md) and [worked-example.md](worked-example.md).

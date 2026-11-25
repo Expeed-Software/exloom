@@ -70,7 +70,7 @@ In optional mode the proof uses its own auto-detected test command. Pinning one 
 
 `prove-change-is-tested.sh` runs your tests at the base commit, then at the base with your tests added, then with change and tests together. If your tests pass without your change, they do not test it.
 
-It runs **only the tests your diff touches**, which is why it takes seconds. The selection comes from the diff, or from a committed `.claude/exloom-test-select` that `/exloom-setup` derives and proves for the repository. If a narrowed command will not run — a layout the built-in adapters guessed wrong — the whole suite is retried before anything is concluded, and the receipt records `selection_source: fallback`. Certified and strict mode keep the wide proof.
+It runs **only the tests your diff touches**, which is why it takes seconds. When the diff touches no test, it runs the tests named after the changed files (`PaymentService.java` → `PaymentServiceTest.java`). The selection comes from the diff, or from a committed `.claude/exloom-test-select` that `/exloom-setup` derives and proves for the repository. If a narrowed command will not run — a layout the built-in adapters guessed wrong — the whole suite is retried before anything is concluded, and the receipt records `selection_source: fallback`. Certified and strict mode keep the wide proof.
 
 The **full suite** is not the gate's job. With CI, branch protection carries it. Without CI — a committed `.claude/exloom-ci` of `none` — the gate asks for a `record-full-suite.sh` receipt before the push.
 

@@ -38,6 +38,40 @@ TOOL="$(exloom_json_field "$HOOK_INPUT" tool_name)"
 
 _tool_input() { exloom_tool_input "$HOOK_INPUT" "$1"; }
 
+# A reviewer recording its OWN verdict is the one write this hook permits, and
+# only from inside a reviewer subagent: a PreToolUse payload raised there carries
+# agent_type, which the authoring session's calls do not. The session still
+# cannot write its own approval, which is the property that makes a receipt
+# evidence. A reviewer naming an agent other than itself is denied too.
+_is_record_verdict_call() {
+  # The WHOLE command must be one invocation of this script with flag/value
+  # pairs - matched by shape, not by banning punctuation. A blocklist leaves
+  # the allow open to any single command that merely mentions the script, and
+  # the allow skips every check below it: `python3 -c ...record-verdict.sh...`
+  # writing a receipt directly would have been permitted.
+  #
+  # The path token may carry ${CLAUDE_PLUGIN_ROOT}, which is how the reviewer
+  # agents are told to call it, so $ { } are allowed THERE and nowhere else.
+  local c="$1"
+  [[ "$c" == *$'\n'* ]] && return 1
+  printf '%s' "$c" | grep -qE '^[[:space:]]*(bash[[:space:]]+)?"?[A-Za-z0-9_${}./:-]*record-verdict[.]sh"?([[:space:]]+--[a-z-]+[[:space:]]+"?[A-Za-z0-9._/-]+"?)*[[:space:]]*$'
+}
+if [[ "$TOOL" == "Bash" ]] && _is_record_verdict_call "$(_tool_input command)"; then
+  _CALLER="$(exloom_json_field "$HOOK_INPUT" agent_type)"
+  _CLAIMED="$(printf '%s' "$(_tool_input command)" \
+    | grep -oE -- '--agent[[:space:]]+[A-Za-z0-9-]+' | head -1 | awk '{print $2}')"
+  case "$_CALLER" in
+    exloom:l1-reviewer|exloom:adversarial-reviewer|exloom:security-auditor)
+      [[ "exloom:${_CLAIMED}" == "$_CALLER" ]] && exit 0 ;;
+  esac
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+  cd "$REPO_ROOT" 2>/dev/null || exit 0
+  exloom_gate_active || exit 0
+  printf '%s
+'     'exloom review gate: DENIED — only a reviewer subagent may record a verdict.'     ''     "Caller: ${_CALLER:-the authoring session}"     "Claimed: ${_CLAIMED:-none}"     ''     'record-verdict.sh is the reviewer own last action, and the receipt it writes is'     'the one piece of review evidence the authoring session does not author. Dispatch'     'the reviewer for real instead:'     '  exloom:l1-reviewer'     '  exloom:adversarial-reviewer | exloom:security-auditor' >&2
+  exit 2
+fi
+
 # Bare `.verdicts/` rather than the full `.claude/reviews/` prefix: an absolute
 # Windows path uses backslashes. `exloom-gate.enabled` is included because
 # deleting it disables every other hook.

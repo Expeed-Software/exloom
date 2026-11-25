@@ -30,12 +30,13 @@ if [[ $NATIVE -eq 0 && -z "${EXLOOM_IN_CONTAINER:-}" ]] && command -v docker >/d
 fi
 
 GATE=scripts/test-exloom-gate.sh
-JOBS=8; CHANGED=0; BASE=""; ONLY=""; LIST=0
+JOBS=8; CHANGED=0; BASE=""; ONLY=""; LIST=0; JOB_TIMEOUT=300
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --native) shift ;;
     -j) JOBS="$2"; shift 2 ;;
     -j*) JOBS="${1#-j}"; shift ;;
+    --timeout) JOB_TIMEOUT="$2"; shift 2 ;;
     --changed) CHANGED=1; shift
                if [[ $# -gt 0 && "$1" != -* ]]; then BASE="$1"; shift; fi ;;
     --only) ONLY="$2"; shift 2 ;;
@@ -45,7 +46,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# A job that spawns runaway children outlives xargs, and -P bounds only the top
+# level. Without the group kill, interrupting a run leaves the descendants alive.
+set -m
+cleanup_all() { trap - EXIT INT TERM; kill -- -$$ 2>/dev/null; rm -rf "$TMP"; }
+trap cleanup_all EXIT INT TERM
 
 mapfile -t STARTS < <(grep -n '^section "' "$GATE" | cut -d: -f1)
 FOOT="$(grep -n '^echo "PASS=\$PASS' "$GATE" | cut -d: -f1)"
@@ -174,8 +179,8 @@ if [[ -f "$TIMES" ]]; then
 fi
 
 START=$SECONDS
-export TMP
-xargs -P "$JOBS" -I{} bash -c 's=$SECONDS; bash "$TMP/{}.sh" > "$TMP/{}.out" 2>&1; echo $? > "$TMP/{}.rc"; echo "{} $((SECONDS - s))" > "$TMP/{}.t"' < "$JOBLIST"
+export TMP JOB_TIMEOUT
+xargs -P "$JOBS" -I{} bash -c 's=$SECONDS; timeout -k 5 "$JOB_TIMEOUT" bash "$TMP/{}.sh" > "$TMP/{}.out" 2>&1; rc=$?; [[ $rc == 124 || $rc == 137 ]] && echo "FAIL: job timed out after ${JOB_TIMEOUT}s" >> "$TMP/{}.out"; echo $rc > "$TMP/{}.rc"; echo "{} $((SECONDS - s))" > "$TMP/{}.t"' < "$JOBLIST"
 
 FAILED=0; PASSES=0
 : > "$TMP/times.new"

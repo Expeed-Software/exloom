@@ -127,7 +127,7 @@ Pin `.claude/exloom-test-command` in every repo. Auto-detection guesses, and for
 The proof records one of these results:
 
 - `PROVED` or `PROVED_BY_MUTATION`: passes.
-- `NOT_PROVED`: blocks.
+- `NOT_PROVED`: blocks. The tests ran and passed without the change.
 - `NOT_APPLICABLE`: the tests do not compile without the change. Passes at every tier, reported as the weakest result.
 - `NOT_TESTABLE`: every changed file is a style, asset, lockfile, dependency manifest or config file (`*.css`, `*.scss`, `*.less`, images, fonts, `package.json`, `*.lock`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `*.yml`, `*.yaml`, `*.json`, plus `.claude/exloom-not-testable-patterns`). Passes at every tier; a dependency change still gets the security auditor.
 - `TESTS_ONLY`: only tests changed. Passes at every tier.
@@ -209,10 +209,9 @@ Every loop is bounded:
 
 ## What's inside
 
-- **11 skills** — `brainstorming` (with a UI mock step for new screens, and a change-note mode for edits to existing code), `fixing-bugs` (reproduce, then test and fix in one commit), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
+- **18 skills** — seven you type as commands: `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`. The rest are playbooks `/exloom` uses: `brainstorming` (with a UI mock step for new screens, and a change-note mode for edits to existing code), `fixing-bugs` (reproduce, then test and fix in one commit), `planning-for-handoff`, `isolating-execution`, `executing-handoff-plans`, `auditing-plan-fidelity`, `review-gate`, `capturing-learnings`, `authoring-claude-md`, `maintaining-reference-docs`, and `using-exloom` (the index).
 - **5 agents** — `l1-reviewer` per plan task and once over the branch; `adversarial-reviewer` and `security-auditor` once, before push (the adversarial dispatch carries the cross-layer contract check); `spec-reviewer`, which reads a finished spec against the code and never gates anything; `fixer`, which applies the smallest fix for findings it is given. None of them can edit a file or create a worktree.
-- **7 commands** — `/exloom`, `/exloom-setup`, `/review-init`, `/smoke-test`, `/review-complete`, `/harden`, `/review-cleanup`.
-- **5 scripts** — `prove-change-is-tested.sh` (narrowed to the tests the diff touches, falling back to the whole suite when that command will not run), `record-full-suite.sh`, `record-smoke.sh`, `fast-check.sh` (advisory, after each task), and `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders).
+- **6 scripts** — `prove-change-is-tested.sh` (narrowed to the tests the diff touches, falling back to the whole suite when that command will not run), `record-full-suite.sh`, `record-smoke.sh`, `fast-check.sh` (advisory, after each task), `lint-spec.sh` (gapless refs, a criterion under every requirement, no placeholders), and `record-verdict.sh`, which a reviewer calls to record its own verdict — nothing else may.
 - **8 hook scripts**, 9 registrations — record a receipt on real dispatch, deny writing one by hand, enforce review budgets at dispatch, refuse to resume a reviewer rather than dispatch a fresh one, refuse a worktree from a reviewer, keep code commits to the fixer during the fix loop, block the push without evidence, announce the flow at session start in a repository with the gate on.
 - **2 templates** — the editable part of the review checklist, and the spec format.
 
