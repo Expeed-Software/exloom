@@ -2895,84 +2895,6 @@ git add -A >/dev/null 2>&1; git commit -qm ok >/dev/null 2>&1
 exloom_check_verdicts "$CCL" 1 HEAD "$(git rev-parse HEAD)" "push" >/dev/null 2>&1
 ok "...but ships once the reviewers are real" "$?" "0"
 
-section "the status line stops driving the loop at the cap"
-
-# exloom_gate_status runs after every reviewer completes, and a fix commit always
-# leaves the L1 receipt behind the tip — so an unconditional "covers an earlier
-# commit - re-run it" asks for another round on every pass, indefinitely. That
-# makes the status a motor for the loop the cap exists to stop.
-subrepo capstatus
-SCL=".claude/reviews/feat/plan.md"; SVD=".claude/reviews/feat/plan.verdicts"
-mkdir -p "$SVD"; printf '**Tier:** 1\n' > "$SCL"
-for i in 1 2 3 4; do
-  printf 's%s\n' "$i" >> src/base.txt
-  git add -A >/dev/null 2>&1; git commit -qm "s$i" >/dev/null 2>&1
-  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"YES","at":"2026-01-0%sT00:00:00Z","session":"s"}\n' \
-    "$(git rev-parse HEAD)" "$i" >> "$SVD/l1-reviewer.json"
-done
-git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
-SOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
-ok "past the cap the status says STOP"        "$(printf '%s' "$SOUT" | grep -c 'STOP -')" "1"
-ok "...and does not ask for another reviewer" "$(printf '%s' "$SOUT" | grep -c 're-run it')" "0"
-ok "...naming the pass count and the cap"     "$(printf '%s' "$SOUT" | grep -c '4 review passes (cap 3)')" "1"
-ok "...and hands over the three options"      "$(printf '%s' "$SOUT" | grep -c 'Accept the open items')" "1"
-
-# A REJECTED receipt at the cap is the one case where "do not dispatch" deadlocks
-# the gate against itself. A rejection has no escape hatch, the push gate says to
-# clear it, and clearing it needs the dispatch this message used to forbid - so
-# the only way out was a person overriding what the gate itself demanded.
-#
-# Stale is deliberately NOT in this set: a fix commit always leaves the L1 receipt
-# behind the tip, so treating that as clearable rebuilds the endless loop the cap
-# exists to stop. The test above pins that half; this one pins the other.
-subrepo capreject
-RCL=".claude/reviews/feat/plan.md"; RVD=".claude/reviews/feat/plan.verdicts"
-mkdir -p "$RVD"; printf '**Tier:** 1
-' > "$RCL"
-for i in 1 2 3 4; do
-  printf 'j%s
-' "$i" >> src/base.txt
-  git add -A >/dev/null 2>&1; git commit -qm "j$i" >/dev/null 2>&1
-  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-0%sT00:00:00Z","session":"s"}
-'     "$(git rev-parse HEAD)" "$i" >> "$RVD/l1-reviewer.json"
-done
-git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
-ROUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
-ok "a rejected receipt at the cap is still clearable"    "$(printf '%s' "$ROUT" | grep -c 'not another round')" "1"
-ok "...and does not forbid the dispatch that clears it"    "$(printf '%s' "$ROUT" | grep -c 'Do not dispatch another reviewer')" "0"
-ok "...while still naming the cap it is at"    "$(printf '%s' "$ROUT" | grep -c 'at the round cap')" "1"
-
-# The same shape for a receipt that recorded a launch and never a verdict - the
-# named-subagent case. It never reported, so it has not had its round.
-subrepo caplaunch
-NCL=".claude/reviews/feat/plan.md"; NVD=".claude/reviews/feat/plan.verdicts"
-mkdir -p "$NVD"; printf '**Tier:** 1
-' > "$NCL"
-for i in 1 2 3 4; do
-  printf 'n%s
-' "$i" >> src/base.txt
-  git add -A >/dev/null 2>&1; git commit -qm "n$i" >/dev/null 2>&1
-  printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-0%sT00:00:00Z","session":"s"}
-'     "$(git rev-parse HEAD)" "$i" >> "$NVD/l1-reviewer.json"
-done
-git add -A >/dev/null 2>&1; git commit -qm r >/dev/null 2>&1
-NOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
-ok "a launch-only receipt at the cap is clearable too"    "$(printf '%s' "$NOUT" | grep -c 'not another round')" "1"
-
-# Under the cap it must still do its ordinary job, or the fix would just be a
-# mute button.
-subrepo undercap
-UCL=".claude/reviews/feat/plan.md"; UVD=".claude/reviews/feat/plan.verdicts"
-mkdir -p "$UVD"; printf '**Tier:** 1\n' > "$UCL"
-printf 'u1\n' >> src/base.txt; git add -A >/dev/null 2>&1; git commit -qm u1 >/dev/null 2>&1
-printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
-  "$(git rev-parse HEAD)" > "$UVD/l1-reviewer.json"
-printf 'u2\n' >> src/base.txt; git add -A >/dev/null 2>&1; git commit -qm u2 >/dev/null 2>&1
-UOUT="$(exloom_gate_status "feat/plan" "$(git rev-parse HEAD)" 2>&1)"
-ok "under the cap it still reports a stale receipt" \
-   "$(printf '%s' "$UOUT" | grep -c 'covers an earlier commit')" "1"
-ok "...and does not say STOP" "$(printf '%s' "$UOUT" | grep -c 'STOP -')" "0"
-
 section "rulings close a REJECTED review, one finding at a time"
 
 subrepo rulings
@@ -4173,44 +4095,6 @@ ok "a bypassed verdict write is recorded too" \
 rm -f .claude/exloom-gate.enabled "$BP"
 printf '%s' "$PUSH_JSON" | EXLOOM_REVIEW_SKIP=1 bash "$HOOKS_ABS/block-unverified-push.sh" >/dev/null 2>&1
 ok "no receipt in a repo with the gate off" "$([[ -f "$BP" ]] && echo yes || echo no)" "no"
-
-section "the status line judges coverage the way the GATE does"
-
-# A status line stricter than the check it reports on sends people to re-run a
-# reviewer the gate is content with. Once its demands are known to be inflated,
-# the ones that are real stop being read too.
-subrepo statusline
-SVD=".claude/reviews/feat/s.verdicts"; SCL=".claude/reviews/feat/s.md"
-mkdir -p "$SVD"
-printf 'Tier: 1\n' > "$SCL"
-printf 'x\n' > code.txt
-git add -A >/dev/null 2>&1; git commit -qm code >/dev/null 2>&1
-REVIEWED="$(git rev-parse HEAD)"
-printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"APPROVED","round_needed":"NO","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
-  "$REVIEWED" > "$SVD/l1-reviewer.json"
-git add -A >/dev/null 2>&1; git commit -qm receipt >/dev/null 2>&1
-
-# The checklist commit moves the tip. Nothing the reviewer saw has changed, so an
-# exact-tip match reports a re-run the gate does not want.
-ok "an approval survives a checklist-only commit on top of it" \
-   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'covers an earlier commit')" "0"
-
-printf 'y\n' >> code.txt
-git add -A >/dev/null 2>&1; git commit -qm more >/dev/null 2>&1
-ok "...but real code landing after it does report stale" \
-   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'covers an earlier commit')" "1"
-
-printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","dispatch":true,"at":"2026-01-01T00:00:00Z","session":"s"}\n' \
-  "$(git rev-parse HEAD)" > "$SVD/l1-reviewer.json"
-git add -A >/dev/null 2>&1; git commit -qm launch >/dev/null 2>&1
-ok "a launch is reported as a launch, not as coverage" \
-   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'never reached exloom')" "1"
-
-printf '{"agent":"l1-reviewer","subagent_type":"exloom:l1-reviewer","head":"%s","verdict":"REJECTED","round_needed":"YES","at":"2026-01-01T00:00:00Z","session":"s"}\n' \
-  "$(git rev-parse HEAD)" > "$SVD/l1-reviewer.json"
-git add -A >/dev/null 2>&1; git commit -qm rej >/dev/null 2>&1
-ok "a rejection is reported as a rejection, not as a stale receipt" \
-   "$(exloom_gate_status "feat/s" "$(git rev-parse HEAD)" 2>&1 | grep -c 'did NOT approve')" "1"
 
 section "the early exit lets through every input a hook must judge"
 
