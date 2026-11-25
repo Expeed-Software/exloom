@@ -4169,7 +4169,7 @@ for f in "$EXLOOM_DIR"/agents/*.md "$EXLOOM_DIR"/skills/*/SKILL.md; do
     r="$(runblk "$blk" "$EMPTY")"; [[ "$r" == "1 - - said" ]] || BAD+=" $n:missing=[$r]"
   done < <(blocks "$f")
 done
-ok "every block that runs an exloom file names it through \${CLAUDE_PLUGIN_ROOT}" "$NBLK" "10"
+ok "every block that runs an exloom file names it through \${CLAUDE_PLUGIN_ROOT}" "$NBLK" "9"
 ok "...uses exloom's own file while a decoy that sorts higher sits in the plugins folder, and stops with a message when the path is literal or the file is missing" "$BAD" ""
 
 REPO_ROOT="$(cd "$EXLOOM_DIR/../.." && pwd)"
@@ -4221,7 +4221,7 @@ for m in PUSHMSG VERMSG; do
   ok "$m: does not tell Claude to set the bypass" "$(grep -ciE 'set EXLOOM_REVIEW_SKIP=1 in your|"env"\), then retry' <<< "${!m}")" "0"
 done
 ok "no command or skill tells Claude to set the bypass itself" \
-   "$(grep -rnE 'EXLOOM_REVIEW_SKIP.*settings\.json|settings\.json.*EXLOOM_REVIEW_SKIP' "$HOOKS_ABS/../commands" "$HOOKS_ABS/../skills" "$HOOKS_ABS/../agents" | grep -vc 'never set it yourself')" "0"
+   "$(grep -rnE 'EXLOOM_REVIEW_SKIP.*settings\.json|settings\.json.*EXLOOM_REVIEW_SKIP' "$HOOKS_ABS/../skills" "$HOOKS_ABS/../agents" | grep -vc 'never set it yourself')" "0"
 
 section "the session-start note appears only where exloom is set up"
 

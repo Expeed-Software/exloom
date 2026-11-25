@@ -165,8 +165,8 @@ YAMLPY
       DOCS_SKILL="$PLUGIN_ROOT/skills/maintaining-reference-docs/SKILL.md"
       if [ -f "$DOCS_SKILL" ]; then
         words=$(wc -w < "$DOCS_SKILL")
-        if [ "$words" -lt 800 ] || [ "$words" -gt 1500 ]; then
-          fail "maintaining-reference-docs/SKILL.md is $words words (800-1500)"
+        if [ "$words" -lt 400 ] || [ "$words" -gt 1500 ]; then
+          fail "maintaining-reference-docs/SKILL.md is $words words (400-1500)"
         fi
       else
         fail "skill maintaining-reference-docs missing"

@@ -1,114 +1,49 @@
 ---
 name: review-complete
-description: Used by /exloom at its review and push steps; do not start it directly. Verifies every checklist section the derived tier requires holds real evidence, dispatches any missing reviewer agents, and refuses to mark complete while a gap remains, naming each one.
+description: Used by /exloom at its review and push steps; do not start it directly. Checks that the checklist holds real evidence for everything the tier requires, dispatches missing reviewers, and names each gap.
 ---
 
 # /review-complete
 
-You are the terminal gate. Verify every tier-required section of `.claude/reviews/<branch>.md` holds real evidence. A reviewer counts only by its receipt, `.claude/reviews/<branch>.verdicts/<agent>.json`, written when the subagent completes and never by hand.
+Verify that `.claude/reviews/<branch>.md` holds real evidence for everything the tier requires. A reviewer counts only by its receipt, `.claude/reviews/<branch>.verdicts/<agent>.json`, which the reviewer records itself; never write one by hand.
 
-## Step 1 — Open and parse
+## 1. Tier and lane
 
-Open `.claude/reviews/<current-branch>.md`. If absent, refuse and tell the user to run `/exloom`.
+No checklist: refuse and point the user to `/exloom`. The tier is `exloom_derive_tier HEAD`, never declared or lowered. The lane is `**Lane:**`, else the committed `.claude/exloom-lane`, else `standard`.
 
-Take the tier from `exloom_derive_tier HEAD` (docs-only → 0; migrations or auth/tenancy/secrets/crypto → 3; deployment surface, API/route surface, or ≥5 files → 2; else 1). It is never declared or lowered.
+- **Sprint** requires only the Tier 1 set; mark the adversarial, cross-layer and runbook sections `N/A — Sprint lane`. It does not waive the proof or a security review the diff's surface demands. At Tier 3 it is refused: offer `/harden`.
+- **Certified**: anything under `## Escape hatches used` blocks the push, and the checklist commit is signed. A recorded round-cap answer is not an escape hatch.
 
-## Step 1b — Read the lane
+If the repository has architecture, data-model, DB or API docs, follow `exloom:maintaining-reference-docs`, or record `- Doc impact: none — <reason>` under `## Rulings`. The gate only warns here.
 
-Read `**Lane:**`. Absent, use the committed `.claude/exloom-lane`, else `standard`.
+## 2. What each tier requires
 
-**Sprint caps the required set at Tier 1**: L1 review, smoke test, proof. Mark adversarial, cross-layer and runbook sections `N/A — Sprint lane`. Sprint does **not** waive the proof receipt, the derived tier, or the security auditor when the diff's *surface* demands it. **Sprint at Tier 3 is refused by the gate**: do not lower the tier; offer `/harden`.
+| Tier | Required |
+|---|---|
+| 0 | `l1-reviewer` receipt; each Critical and Important resolved |
+| 1 | Tier 0 + smoke test (boot command, user action, expected and observed result with evidence) + proof |
+| 2 | Tier 1 + `adversarial-reviewer` receipt, with the cross-layer grep output and each orphan resolved |
+| 3 | Tier 2 + `security-auditor` receipt with tool output; a runbook path that exists; **What reverting does not fix** (`nothing` is valid); **What would recover it** (`NOT RECOVERABLE` with a reason is valid) |
 
-**Certified**: anything under `## Escape hatches used` blocks the push, and the checklist commit must be signed. A recorded round-cap answer is not an escape hatch.
+`l1-reviewer` must cover the shipped commit; the others need only have approved somewhere on the branch. At Tier 3, do not ask whether recovery was tested or who verifies at deploy: a deferral names a ticket.
 
-## Step 1c — Reference docs
-
-If the repository has architecture, data-model, DB or API docs, follow `exloom:maintaining-reference-docs`: update each one whose code this branch changed, in this branch, or record `- Doc impact: none — <reason>` under `## Rulings`. Without such docs, skip this step. The push gate only warns here; it never blocks.
-
-## Step 2 — Check required sections for the tier
-
-Dispatch is answered by receipts, never the checklist:
-
-```bash
-ls .claude/reviews/<branch>.verdicts/
-```
-
-**`l1-reviewer` must cover the shipped commit**; if code changed after its review, it runs again. **Every other reviewer needs only to have run and approved somewhere on this branch.** Commit receipts alongside the checklist.
-
-### When to stop reviewing
-
-Each receipt carries `"round_needed"`, from the `ROUND NEEDED AFTER FIX:` line. **The loop is over when every required receipt reads `"verdict":"APPROVED"` and `"round_needed":"NO"`:**
+**Proof**, unless `.claude/exloom-proof.disabled` is committed: a `proof.json` covering the reviewed commit, written only by
 
 ```bash
-grep -h '"round_needed"' .claude/reviews/<branch>.verdicts/*.json
+XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
 ```
 
-If that holds, ship; no extra round to be thorough.
+`PROVED`, `PROVED_BY_MUTATION`, `NOT_APPLICABLE`, `NOT_TESTABLE` and `TESTS_ONLY` pass. `NO_NEW_BEHAVIOUR` at Tier 2–3 needs `- Proof: deletion only — <reason>` from the user; `NO_TEST_CHANGED` needs `- Proof: refactor — <reason>` from the user. `NOT_PROVED` blocks: strengthen the test, never re-run unchanged.
 
-`"round_needed":"UNKNOWN"` counts as `YES`; re-dispatch only that reviewer.
+A section is missing if it is empty or still holds a template placeholder such as `<exact command>` or `<paste output / screenshot link>`.
 
-**Minor, out-of-scope and pre-existing findings go to the ledger**, `.claude/reviews/<branch>.ledger.md`, written by the hook: no ruling, no round, no fixing during the loop. After the final review, tick each item with the user — fixed, ticket id, or dropped — and commit it with the checklist. After a compaction, resume from the ledger and receipts.
+## 3. Fill the gaps
 
-**After any fix, the reviewer runs in verify mode.** Findings it marks `ADDRESSED` close on their own. For each one still `NOT ADDRESSED`, ask the user with AskUserQuestion, showing the reviewer's reason from the gate message, with three options:
+Print `Cannot mark complete. Missing or placeholder sections:` with one line per gap. A missing or stale reviewer receipt: dispatch that reviewer now, without asking, with `model` set to `exloom_reviewer_model <agent>`. Smoke test: the smoke step of `/exloom`. Runbook: ask the user for the path. Do not accept "I'll do that later".
 
-- **"Fix again"** — dispatch `exloom:fixer` with it, then verify again.
-- **"Not a real problem, ignore (PARKED)"** — `- src/x.go:12 — PARKED: why` under `## Rulings`.
-- **"Fix later, with a ticket (DEFERRED)"** — `- src/x.go:30 — DEFERRED ABC-123: why, and the ticket that tracks it`.
+**Order.** `l1-reviewer` alone, first, once over the whole branch. Then `adversarial-reviewer` and `security-auditor` in parallel, once, with the L1 findings.
 
-The gate accepts the REJECTED receipt once every open in-scope finding is PARKED or DEFERRED. At Tier 3 and on Certified, a ruling on a Critical quotes the user's words in double quotes — ask them. An UNKNOWN verdict, or a REJECTED review with no recorded findings, cannot be ruled on: re-dispatch that reviewer.
-
-### Tier 0 required
-- L1: `l1-reviewer.json` receipt, findings listed (or "no findings"), resolution for each Critical/Important.
-- Other sections may be `N/A - Tier 0` or default.
-
-### Tier 1 required
-- L1, as Tier 0.
-- Smoke test: boot command, user action, expected result, actual observed result with evidence. "Test passed" ticked.
-- **Proof that the change is tested — unless the repo has committed `.claude/exloom-proof.disabled`.** `proof.json` receipt covering the reviewed commit with `"result":"PROVED"` (or `NOT_APPLICABLE`, `NOT_TESTABLE`, `TESTS_ONLY`, `NO_NEW_BEHAVIOUR` with a `- Proof: deletion only — <reason>` line from the user at Tier 2–3, or `NO_TEST_CHANGED` with a `- Proof: refactor — <reason>` line from the user). Written only by:
-
-  ```bash
-  XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/prove-change-is-tested.sh";[[ $XL_ROOT =~ ^(/|[A-Za-z]:/) && -f $XL_FILE ]]||{ echo "exloom: $XL_FILE missing; reinstall exloom or update Claude Code">&2;exit 1;};bash "$XL_FILE"
-  ```
-
-  `PROVED_BY_MUTATION` and `NOT_APPLICABLE` (tests cannot compile without the change) also pass. `NOT_PROVED` blocks: strengthen the assertions, make the runner run them, or for purely additive code commit `.claude/exloom-mutation-command`; do not re-run unchanged. For `NO_TEST_CHANGED`, ask the user whether it is a refactor and record their reason.
-
-### Tier 2 required (Tier 1 +)
-- Adversarial review: `adversarial-reviewer.json` receipt, findings with category and resolution, and the cross-layer contract check's grep output with each orphan resolved.
-
-### Tier 3 required (Tier 2 +)
-- Security review: `security-auditor.json` receipt, tool output pasted, findings dispositioned.
-- Runbook path filled and the file exists.
-- **What reverting does not fix** filled; `nothing` is valid but must be written.
-- **What would recover it** filled: a named mechanism, or `NOT RECOVERABLE` with a stated reason (accept it).
-- The Tier 3 box ticked.
-
-Do **not** ask whether recovery was tested, who verifies at deploy, or for a "rollback command". Every line must be answerable by the author, on this branch, before merge; a deferral names a ticket.
-
-## Step 3 — Verify section content is real, not placeholder
-
-A required section is missing if it is empty after the header or still contains:
-- `<paste output / screenshot link>`
-- `<exact command>`
-- `<exact steps>`
-- `<Critical / Important / Minor with file:line>`
-- `<expected-result>`
-
-## Step 4 — If sections are missing
-
-Print `Cannot mark complete. Missing or placeholder sections:` and one line per gap. Then:
-- Smoke test → the smoke step of `/exloom`.
-- Proof missing, stale, or `NOT_PROVED` → run `prove-change-is-tested.sh` (above); NOT PROVED needs a better test, not another run.
-- L1 receipt missing or stale → dispatch `exloom:l1-reviewer` now.
-- Adversarial receipt missing or stale → dispatch `exloom:adversarial-reviewer` now.
-- Security receipt missing or stale → dispatch `exloom:security-auditor` now.
-- Runbook → ask the user for the path.
-- Reversal proof → ask which test exercises the rollback; if none, offer to write it rather than accepting prose.
-
-Dispatch missing reviewers without asking, with the `Agent`/`Task` tool and the agent type above. **Dispatch without a name**, with `model` set to `exloom_reviewer_model <agent>` (Opus unless `.claude/exloom-reviewer-model` says otherwise). A receipt with no `"verdict"` field means it was named: re-dispatch unnamed. Reviewing yourself produces no receipt.
-
-### The dispatch prompt — use this, do not write your own
-
-Fill the two blanks, send nothing else:
+**The dispatch prompt — send exactly this:**
 
 ```
 Review branch <branch> at <sha>. Diff: git diff <merge-base>...<sha>
@@ -122,7 +57,7 @@ L1 already reported and these are being handled, so do not re-report them:
   <file:line> — <one line each>
 ```
 
-**From round 2, re-dispatch in verify mode:**
+After a fix, re-dispatch in verify mode. `<last-reviewed-sha>` is the `"head"` of that reviewer's last receipt line:
 
 ```
 Verify fixes on branch <branch>. Fix range: <last-reviewed-sha>..<sha>
@@ -130,24 +65,19 @@ Previous findings:
 <the finding lines of its last report, verbatim>
 ```
 
-`<last-reviewed-sha>` is the `"head"` of that reviewer's last verdict line. A new finding outside the fix range is out of scope and needs no ruling.
+Do not steer a reviewer: say nothing about what to look for, what to ignore, a severity, what you changed, or what you verified.
 
-**The budget is enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). Past that, or a whole-branch dispatch after the branch grew by more than max(100 lines, half its size) since the final review started, is refused: ask the user about the open findings. A verify after a fix is never refused for budget: the last fix always gets one verify. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it: one dispatch, at that code, before any other. A commit made during a review is not covered by it.
+**Budget, enforced at dispatch.** Each reviewer gets one whole-branch review and one verify pass; each plan task gets `.claude/exloom-max-rounds` fix rounds (default 3). A refused dispatch means: ask the user about the open findings. The last fix always gets one verify. If the user wants another round, record `- Extra round — "<their words>"` under `## Rulings` and commit it.
 
-**Dispatch order:**
+## 4. When the loop is over
 
-1. **`l1-reviewer` alone, first, once over the whole branch** Fix, then re-dispatch in verify mode.
-2. **Then `adversarial-reviewer` and `security-auditor`**, in parallel, once, after L1 settles, with the L1 findings. The gate's `approved <sha> — 3 commit(s) have landed since` does not block.
+When every required receipt reads `"verdict":"APPROVED"` and `"round_needed":"NO"`, ship. No extra round to be thorough.
 
-**A finding is a defect report, not a work order.** Implement defects. A proposed design — new check, abstraction, validator, helper, test infrastructure, class-wide fix — goes to the ticket owner. Do not build a guard unless you can point to the type, schema or contract behind its rule; if one was built and reverted, pin the case with a test.
+Minor, out-of-scope and pre-existing findings go to `.claude/reviews/<branch>.ledger.md` automatically: no ruling, no round, no fixing during the loop. After the final review, tick each item with the user — fixed, ticket id, or dropped — and commit it.
 
-**Cost discipline.** `l1-reviewer` at low effort, per commit; `adversarial-reviewer` and `security-auditor` at medium effort, once, before push.
+## 5. A rejected review
 
-## How to respond to a finding
-
-Deliver what was asked; if it seems mistaken, say so in a sentence and continue.
-
-**The fix is made by `exloom:fixer`, not this session.** During the fix loop this session makes no code edits or commits; exloom refuses them while a REJECTED finding has no ruling. Dispatch the fixer, unnamed, with exactly:
+**The fix is made by `exloom:fixer`, not this session**, which makes no code edits or commits while a finding is open. Dispatch it with exactly:
 
 ```
 Fix these review findings on branch <branch>, round <n>. Findings, verbatim:
@@ -156,58 +86,30 @@ Rulings that allow more than a minimal fix:
 <lines from '## Rulings', or "none">
 ```
 
-Round 3 gets a fresh fixer with `model` set to `opus`. Each `NEEDS RULING` line it returns goes to the user, never back to the fixer. Then re-dispatch the reviewer in verify mode.
+Round 3 gets a fresh fixer with `model` set to `opus`. A `NEEDS RULING` line it returns goes to the user. Then verify.
 
-- **Fix what is cited, at the line cited.**
-- **Before adding a new file, class, method, or test class for a finding, stop and ask**, stating the minimal fix.
-- **The branch should stay roughly its size at review start.**
-- **A finding that needs architecture goes to a ticket**: record `DEFERRED <ticket>` under `## Rulings` and move on.
+For each finding the verify leaves NOT ADDRESSED, ask the user with AskUserQuestion, showing the reviewer's reason:
 
-## Do not steer the review
+- **"Fix again"** — fixer, then verify.
+- **"Not a real problem, ignore (PARKED)"** — `- src/x.go:12 — PARKED: why` under `## Rulings`.
+- **"Fix later, with a ticket (DEFERRED)"** — `- src/x.go:30 — DEFERRED ABC-123: why`.
 
-- **Do not tell a reviewer what to look for.**
-- **Do not tell it what not to flag** ("ignore the docs changes", "pre-existing").
-- **Do not pre-rate a severity.**
-- **Do not summarise what you changed or why.**
-- **Do not say what you already verified.**
+At Tier 3 and on Certified, a ruling on a Critical quotes the user's words in double quotes. A REJECTED review with no recorded findings cannot be ruled on: re-dispatch that reviewer.
 
-**Do not invent process** — your own freeze, re-review trigger, or same-commit rule. If exloom seems wrong, say so and continue.
+A finding is a defect report, not a work order. A proposed design — a new check, abstraction, helper or class-wide fix — goes to a ticket as `DEFERRED <ticket>`.
 
-Wait for the user. Do NOT mark complete while anything is missing.
+## 6. Record it
 
-## Step 5 — If everything is present
-
-Regenerate the evidence block from the receipts, never by hand:
+Rebuild the evidence block from the receipts, never by hand, then commit the checklist with its receipts:
 
 ```bash
 exloom_render_report "$(git rev-parse --abbrev-ref HEAD)"
-```
-
-It records HEAD as the reviewed commit; run it before committing.
-
-Stage the checklist **and the verdict receipts** together:
-
-```bash
 git add .claude/reviews/<branch>.md ".claude/reviews/<branch>.verdicts" ".claude/reviews/<branch>.ledger.md"
-```
-
-If the repo has `.claude/exloom-provenance-signed.enabled` or strict mode (`.claude/exloom-strict`), the commit MUST be signed (`git commit -S`); never fall back to unsigned. Otherwise:
-
-```
 git commit -m "chore(review): record the review of <branch-name>"
 ```
 
-A checklist from the old template (a `## Final verdict` section with tick boxes) still works: tick the boxes and write `Reviewed code commit:`.
+On Certified, or with `.claude/exloom-provenance-signed.enabled` or `.claude/exloom-strict`, sign it with `git commit -S`; never fall back to unsigned.
 
-## Step 6 — Tell the user what is now unblocked
+Then tell the user: review complete for Tier <N>, checklist committed, the branch may be pushed.
 
-Print:
-
-> Review complete for Tier <N> — checklist committed (`chore(review): mark Tier <N> review complete`). You may now `git push` or open a PR.
-
-## Rules
-
-- All-or-nothing per the tier's required sections.
-- Do NOT accept "I'll do that later".
-- A skipped narrative step with written justification under "Escape hatches used" counts as addressed; an unjustified skip does not. **The derived tier and a missing reviewer receipt have no escape hatch.**
-- Emergency bypass: only the user may set `EXLOOM_REVIEW_SKIP=1` in their `settings.json` `env`; never set it yourself. It works on every lane, verifies no justification, writes `.claude/reviews/<branch>.bypass.json` — **commit that file with the change** and write the reason under "Escape hatches used". Do not tell the user the tooling enforces the reason.
+**Bypass.** Only the user may set `EXLOOM_REVIEW_SKIP=1` in their `settings.json` `env`; never set it yourself. It writes `.claude/reviews/<branch>.bypass.json`: commit that file and write the reason under `## Escape hatches used`.
