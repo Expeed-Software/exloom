@@ -1451,13 +1451,13 @@ ok "a CRLF install is reported as CRLF"  "$(crlfck "$CC")" "crlf"
 ok "a missing install is not a CRLF one" "$(crlfck "$REG/absent")" "lf"
 
 # The remedy must name both halves: the setting, and the reinstall.
-SETUP="$HOOKS_ABS/../commands/exloom-setup.md"
+SETUP="$HOOKS_ABS/../skills/exloom-setup/SKILL.md"
 ok "setup names core.autocrlf input" "$(grep -c 'core.autocrlf input' "$SETUP")" "1"
 ok "...and says to reinstall"        "$([[ "$(grep -ci 'reinstall' "$SETUP")" -ge 1 ]] && echo yes || echo no)" "yes"
 
 # Setup runs once; /exloom runs constantly. A developer who set exloom up before
 # this existed would otherwise meet the CRLF failure as bare shell noise.
-XLM="$HOOKS_ABS/../commands/exloom.md"
+XLM="$HOOKS_ABS/../skills/exloom/SKILL.md"
 ok "/exloom checks the installed line endings too" \
    "$(grep -c 'exloom_hooks_are_crlf' "$XLM")" "1"
 ok "...and names the remedy where the developer reads it" \
@@ -1616,8 +1616,8 @@ section "the selection command is derived once, proved, and then used mechanical
 # The built-in adapters are guesses about syntax exloom cannot run. Setup can
 # work the command out for this repo, prove it on a real test file, and commit
 # it — model judgement once, determinism on every proof after.
-SUP="$HOOKS_ABS/../commands/exloom-setup.md"
-XLM="$HOOKS_ABS/../commands/exloom.md"
+SUP="$HOOKS_ABS/../skills/exloom-setup/SKILL.md"
+XLM="$HOOKS_ABS/../skills/exloom/SKILL.md"
 ok "setup derives a selection command"        "$(grep -c 'exloom-test-select' "$SUP")" "$(grep -c 'exloom-test-select' "$SUP")"
 ok "...and mentions it at all"                "$([[ "$(grep -c 'exloom-test-select' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
 ok "...with a {tests} placeholder"            "$([[ "$(grep -c '{tests}' "$SUP")" -ge 1 ]] && echo yes || echo no)" "yes"
@@ -1645,8 +1645,6 @@ ok "README names the skills it ships" \
    "$(ls -d "$XR"/skills/*/ 2>/dev/null | wc -l | tr -d ' ')"
 ok "...the agents"  "$(sed -n 's/.*\*\*\([0-9]*\) agents\*\*.*/\1/p' "$RDM" | head -1)" \
    "$(ls "$XR"/agents/*.md 2>/dev/null | wc -l | tr -d ' ')"
-ok "...the commands" "$(sed -n 's/.*\*\*\([0-9]*\) commands\*\*.*/\1/p' "$RDM" | head -1)" \
-   "$(ls "$XR"/commands/*.md 2>/dev/null | wc -l | tr -d ' ')"
 ok "...the scripts" "$(sed -n 's/.*\*\*\([0-9]*\) scripts\*\*.*/\1/p' "$RDM" | head -1)" \
    "$(ls "$XR"/scripts/*.sh 2>/dev/null | wc -l | tr -d ' ')"
 ok "...and the templates" "$(sed -n 's/.*\*\*\([0-9]*\) templates\*\*.*/\1/p' "$RDM" | head -1)" \
@@ -4163,7 +4161,7 @@ runblk() {   # runblk <block> <root|RAW> -> "rc own decoy said"
   echo "$rc $([[ -f $MARKS/own ]] && echo own || echo -) $([[ -f $MARKS/decoy ]] && echo decoy || echo -) $(grep -q 'exloom:.*missing' "$REG/blk.out" && echo said || echo -)"
 }
 NBLK=0; BAD=""
-for f in "$EXLOOM_DIR"/commands/*.md "$EXLOOM_DIR"/agents/*.md "$EXLOOM_DIR"/skills/*/SKILL.md; do
+for f in "$EXLOOM_DIR"/agents/*.md "$EXLOOM_DIR"/skills/*/SKILL.md; do
   while IFS= read -r -d '' blk; do
     NBLK=$((NBLK + 1)); n="${f#"$EXLOOM_DIR"/}#$NBLK"
     r="$(runblk "$blk" "$OWN")";   [[ "$r" == "0 own - -" ]]  || BAD+=" $n:own=[$r]"
@@ -4426,15 +4424,15 @@ section "/exloom asks for the branch instead of routing to setup"
 obrepo pbnext
 ok "per-branch mode goes to init"               "$(exloom_next_step feat/plan)" "init"
 ok "setup is no longer a step the gate returns" "$(grep -c 'echo setup' "$LIB_ABS")" "0"
-ok "...and /exloom no longer has a setup row"   "$(grep -c '^| `setup`' "$HOOKS_ABS/../commands/exloom.md")" "0"
+ok "...and /exloom no longer has a setup row"   "$(grep -c '^| `setup`' "$HOOKS_ABS/../skills/exloom/SKILL.md")" "0"
 ok "the init step asks whether to use exloom on this branch" \
-   "$(grep -ciE 'use exloom on this branch' "$HOOKS_ABS/../commands/exloom.md")" "1"
+   "$(grep -ciE 'use exloom on this branch' "$HOOKS_ABS/../skills/exloom/SKILL.md")" "1"
 ok "...and asks it only when the shared check says the gate is off" \
-   "$(grep -cE 'Unless .exloom_gate_active. is already true' "$HOOKS_ABS/../commands/exloom.md")" "1"
+   "$(grep -cE 'Unless .exloom_gate_active. is already true' "$HOOKS_ABS/../skills/exloom/SKILL.md")" "1"
 ok "a protected branch still goes to branch"    "$(exloom_next_step main)" "branch"
 
 ok "/exloom-setup offers an optional and a mandatory mode" \
-   "$(grep -cE 'Optional|Mandatory' "$HOOKS_ABS/../commands/exloom-setup.md" | awk '{print ($1>1)?"yes":"no"}')" "yes"
+   "$(grep -cE 'Optional|Mandatory' "$HOOKS_ABS/../skills/exloom-setup/SKILL.md" | awk '{print ($1>1)?"yes":"no"}')" "yes"
 for d in README.md HOW-IT-WORKS.md; do
   ok "$d explains both modes" \
      "$(grep -ciE 'per branch|per-branch' "$HOOKS_ABS/../$d" | awk '{print ($1>0)?"yes":"no"}')" "yes"

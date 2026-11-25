@@ -175,7 +175,7 @@ YAMLPY
       V5_RE='declared tier|Propose a tier|Merge as-is'
       DIRECT_RE='(^|[^A-Za-z/`])([Rr]un|[Rr]e-run|[Ii]nvoke|[Uu]se|[Ff]ollow|[Ss]uggest|[Nn]ext( command)?s?:)[^.|]{0,40}/(review-init|smoke-test|review-complete)'
       while IFS= read -r f; do
-        case "$f" in */commands/exloom.md) re="$V5_RE" ;; *) re="$V5_RE|$DIRECT_RE" ;; esac
+        case "$f" in */skills/exloom/SKILL.md) re="$V5_RE" ;; *) re="$V5_RE|$DIRECT_RE" ;; esac
         hits=$(grep -nE "$re" "$f" || true)
         if [ -n "$hits" ]; then
           fail "v5 wording in ${f#"$PLUGIN_ROOT/"}:"

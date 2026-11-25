@@ -6,9 +6,8 @@ Thanks for your interest in improving exloom. It's an open, MIT-licensed Claude 
 
 exloom is all Markdown plus a little Bash. There's no build step.
 
-- `plugins/exloom/skills/<name>/SKILL.md` — a skill: YAML frontmatter (`name`, `description`) plus the playbook body.
+- `plugins/exloom/skills/<name>/SKILL.md` — a skill: YAML frontmatter (`name`, `description`) plus the playbook body. A skill is also the slash command `/<name>`.
 - `plugins/exloom/agents/<name>.md` — a reviewer subagent.
-- `plugins/exloom/commands/<name>.md` — a slash command.
 - `plugins/exloom/hooks/*.sh` — the opt-in enforcement gate.
 - `plugins/exloom/assets/claude-md-templates/` — starting-point CLAUDE.md templates.
 - `plugins/exloom/.claude-plugin/plugin.json` — the manifest.
