@@ -1543,6 +1543,50 @@ ok "...with run 1 recorded as it actually ran" \
    "$(sed -n 's/.*"run1":"\([a-z\/]*\)".*/\1/p' "$FB3J" | tail -1)" "pass"
 
 
+section "with no test in the diff, the tests named after the changed files run, not the suite"
+
+nmrepo() {   # nmrepo <name> [select-template]
+  local d="$REG/$1"; rm -rf "$d"; mkdir -p "$d/src" "$d/tests" "$d/.claude"; cd "$d" || return 1
+  git init -q -b main . 2>/dev/null; git config user.email t@e.com; git config user.name t
+  : > .claude/exloom-gate.enabled
+  printf 'for t in tests/*.sh; do bash "$t" || exit 1; done\n' > .claude/exloom-test-command
+  [[ -n "${2:-}" ]] && printf '%s\n' "$2" > .claude/exloom-test-select
+  printf 'echo 4\n' > src/calc.sh
+  printf 'v=$(bash src/calc.sh); [ -n "$v" ]\n' > tests/calc_test.sh
+  printf 'echo ran >> "%s"\n' "$d.other" > tests/other_test.sh
+  rm -f "$d.other"
+  git add -A >/dev/null 2>&1; git commit -qm b >/dev/null 2>&1
+  NMB="$(git rev-parse HEAD)"; NMJ=".claude/reviews/main.verdicts/proof.json"
+  printf 'echo 5\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm c >/dev/null 2>&1
+}
+nmf() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" "$NMJ" | tail -1; }
+
+nmrepo nm-named 'bash {tests}'
+bash "$PROVE" --base "$NMB" >/dev/null 2>&1
+ok "the result is unchanged: no test changed"       "$(nmf result)" "NO_TEST_CHANGED"
+ok "...the test named after the changed file ran"   "$(nmf selection)" "tests/calc_test.sh"
+ok "...chosen by name"                              "$(nmf selection_source)" "name"
+ok "...and the rest of the suite did not"           "$([[ -f "$REG/nm-named.other" ]] && echo ran || echo skipped)" "skipped"
+
+# No way to narrow here, so the whole suite runs as it always did.
+nmrepo nm-plain
+bash "$PROVE" --base "$NMB" >/dev/null 2>&1
+ok "with no way to narrow, the whole suite still runs" \
+   "$(nmf selection_source; [[ -f "$REG/nm-plain.other" ]] && echo ran)" "fallback
+ran"
+
+nmrepo nm-broken './no-such-runner {tests}'
+bash "$PROVE" --base "$NMB" >/dev/null 2>&1
+ok "a narrowed run that fails is retried on the whole suite" \
+   "$(nmf result; nmf selection_source)" "NO_TEST_CHANGED
+fallback"
+
+nmrepo nm-certified 'bash {tests}'
+printf 'certified\n' > .claude/exloom-lane; git add -A >/dev/null 2>&1; git commit -qm lane >/dev/null 2>&1
+bash "$PROVE" --base "$NMB" >/dev/null 2>&1
+ok "the Certified lane keeps the whole suite" \
+   "$([[ -f "$REG/nm-certified.other" ]] && echo ran || echo skipped)" "ran"
+
 section "no unpinned launcher ships in the plugin"
 
 # npx and uvx fetch and run whatever the registry serves, which is a launcher
