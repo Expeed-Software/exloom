@@ -62,7 +62,7 @@ After a fix, re-dispatch in verify mode. `<last-reviewed-sha>` is the `"head"` o
 ```
 Verify fixes on branch <branch>. Fix range: <last-reviewed-sha>..<sha>
 Previous findings:
-<the finding lines of its last report, verbatim>
+<the Critical and Important finding lines of its last report, verbatim: the lines the fixer was given, never a Minor one>
 ```
 
 Do not steer a reviewer: say nothing about what to look for, what to ignore, a severity, what you changed, or what you verified.

@@ -75,9 +75,12 @@ LEDGER=".claude/reviews/${BRANCH}.ledger.md"
 # only when it starts where this agent's last review ended and ends somewhere
 # else. Anything else is a full pass.
 if [[ "$MODE" == "verify" ]]; then
-  LAST_HEAD="$(grep -F '"verdict":' "$RECEIPT" 2>/dev/null \
+  LAST_LINE="$(grep -F '"verdict":' "$RECEIPT" 2>/dev/null \
     | { if [[ -n "$TASK" ]]; then grep -F "\"task\":\"${TASK}\""; else cat; fi; } \
-    | tail -1 | sed -n 's/.*"head":"\([0-9a-f]*\)".*/\1/p')"
+    | tail -1)"
+  LAST_HEAD="$(printf '%s' "$LAST_LINE" | sed -n 's/.*"head":"\([0-9a-f]*\)".*/\1/p')"
+  # Recording the same verify pass again is still that pass, not a full review.
+  [[ -n "$FROM" && "$LAST_LINE" == *"\"range\":\"${FROM}..${HEAD_SHA}\""* ]] && LAST_HEAD="$FROM"
   if [[ -z "$FROM" || "$FROM" != "$LAST_HEAD" || "$FROM" == "$HEAD_SHA" ]]; then
     echo "record-verdict: --from does not match what ${AGENT} last reviewed; recording a full pass" >&2
     MODE="full"; FROM=""
@@ -93,6 +96,19 @@ if [[ "$MODE" == "verify" && -n "$FROM" ]]; then
     | awk '/^\+\+\+ b\//{f=substr($0,7); next} /^\+\+\+ /{f=""; next}
            /^@@/ && f!=""{split($3,a,","); s=substr(a[1],2)+0; n=(a[2]=="")?1:a[2]+0; for(i=0;i<n;i++) print f":"(s+i); if(n==0){print f":"s; print f":"(s+1)}}')"
 fi
+# An approval with no findings file would leave every earlier finding
+# unanswered and be stored as a rejection of a commit that cannot then be
+# approved. Nothing is recorded; the reviewer states each one and records again.
+if [[ "$MODE" == "verify" && -n "$FROM" && "$VERDICT" == "APPROVED" ]] && [[ -z "$FINDINGS_IN" || ! -s "$FINDINGS_IN" ]]; then
+  OPEN_BEFORE="$(grep -F "\"head\":\"${FROM}\"" "$FINDINGS_FILE" 2>/dev/null \
+    | grep -F '"scope":"IN-SCOPE"' | grep -vF '"severity":"LOW"' \
+    | sed -n 's/.*"cite":"\([^"]*\)".*/\1/p' | sort -u | tr '\n' ' ')"
+  if [[ -n "$OPEN_BEFORE" ]]; then
+    echo "record-verdict: nothing recorded. A verify pass states every earlier finding: write the findings file with one line for each of ${OPEN_BEFORE}— scope ADDRESSED, or IN-SCOPE if it is still open — and record again with --findings." >&2
+    exit 2
+  fi
+fi
+
 _in_fix() {   # is the cited line one the fix range added or changed?
   local pth="${1%:*}" ln="${1##*:}" f
   while IFS= read -r f; do
@@ -123,7 +139,7 @@ PENDING="$(mktemp 2>/dev/null || echo "${VDIR}/.pending.$$")"
 PENDING_LEDGER="$(mktemp 2>/dev/null || echo "${VDIR}/.ledger.$$")"
 : > "$PENDING"; : > "$PENDING_LEDGER"
 SEEN_CITES=""
-n_found=0; n_blocking=0
+n_found=0; n_blocking=0; n_dropped=0
 
 if [[ -n "$FINDINGS_IN" && -f "$FINDINGS_IN" ]]; then
   while IFS=$'\t' read -r sev scope cite reason || [[ -n "${sev:-}" ]]; do
@@ -133,7 +149,7 @@ if [[ -n "$FINDINGS_IN" && -f "$FINDINGS_IN" ]]; then
     scope="$(printf '%s' "$scope" | tr -cd 'A-Za-z-' | tr '[:lower:]' '[:upper:]')"
     case "$scope" in IN-SCOPE|PRE-EXISTING|ADDRESSED) ;; *) scope="IN-SCOPE" ;; esac
     cite="$(printf '%s' "$cite" | grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+:[0-9]+' | head -1)"
-    [[ -n "$cite" ]] || continue
+    [[ -n "$cite" ]] || { n_dropped=$((n_dropped + 1)); continue; }
     reason="$(printf '%s' "${reason:-}" | tr -d '"\\' | LC_ALL=C tr -cd ' -~' | cut -c1-300)"
     SEEN_CITES="${SEEN_CITES}${cite}"$'\n'
 
@@ -197,6 +213,13 @@ fi
 if [[ "$VERDICT" == "APPROVED" && $n_blocking -gt 0 ]]; then
   echo "record-verdict: ${n_blocking} blocking finding(s) stand at this commit — recording REJECTED, not APPROVED." >&2
   VERDICT="REJECTED"; ROUND="YES"
+fi
+
+# A verify pass that rejects with nothing blocking in its fix range has only
+# ledger items left, so it asks for no further round.
+if [[ "$MODE" == "verify" && "$VERDICT" == "REJECTED" && $n_blocking -eq 0 && $n_found -gt 0 && $n_dropped -eq 0 ]]; then
+  echo "record-verdict: no blocking finding stands in the fix range — the rest are in the ledger; no further round." >&2
+  ROUND="NO"
 fi
 
 EXTRA=""

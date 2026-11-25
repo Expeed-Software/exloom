@@ -37,7 +37,7 @@ Detect the stack and propose:
 | `pyproject.toml` / `pytest.ini` | `pytest -q` |
 | `go.mod` / `Cargo.toml` | `go test ./... -count=1` / `cargo test` |
 
-Dry-run it once, non-interactively, with a timeout. It must exit 0 without waiting for input or a browser. If it hangs or fails, show the last lines and ask for the right one; never pin a command that has not passed. Then write `.claude/exloom-test-command`.
+Dry-run it once, non-interactively, with a timeout. It must exit 0 without waiting for input or a browser. If it hangs or fails, show the last lines and ask for the right one; never pin a command that has not passed. The proof runs this command in a throwaway copy of the repository with nothing installed, so it must install what it needs first: for npm, `{ [ -d node_modules ] || npm ci; } && npm test`. Run it once in a temporary copy of the project without the installed dependencies before pinning it. Then write `.claude/exloom-test-command`.
 
 If the suite needs local secrets or untracked state, the proof cannot run here: with the user's agreement write `.claude/exloom-proof.disabled` instead.
 

@@ -70,7 +70,7 @@ Review only the fix range. Under `## Previous findings`, one line per earlier in
 
 exloom does not read your report: what you record here is the review. Do it last.
 
-**1. Write your findings to a file**, one per line, TAB separated. Skip this when you have none.
+**1. Write your findings to a file**, one per line, TAB separated. Skip this only on a first review with no findings: a verify pass always writes the file, because an earlier finding it leaves out is recorded as still open.
 
     printf 'HIGH\tIN-SCOPE\tsrc/a.go:12\tnull dereference on the error path\n' > /tmp/exloom-security-auditor-findings.tsv
 

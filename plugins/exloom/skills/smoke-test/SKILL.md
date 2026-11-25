@@ -27,7 +27,9 @@ XL_ROOT='${CLAUDE_PLUGIN_ROOT}';XL_FILE="$XL_ROOT/scripts/record-smoke.sh";[[ $X
 
 It writes `smoke.json` and `smoke.out` under `<branch>.verdicts/`. Read the output: a non-zero exit is a failed smoke test. Commit both files.
 
-**A UI change, or Tier 3** — the gate does not accept an agent-run receipt. Ask the user to boot the system, perform the action, and paste back the log lines or response showing it completed and the evidence of the visible result (screenshot link, log excerpt, DB row, response body). "It worked" with nothing pasted is refused: help them get the output from the network tab, the logs, `psql` or `curl`.
+**A UI change at Tier 0–2, in a project with an end-to-end runner** (Playwright, Cypress, or the framework's own) — the end-to-end test of the user action is part of the change, written at the build step so the review covers it. Run it through the same recorder with `--method e2e` before the `--`. A failing run is a failed smoke test; fix the change, not the test. If the test does not exist yet, write and commit it now; the reviewer then verifies that commit. With no runner, or one that cannot run here, use the pasted path below.
+
+**Tier 3, or a UI change with no end-to-end test** — the gate does not accept an agent-run receipt. Ask the user to boot the system, perform the action, and paste back the log lines or response showing it completed and the evidence of the visible result (screenshot link, log excerpt, DB row, response body). "It worked" with nothing pasted is refused: help them get the output from the network tab, the logs, `psql` or `curl`.
 
 If the spec has an approved UI mock, compare the result with it, list each difference, and ask the user to accept or reject each one. A rejected difference means the change is not ready.
 

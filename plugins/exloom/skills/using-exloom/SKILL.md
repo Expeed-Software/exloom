@@ -39,7 +39,7 @@ After a REJECTED review, the fixer applies the smallest fix for what was cited a
 
 `/review-init`, `/smoke-test` and `/review-complete` belong to /exloom. Doing their steps by hand leaves the push blocked: receipts exist only when a reviewer records one.
 
-Call yourself when needed: `exloom:capturing-learnings`, `exloom:authoring-claude-md`, `exloom:auditing-plan-fidelity`, `exloom:maintaining-reference-docs`. `exloom:review-gate` describes the gate.
+Call yourself when needed: `exloom:starting-a-project` (a new project, before any feature), `exloom:defining-a-design-system` (the look of a product with screens), `exloom:capturing-learnings`, `exloom:authoring-claude-md`, `exloom:auditing-plan-fidelity`, `exloom:maintaining-reference-docs`. `exloom:review-gate` describes the gate.
 
 ## Is the gate on here?
 

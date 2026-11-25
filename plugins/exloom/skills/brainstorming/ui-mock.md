@@ -12,7 +12,7 @@ Only when the spec adds a new screen, or changes a layout or a user flow signifi
 
 ## Visual style
 
-Find the app's design tokens or theme (CSS variables, Tailwind config, a theme or tokens file) and copy their values into the mock as CSS variables, each citing its source file. With no tokens, copy the values the nearest existing screen uses. With neither, ask the user once: their design system or Figma link, their brand colours and font, or a plain neutral style decided later. Never invent a visual style.
+If `docs/design-system.md` exists, take the tokens, components and patterns from it and cite it. Otherwise find the app's design tokens or theme (CSS variables, Tailwind config, a theme or tokens file) and copy their values into the mock as CSS variables, each citing its source file. With no tokens, copy the values the nearest existing screen uses. With neither, ask the user once: their design system or Figma link, their brand colours and font, or a plain neutral style decided later. Never invent a visual style.
 
 If a UI or design skill is installed, you may use it to build the mock, within these values and the rules below.
 

@@ -24,7 +24,7 @@ Document what the code does, never what it should do. **Existing code wins**: if
 
 ## New project
 
-Ask once what stack it uses. Fill the matching template with the project name, description and all baselines, and leave Overrides in place but empty. Propose `docs: add CLAUDE.md for <project>` and wait.
+For a project with no code yet, `exloom:starting-a-project` settles the product and the stack first and then calls this mode; use its answers and do not ask again. Otherwise ask once what stack it uses. Fill the matching template with the project name, description and all baselines, and leave Overrides in place but empty. Propose `docs: add CLAUDE.md for <project>` and wait.
 
 ## CLAUDE.md already exists
 
