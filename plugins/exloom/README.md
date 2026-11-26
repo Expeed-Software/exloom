@@ -138,7 +138,7 @@ The proof records one of these results:
 
 **Upgrading from 5.x:** the proof is now on whenever the gate is on. `.claude/exloom-proof.enabled` no longer does anything; a repo that ran without the proof must either pin a working `.claude/exloom-test-command` or commit `.claude/exloom-proof.disabled`.
 
-Smoke evidence: for a CLI or API change at Tier 0–2, `/smoke-test` runs the check through the plugin's `scripts/record-smoke.sh`, which records the command, exit code and output as a receipt. A UI change below Tier 3 needs an end-to-end test of the user action, run through the same script with `--method e2e`, or a result pasted under `## Smoke test`. Tier 3 needs the pasted result.
+Smoke evidence: for a CLI or API change at Tier 0–2, `/smoke-test` runs the check through the plugin's `scripts/record-smoke.sh`, which records the command, exit code and output as a receipt. A UI change at any tier needs an end-to-end test of the user action, run through the same script with `--method e2e`; or, when no such test can run and a browser plugin is installed, the action performed in that browser by the agent and recorded with `--method browser`; or a result pasted under `## Smoke test`. Any other Tier 3 change needs the pasted result.
 
 Emergency bypass: `EXLOOM_REVIEW_SKIP=1` in your Claude Code session env. It is honoured unconditionally, and records itself in `.claude/reviews/<branch>.bypass.json` — commit that with the change so the bypass is findable afterwards.
 
