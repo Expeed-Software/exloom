@@ -3622,7 +3622,7 @@ printf 'c\n' > src/b.go; git add src/b.go
 ok "once every finding is ruled, the session commits again" "$(fl 'git commit -m next')" "0"
 ok "an ordinary command is not judged" "$(fl 'git status')" "0"
 
-section "smoke evidence: agent-run for CLI and API, an end-to-end run or a pasted result for UI, pasted at Tier 3"
+section "smoke evidence: agent-run for CLI and API, an end-to-end run or a pasted result for UI, pasted at Tier 3 without UI"
 
 subrepo smoke
 SMC=".claude/reviews/feat/plan.md"; SMV=".claude/reviews/feat/plan.verdicts"; mkdir -p "$SMV"
@@ -3656,11 +3656,32 @@ ok "...the report says how the smoke test ran" "$(grep -c '^e2e: ' "$SMC")" "1"
 printf '<p>more</p>\n' >> web/page.html; git add -A >/dev/null 2>&1; git commit -qm ui2 >/dev/null 2>&1
 ok "...but not once the UI changed after it" "$(exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 | grep -c "end-to-end test or a pasted result")" "1"
 ok "an unknown method is refused" "$(bash "$SMOKE" --method looked -- true >/dev/null 2>&1; echo $?)" "2"
-ok "at Tier 3 an end-to-end receipt is not enough" \
-   "$(bash "$SMOKE" --method e2e -- true >/dev/null 2>&1; git add -A >/dev/null 2>&1; git commit -qm e >/dev/null 2>&1
-      exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 3 2>&1 | grep -c 'it is Tier 3')" "1"
+sm3() { git add -A >/dev/null 2>&1; git commit -qm e >/dev/null 2>&1
+  exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 3 2>&1 | grep -c 'it is Tier 3'; }
+ok "at Tier 3 a plain agent receipt does not cover a UI change" "$(bash "$SMOKE" -- true >/dev/null 2>&1; sm3)" "1"
+ok "...nor an end-to-end run that failed" "$(bash "$SMOKE" --method e2e -- false >/dev/null 2>&1; sm3)" "1"
+ok "...but a passing end-to-end run does" "$(bash "$SMOKE" --method e2e -- true >/dev/null 2>&1; sm3)" "0"
+printf '<p>again</p>\n' >> web/page.html; git add -A >/dev/null 2>&1; git commit -qm ui3 >/dev/null 2>&1
+ok "...until the UI changes after it" "$(sm3)" "1"
+ok "a browser check needs its observations" "$(bash "$SMOKE" --method browser >/dev/null 2>&1; echo $?)" "2"
+printf 'looked fine\n' > "$REG/obs.txt"
+ok "...stated as tool, URL and what was seen" "$(bash "$SMOKE" --method browser --observed "$REG/obs.txt" >/dev/null 2>&1; echo $?)" "2"
+printf 'Tool: playwright plugin\nURL: http://localhost:4200/page.html\nObserved: the paragraph "again" is shown\n' > "$REG/obs.txt"
+bash "$SMOKE" --method browser --observed "$REG/obs.txt" >/dev/null 2>&1
+ok "a browser check is recorded with its method and tool" \
+   "$(tail -1 "$SMV/smoke.json" | grep -c '"method":"browser".*"cmd":"observed with playwright plugin","exit":0,')" "1"
+ok "...and what was seen is kept" "$(grep -c '^Observed: the paragraph' "$SMV/smoke.out")" "1"
+ok "...it covers a UI change at Tier 3" "$(sm3)" "0"
+ok "...and below it" "$(exloom_check_smoke "$SMC" HEAD "$(git rev-parse HEAD)" test 1 2>&1 | grep -c 'smoke test')" "0"
 sed -i 's/^## Rulings$/## Smoke test\n\nOpened \/page.html; the paragraph rendered.\n\n## Rulings/' "$SMC"
 ok "...and the pasted section satisfies it" "$(smchk | grep -c 'smoke test' | head -1)" "0"
+
+subrepo smoke3
+mkdir -p .claude/reviews/feat; printf '# checklist\n' > "$SMC"
+printf 'echo 5\n' > src/calc.sh; git add -A >/dev/null 2>&1; git commit -qm calc >/dev/null 2>&1
+ok "at Tier 3 an end-to-end receipt does not cover a change with no UI" \
+   "$(bash "$SMOKE" --method e2e -- true >/dev/null 2>&1; sm3)" "1"
+ok "...nor does a browser check" "$(bash "$SMOKE" --method browser --observed "$REG/obs.txt" >/dev/null 2>&1; sm3)" "1"
 
 section "after a fix the reviewer verifies; the user rules only on what is still open"
 

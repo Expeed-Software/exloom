@@ -1897,7 +1897,8 @@ exloom_status_line() {   # exloom_status_line <branch>
 
 # Smoke evidence for a generated report. A CLI or API change at Tier 1-2 may use
 # an agent-run receipt from record-smoke.sh. A UI change below Tier 3 needs an
-# e2e receipt or a result pasted under '## Smoke test'; Tier 3 needs it pasted.
+# e2e or browser receipt, or a result pasted under '## Smoke test'. Tier 3 needs
+# it pasted, except that an e2e or browser receipt still covers a UI change.
 exloom_check_smoke() {   # exloom_check_smoke <checklist> <tip> <reviewed-sha> <action> <tier>
   local cl="$1" tip="$2" reviewed="$3" action="$4" tier="$5" content pasted fork ui=0 line sha
   [[ "$tier" -ge 1 ]] 2>/dev/null || return 0
@@ -1914,11 +1915,6 @@ exloom_check_smoke() {   # exloom_check_smoke <checklist> <tip> <reviewed-sha> <
     printf '%s\n' "$content" | grep -E '^[[:space:]]*-[[:space:]]*Smoke test waived:' | sed 's/^[[:space:]]*/  /' >&2
     return 0
   fi
-  if [[ "$tier" -ge 3 ]]; then
-    _exloom_block "$action" "This change needs a pasted smoke test result: it is Tier 3.
-Run /exloom; its smoke step asks you to paste what you saw under '## Smoke test' in ${cl}. An agent-run receipt does not cover it."
-    return 2
-  fi
   line="$(MSYS_NO_PATHCONV=1 git show "${tip}:$(exloom_verdict_dir "$cl")/smoke.json" 2>/dev/null | tail -1)"
   sha="$(printf '%s' "$line" | sed -n 's/.*"head":"\([0-9a-f]\{40\}\)".*/\1/p')"
   local own covered=0
@@ -1928,11 +1924,20 @@ Run /exloom; its smoke step asks you to paste what you saw under '## Smoke test'
           || ! exloom_diff_is_behavioural "$own" "$reviewed"; }; then
     covered=1
   fi
+  if [[ "$tier" -ge 3 ]]; then
+    [[ $ui -eq 1 && $covered -eq 1 && "$line" =~ \"method\":\"(e2e|browser)\" ]] && return 0
+    _exloom_block "$action" "This change needs a pasted smoke test result: it is Tier 3.
+Run /exloom; its smoke step asks you to paste what you saw under '## Smoke test' in ${cl}. For a UI change a passing
+end-to-end test of the user action, or a check in a browser tool, recorded with record-smoke.sh, also covers it.
+A plain agent-run receipt does not."
+    return 2
+  fi
   if [[ $ui -eq 1 ]]; then
-    [[ $covered -eq 1 && "$line" == *'"method":"e2e"'* ]] && return 0
+    [[ $covered -eq 1 && "$line" =~ \"method\":\"(e2e|browser)\" ]] && return 0
     _exloom_block "$action" "This change changes UI, so its smoke test is an end-to-end test or a pasted result.
 Run /exloom: its smoke step runs the project's end-to-end test of the user action with record-smoke.sh --method e2e,
-or asks you to paste what you saw under '## Smoke test' in ${cl}. A plain agent-run receipt does not cover it."
+performs the action in a browser tool and records what it saw, or asks you to paste what you saw under
+'## Smoke test' in ${cl}. A plain agent-run receipt does not cover it."
     return 2
   fi
   [[ $covered -eq 1 ]] && return 0
